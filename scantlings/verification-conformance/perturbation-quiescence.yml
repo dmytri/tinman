@@ -1,0 +1,17 @@
+id: perturbation-quiescence
+language: rust
+severity: error
+message: A PERTURBATION statement is standing in the implementation.
+note: |
+  Perturbation policy: a green tree carries no PERTURBATION token. A standing token
+  beside green verification is the stale-green alarm, meaning the perturbed seam was
+  never exercised or its scenario is stale. A live plant rides uncommitted with its own
+  watchbill entries, so this reddens only where a standing token is a fault.
+files:
+  - src/**
+rule:
+  any:
+    - kind: string_literal
+      regex: 'PERTURBATION'
+    - kind: line_comment
+      regex: 'PERTURBATION'

@@ -17,5 +17,14 @@ Sandboxed execution is the default. `tinman record` launches its target inside a
 
 - Default tier (`@logic`, untagged): pure, local, deterministic. No external tool.
 - `@sandbox` tier: launches a real process under Bubblewrap. Requires the `bwrap` binary and unprivileged user namespaces.
+- `@inference` tier: calls the configured inference provider for real. Requires `TINMAN_API_KEY`, read from the environment or from a git-ignored `.env` file. `TINMAN_BASE_URL` and `TINMAN_MODEL` are optional overrides, defaulting to OpenRouter and `deepseek/deepseek-v4-flash`. Tinman speaks the OpenAI-compatible chat-completions protocol, so any compatible endpoint serves. It costs money per run and never sits on the inner loop.
+
+## Methodology checks
+
+Methodology breaches surface as failing verification rather than as review comments. The rule set lives in `scantlings/verification-conformance` and is discharged by the `conformance` command, `ast-grep scan`, configured by `sgconfig.yml`. It carries three rules: plank form, perturbation quiescence, and forbidden doubles. The scenarios that run it are tagged `@conformance` in `features/methodology-conformance.feature`.
+
+Watchbill-shape conformance is deliberately absent. Shipwright derived it and Captain condemned it at the 2026-07-25 harbour, on the decision that the watchbill stays hand-checked rather than schema-backed. A later harbour that re-derives it is repeating a settled decision, not finding a gap.
+
+Two derivations the stack does not support: cucumber-rs offers no dry-run and no usage report, so `discover` and `step-usage` read `none` in `RIGGING.md`. The consequence is that the stale-plank join of plank strings against current step-definition patterns has no machine-readable source, and plank staleness is caught by reading rather than by running. Closing it needs a checker that extracts the `#[given]`, `#[when]` and `#[then]` pattern literals and joins them against the plank inventory.
 
 See `RIGGING.md` for the exact commands. Note the cucumber-rs constraint: `--tags` and `--name` are mutually exclusive on the CLI. A focused run selects one scenario with `--name "^…$"`, whose anchoring already excludes the differently-named `@captain` and `@shipwright` skeletons, so it carries no tag filter. Tier enumeration sweeps use no `--name`, so they carry the exclusion through the `CUCUMBER_FILTER_TAGS` environment variable.

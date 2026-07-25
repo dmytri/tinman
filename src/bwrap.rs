@@ -7,6 +7,8 @@ use crate::sandbox::{CommandSpec, Network, SandboxSpec};
 
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
 /// availability check can be exercised against a name that is off PATH.
+///
+/// @planks("the Bubblewrap executable is absent")
 #[derive(Debug, Clone)]
 pub struct BubblewrapBackend {
     executable: String,

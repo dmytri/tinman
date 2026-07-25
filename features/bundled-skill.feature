@@ -3,7 +3,7 @@ Feature: bundled skill
   I want Tinman to ship exactly one skills.sh-compatible skill
   So that coding agents and Tinman itself read the same documentation
 
-  Rule: the bundled skill is the single source of truth for what Tinman is and how it is used. It has three consumers: an external coding agent reads the whole skill, "tinman --help" loads the whole skill to answer questions, and the acronym generator reads only its description field.
+  Rule: the bundled skill is the single source of truth for what Tinman is and how it is used. It has three consumers: an external coding agent reads the whole skill, "tinman --help" loads the whole skill to answer questions, and the acronym generator reads its name and description.
 
   @contract
   Scenario: the bundled skill conforms to the skill schema
@@ -16,10 +16,10 @@ Feature: bundled skill
     When Tinman loads its bundled skill
     Then the loaded skill body is identical to the file's body
 
-  Scenario: the acronym context is the skill description alone
+  Scenario: the acronym context is the skill's name and description
     Given the bundled skill at "assets/skill/SKILL.md"
     When the acronym context is built
-    Then the context is the skill's "description" field
+    Then the context is the skill's "name" and "description" fields
 
   Scenario: the assistant answers from the whole bundled skill
     Given the bundled skill at "assets/skill/SKILL.md"

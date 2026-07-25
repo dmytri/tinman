@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "skill",
   "title": "skills.sh skill front matter",
-  "description": "The front matter of the bundled skills.sh-compatible skill. A compatible coding agent installs and reads the skill unmodified; Tinman loads the same file to answer help questions, and the acronym generator reads its description alone. Referenced by features/bundled-skill.feature.",
+  "description": "The front matter of the bundled skills.sh-compatible skill. A compatible coding agent installs and reads the skill unmodified; Tinman loads the same file to answer help questions, and the acronym generator reads its name and description. Referenced by features/bundled-skill.feature.",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "description"],
@@ -15,7 +15,7 @@
       "maxLength": 64
     },
     "description": {
-      "description": "One line stating what the skill covers and when to use it. This is the only field the acronym generator reads.",
+      "description": "One line stating what the skill covers and when to use it. The acronym generator reads this field together with the name.",
       "type": "string",
       "minLength": 1,
       "maxLength": 1024

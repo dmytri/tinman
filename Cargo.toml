@@ -8,15 +8,17 @@ readme = "README.md"
 repository = "https://github.com/dmytri/tinman"
 keywords = ["testing", "tui", "cli", "pty", "sandbox"]
 categories = ["development-tools::testing", "command-line-utilities"]
-exclude = ["idea.md", "isolation.md", "CAPTAIN.md", ".claude"]
+exclude = ["idea.md", "isolation.md", "help.md", "CAPTAIN.md", ".claude"]
 
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
 crossterm = "0.29.0"
+dotenvy = "0.15.7"
 portable-pty = "0.9.0"
 ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9.34"
+ureq = "3.3.0"
 vt100 = "0.16.2"
 
 [dev-dependencies]

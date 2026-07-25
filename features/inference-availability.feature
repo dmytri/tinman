@@ -6,19 +6,19 @@ Feature: inference availability
   Rule: inference unavailable is a normal degraded mode, not an error.
 
   Scenario: a dotenv file supplies the provider credential
-    Given a working directory holding a ".env" file that sets "OPENROUTER_API_KEY" to "sk-file-key"
-    And the environment does not set "OPENROUTER_API_KEY"
+    Given a working directory holding a ".env" file that sets "TINMAN_API_KEY" to "sk-file-key"
+    And the environment does not set "TINMAN_API_KEY"
     When Tinman resolves its inference credential
     Then the resolved credential is "sk-file-key"
 
   Scenario: the environment overrides the dotenv file
-    Given a working directory holding a ".env" file that sets "OPENROUTER_API_KEY" to "sk-file-key"
-    And the environment sets "OPENROUTER_API_KEY" to "sk-env-key"
+    Given a working directory holding a ".env" file that sets "TINMAN_API_KEY" to "sk-file-key"
+    And the environment sets "TINMAN_API_KEY" to "sk-env-key"
     When Tinman resolves its inference credential
     Then the resolved credential is "sk-env-key"
 
   Scenario: inference is unavailable without a credential
-    Given neither the environment nor a dotenv file sets "OPENROUTER_API_KEY"
+    Given neither the environment nor a dotenv file sets "TINMAN_API_KEY"
     When Tinman checks whether inference is available
     Then inference is reported unavailable
 
@@ -39,6 +39,6 @@ Feature: inference availability
 
   Scenario: replay runs without a credential
     Given a harness plan driving the fixture terminal program
-    And neither the environment nor a dotenv file sets "OPENROUTER_API_KEY"
+    And neither the environment nor a dotenv file sets "TINMAN_API_KEY"
     When that plan is replayed
     Then the replay passes

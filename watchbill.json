@@ -1,17 +1,24 @@
 {
   "watch1": {
     "scenarios": [
+      "features/methodology-conformance.feature:the implementation carries no standing perturbation",
+      "features/methodology-conformance.feature:every plank is a doc comment on a declaration",
+      "features/methodology-conformance.feature:verification support declares no unmarked test double"
+    ]
+  },
+  "watch2": {
+    "scenarios": [
       "features/conventional-help.feature:help renders the bundled help text",
       "features/conventional-help.feature:every command the parser accepts appears in the help text",
       "features/conventional-help.feature:the help text carries exactly one tagline placeholder",
       "features/conventional-help.feature:help exits successfully",
       "features/bundled-skill.feature:the bundled skill conforms to the skill schema",
       "features/bundled-skill.feature:Tinman loads the skill it ships",
-      "features/bundled-skill.feature:the acronym context is the skill description alone",
+      "features/bundled-skill.feature:the acronym context is the skill's name and description",
       "features/bundled-skill.feature:the assistant answers from the whole bundled skill"
     ]
   },
-  "watch2": {
+  "watch3": {
     "scenarios": [
       "features/inference-availability.feature:a dotenv file supplies the provider credential",
       "features/inference-availability.feature:the environment overrides the dotenv file",
@@ -20,24 +27,21 @@
       "features/inference-availability.feature:degraded help omits the assistant prompt",
       "features/inference-availability.feature:degraded help exits successfully",
       "features/inference-availability.feature:replay runs without a credential",
-      "features/acronym.feature:a well-formed expansion is accepted",
-      "features/acronym.feature:an expansion with no connective words is accepted",
-      "features/acronym.feature:an expansion whose initials do not spell TINMAN is rejected",
-      "features/acronym.feature:an expansion with too few acronym words is rejected",
-      "features/acronym.feature:an expansion carrying punctuation is rejected",
-      "features/acronym.feature:an expansion spanning two lines is rejected",
-      "features/acronym.feature:generation retries once after an invalid expansion",
-      "features/acronym.feature:two invalid expansions yield no acronym",
-      "features/acronym.feature:a valid expansion fills the tagline line",
-      "features/acronym.feature:a failed generation falls back to the unavailable notice",
+      "features/acronym.feature:the generated expansion fills the tagline line",
+      "features/acronym.feature:an empty generation falls back to the unavailable notice",
       "features/inference-profiles.feature:the acronym profile samples at a very high temperature",
       "features/inference-profiles.feature:the assistant profile samples at a low temperature",
       "features/inference-profiles.feature:both profiles address the same configured model",
+      "features/inference-provider.feature:an unset endpoint defaults to OpenRouter",
+      "features/inference-provider.feature:a configured endpoint addresses a different provider",
+      "features/inference-provider.feature:an unset model defaults to the bundled model",
+      "features/inference-provider.feature:a configured model overrides the default",
+      "features/inference-provider.feature:the credential is sent as a bearer token",
       "features/inference-provider.feature:an unreachable provider reports inference unavailable",
       "features/inference-provider.feature:a rejected credential reports inference unavailable"
     ]
   },
-  "watch3": {
+  "watch4": {
     "scenarios": [
       "features/interactive-help.feature:the assistant is appended beneath the conventional help",
       "features/interactive-help.feature:a proposed command is displayed before it runs",
@@ -49,7 +53,7 @@
       "features/interactive-help.feature:the assistant discharges the command-parser boundary contract"
     ]
   },
-  "watch4": {
+  "watch5": {
     "scenarios": [
       "features/terminal-object-model.feature:a vertical split becomes two sibling regions",
       "features/terminal-object-model.feature:a bordered pane becomes a region carrying its title as its name",
@@ -67,7 +71,7 @@
       "features/tom-inference.feature:an engine result that violates the model schema is discarded"
     ]
   },
-  "watch5": {
+  "watch6": {
     "scenarios": [
       "features/harness-plan.feature:the example flow conforms to the harness schema",
       "features/harness-plan.feature:a plan step naming an unknown keyword is rejected",
@@ -81,7 +85,7 @@
       "features/sandbox-configuration.feature:a mount is read-only unless the plan says otherwise"
     ]
   },
-  "watch6": {
+  "watch7": {
     "scenarios": [
       "features/driver-protocol.feature:the driver answers a launch request with a session identifier",
       "features/driver-protocol.feature:the driver rejects an unknown operation",
@@ -102,7 +106,7 @@
       "features/semantic-capture.feature:capturing a pane that never stops scrolling fails within its budget"
     ]
   },
-  "watch7": {
+  "watch8": {
     "scenarios": [
       "features/record-command.feature:record writes an interaction log for the captured program",
       "features/record-command.feature:record refuses to overwrite an existing log",
@@ -121,12 +125,12 @@
       "features/replay.feature:replay performs no inference"
     ]
   },
-  "watch8": {
+  "watch9": {
     "scenarios": [
       "@sandbox"
     ]
   },
-  "watch9": {
+  "watch10": {
     "scenarios": [
       "@inference"
     ]

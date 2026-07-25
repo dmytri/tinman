@@ -1,0 +1,20 @@
+id: plank-form
+language: rust
+severity: error
+message: A plank must be a /// doc comment attached to a declaration.
+note: |
+  Planking agreement, Form: @planks and @planks-provisional are documentation-comment
+  tags on the seam declaration. A plank in a plain // line comment or a /* */ block
+  comment is malformed: it reads as coverage the seam does not have, and no docblock
+  reader can inventory it.
+files:
+  - src/**
+rule:
+  any:
+    - all:
+        - kind: line_comment
+          regex: '@planks'
+        - not:
+            regex: '^///'
+    - kind: block_comment
+      regex: '@planks'
