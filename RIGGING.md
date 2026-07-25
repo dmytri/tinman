@@ -14,7 +14,7 @@
 
 ## Commands
 - discover: none
-- focused: `ref="{scenario}"; CUCUMBER_FILTER_TAGS="not @captain and not @shipwright" cargo test --test cucumber -- -i "${ref%%:*}" --name "^${ref#*:}$"`
+- focused: `ref="{scenario}"; cargo test --test cucumber -- -i "${ref%%:*}" --name "^${ref#*:}$"`
 - broad: `CUCUMBER_FILTER_TAGS="not @sandbox and not @captain and not @shipwright" cargo test --test cucumber`
 - broad-sandbox: `CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo test --test cucumber`
 - coverage: none
@@ -46,6 +46,8 @@
 - dependency: clap
 - dependency: serde
 - dependency: serde_yaml
+- dependency: serde_json
+- dependency: jsonschema
 
 ## Outbound
 - outbound: none

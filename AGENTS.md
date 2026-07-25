@@ -18,4 +18,4 @@ Sandboxed execution is the default. `clanker record` launches its target inside 
 - Default tier (`@logic`, untagged): pure, local, deterministic. No external tool.
 - `@sandbox` tier: launches a real process under Bubblewrap. Requires the `bwrap` binary and unprivileged user namespaces.
 
-See `RIGGING.md` for the exact commands. Note the cucumber-rs constraint: `--tags` and `--name` are mutually exclusive on the CLI, so the tag exclusion is passed through the `CUCUMBER_FILTER_TAGS` environment variable while `--name` selects a scenario.
+See `RIGGING.md` for the exact commands. Note the cucumber-rs constraint: `--tags` and `--name` are mutually exclusive on the CLI. A focused run selects one scenario with `--name "^…$"`, whose anchoring already excludes the differently-named `@captain` and `@shipwright` skeletons, so it carries no tag filter. Tier enumeration sweeps use no `--name`, so they carry the exclusion through the `CUCUMBER_FILTER_TAGS` environment variable.
