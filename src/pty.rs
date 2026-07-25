@@ -1,0 +1,134 @@
+//! The PTY runner. It launches a prepared process on a pseudo-terminal and
+//! waits for it to finish. It knows only about a prepared process; it never
+//! constructs sandbox arguments itself, so new sandbox backends never change
+//! this layer.
+
+use crate::process::PreparedProcess;
+use crate::screen::VirtualScreen;
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
+
+/// Launch a prepared process on a PTY and wait for it to exit.
+///
+/// @planks("a process is prepared and launched")
+pub fn launch(prepared: &PreparedProcess) -> Result<(), String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .map_err(|e| e.to_string())?;
+    let mut cmd = CommandBuilder::new(prepared.program.clone());
+    for arg in &prepared.args {
+        cmd.arg(arg.clone());
+    }
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "launched process exited unsuccessfully: {status:?}"
+        ))
+    }
+}
+
+/// Launch a prepared process on a PTY, read its output until it exits, and
+/// parse that output into a virtual screen.
+///
+/// @planks("the process is captured through a PTY")
+pub fn capture(prepared: &PreparedProcess) -> Result<VirtualScreen, String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .map_err(|e| e.to_string())?;
+    let mut cmd = CommandBuilder::new(prepared.program.clone());
+    for arg in &prepared.args {
+        cmd.arg(arg.clone());
+    }
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    // Drop the parent's slave handle so the reader sees EOF once the child,
+    // which holds its own slave, exits.
+    drop(pair.slave);
+    let mut output = Vec::new();
+    reader.read_to_end(&mut output).map_err(|e| e.to_string())?;
+    child.wait().map_err(|e| e.to_string())?;
+    Ok(VirtualScreen::from_pty_output(&output))
+}
+
+/// A live interactive capture of a running program: keys pressed on it are
+/// forwarded to the program through the PTY, and its output is accumulated in
+/// the background so the current virtual screen can be read at any time.
+///
+/// @planks("the process is captured through a PTY")
+pub struct InteractiveCapture {
+    writer: Box<dyn Write + Send>,
+    output: Arc<Mutex<Vec<u8>>>,
+    _child: Box<dyn Child + Send + Sync>,
+}
+
+impl std::fmt::Debug for InteractiveCapture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InteractiveCapture").finish_non_exhaustive()
+    }
+}
+
+/// Launch a prepared process on a PTY and keep it running, reading its output
+/// in the background, so keys can be forwarded to it and its screen read while
+/// it runs.
+///
+/// @planks("the process is captured through a PTY")
+pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapture, String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .map_err(|e| e.to_string())?;
+    let mut cmd = CommandBuilder::new(prepared.program.clone());
+    for arg in &prepared.args {
+        cmd.arg(arg.clone());
+    }
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    // The child holds its own slave handle; drop the parent's so only the child
+    // keeps the slave side open.
+    drop(pair.slave);
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&output);
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        while let Ok(read) = reader.read(&mut buf) {
+            if read == 0 {
+                break;
+            }
+            sink.lock().unwrap().extend_from_slice(&buf[..read]);
+        }
+    });
+    Ok(InteractiveCapture {
+        writer,
+        output,
+        _child: child,
+    })
+}
+
+impl InteractiveCapture {
+    /// Forward a key press to the running program. Enter is sent as a carriage
+    /// return, as a terminal sends it; any other key is sent as its own text.
+    ///
+    /// @planks("the operator presses the keys {string}, {string}, and Enter")
+    pub fn press_key(&mut self, key: &str) {
+        let bytes = if key == "Enter" { "\r" } else { key };
+        self.writer
+            .write_all(bytes.as_bytes())
+            .expect("forward key press to the PTY");
+        self.writer.flush().expect("flush the PTY");
+    }
+
+    /// The current virtual screen, parsed from all output read so far.
+    ///
+    /// @planks("the virtual screen contains the text {string}")
+    pub fn screen(&self) -> VirtualScreen {
+        let output = self.output.lock().unwrap();
+        VirtualScreen::from_pty_output(&output)
+    }
+}

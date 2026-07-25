@@ -1,0 +1,13 @@
+{
+  "$id": "pty-sandbox-boundary",
+  "title": "PTY / sandbox dependency boundary",
+  "description": "isolation.md invariant: the PTY layer must not know about Bubblewrap. The PTY runner source MUST NOT reference the Bubblewrap backend or bwrap mechanics; it accepts only a prepared process. Discharged by the pty-sandbox-boundary checker in verification support, which scans the PTY runner source. Attested by the @contract scenario in features/pty-sandbox-boundary.feature.",
+  "module": "src/pty.rs",
+  "forbiddenReferences": [
+    "bubblewrap",
+    "Bubblewrap",
+    "bwrap",
+    "BubblewrapBackend"
+  ],
+  "rationale": "New sandbox backends must never change the PTY architecture. The PTY runner takes a PreparedProcess and launches it verbatim."
+}

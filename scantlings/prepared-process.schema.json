@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepared-process",
+  "title": "Tinman prepared process",
+  "description": "Everything the PTY runner needs to launch a process, with no backend knowledge. Referenced by features/prepared-process.feature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["program", "args", "env", "cleanup"],
+  "properties": {
+    "program": {
+      "description": "Absolute path to the program the PTY runner launches.",
+      "type": "string",
+      "minLength": 1
+    },
+    "args": {
+      "description": "Arguments passed to the program.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "env": {
+      "description": "Environment as name/value pairs. A backend that clears the environment produces the full set here.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "cwd": {
+      "description": "Working directory, or null to inherit the launch directory.",
+      "type": ["string", "null"]
+    },
+    "cleanup": {
+      "description": "Descriptors of temporary resources to reclaim after the process ends.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

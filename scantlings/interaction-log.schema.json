@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "interaction-log",
+  "title": "Tinman interaction log",
+  "description": "The constrained YAML a recording session emits. Referenced by features/interaction-log.feature. This is the milestone-1 capture log, not the replay flow format.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "events"],
+  "properties": {
+    "command": {
+      "description": "The launched target command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["program", "args"],
+      "properties": {
+        "program": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "events": {
+      "description": "Recorded events in capture order. Each event is exactly one of a key press or a screen snapshot.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key"],
+            "properties": { "key": { "type": "string", "minLength": 1 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["snapshot"],
+            "properties": {
+              "snapshot": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["rows", "cols", "lines"],
+                "properties": {
+                  "rows": { "type": "integer", "minimum": 1 },
+                  "cols": { "type": "integer", "minimum": 1 },
+                  "lines": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
