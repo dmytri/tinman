@@ -45,7 +45,7 @@
 - dependency: cucumber
 - dependency: tokio
 - dependency: portable-pty
-- dependency: vt100
+- dependency: alacritty_terminal
 - dependency: ratatui
 - dependency: crossterm
 - dependency: clap

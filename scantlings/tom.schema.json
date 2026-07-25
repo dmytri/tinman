@@ -20,6 +20,18 @@
     "root": { "$ref": "#/$defs/region" }
   },
   "$defs": {
+    "stretch": {
+      "description": "Which edges of the region's rectangle are elastic. An anchored edge holds its cell offset when the terminal is a different size; an elastic edge moves with the viewport. A region recorded at one width must still bind at another, and a rectangle anchored on all four sides cannot. A bordered pane is anchored on every edge, a status line is anchored bottom and left while elastic right, and a list inside a pane is anchored top and left while elastic right and bottom.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "bottom", "left", "right"],
+      "properties": {
+        "top": { "type": "boolean" },
+        "bottom": { "type": "boolean" },
+        "left": { "type": "boolean" },
+        "right": { "type": "boolean" }
+      }
+    },
     "rect": {
       "description": "A Ratatui-shaped rectangle in screen cells.",
       "type": "object",
@@ -73,6 +85,7 @@
           "type": "boolean"
         },
         "rect": { "$ref": "#/$defs/rect" },
+        "stretch": { "$ref": "#/$defs/stretch" },
         "children": {
           "type": "array",
           "items": { "$ref": "#/$defs/region" }

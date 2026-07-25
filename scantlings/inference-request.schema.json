@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inference-request",
+  "title": "Outbound inference request",
+  "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. Referenced by features/inference-provider.feature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["url", "authorization", "model", "messages", "temperature"],
+  "properties": {
+    "url": {
+      "description": "The absolute chat-completions endpoint the request addresses, built from the resolved base URL.",
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    },
+    "authorization": {
+      "description": "The Authorization header value. The resolved credential is always sent as a bearer token.",
+      "type": "string",
+      "pattern": "^Bearer .+$"
+    },
+    "model": {
+      "description": "The resolved model identifier the provider is asked to serve.",
+      "type": "string",
+      "minLength": 1
+    },
+    "temperature": {
+      "description": "The sampling temperature from the request's profile. The acronym profile optimizes for novelty and the assistant profile for correctness, so the value is per-profile rather than global.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "messages": {
+      "description": "The chat messages, in order. At least one is always present.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "content"],
+        "properties": {
+          "role": { "enum": ["system", "user", "assistant"] },
+          "content": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

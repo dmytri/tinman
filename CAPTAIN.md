@@ -25,6 +25,25 @@ Positioning note, unchanged: a crate named for one framework under-indexes for g
 
 Snapshot testing was considered and rejected in the same pass. `insta` asserts "same as last time", which is drift detection rather than specification: a snapshot passes whatever it recorded, including a regression recorded before anyone looked. That contradicts the falsifiable-scenario line the project runs on. The existing `TestBackend` use at `tests/cucumber/support.rs` is the right depth.
 
+## Emulator: migrate vt100 to alacritty_terminal. Decided 2026-07-25.
+
+User directive: do not carry technical debt this early; if `vt100` is debt, take something simple, current and well maintained. Differential probing against `alacritty_terminal`, `wezterm-term` and `avt` settled it on evidence rather than reputation.
+
+`vt100` 0.16.2 fails two of the four requirements. Cell addressing: HVP, HPA, REP, CBT and DECAWM are unimplemented, so `ESC[2;3f` lands at the wrong cell and `ESC[?7l` wraps to the wrong row. Reverse video: a wide-character continuation cell is cleared to `Attrs::default()`, so a highlight spanning CJK or emoji reads back striped rather than continuous, which breaks selection detection against agents that emit emoji constantly. Upstream has zero 2026 commits, three open correctness issues and six open correctness pull requests, all concentrated on those same two requirements. One PR author's rationale names our target class directly: OpenCode rendered as "a complete mess" without HPA and REP.
+
+`vt100-ctt` is eliminated on evidence, not suspicion. Its entire diff against upstream is a rename, a `vte` compatibility bump and a new ratatui adapter; it is byte-identical to `vt100` across all nine probed defects. Its default features also pin `unicode-width` incompatibly with our `ratatui 0.30.2`.
+
+`wezterm-term` is the best emulator tested and is disqualified for one decisive reason: it is not published on crates.io, and Tinman is published, so a git dependency makes `cargo publish` fail. `libghostty-vt` needs a Zig toolchain. `avt` has no combining-mark support at all.
+
+`alacritty_terminal` 0.26.0 satisfies all four requirements, is strictly better on cell addressing and reverse video, takes raw PTY bytes without owning a terminal, and costs about fifteen lines of adapter boilerplate. Released 2026-04-06 inside a 65k-star project with 444 contributors and a changelog that marks breaking changes. It is 0.x and does break across releases; budget for that.
+
+Two obligations ride with this decision:
+
+1. **The migration's own regression risk is pinned first.** On the full-row highlight idiom, reverse video then text then erase-to-end-of-line, `vt100` and `wezterm-term` mark the whole row while `alacritty_terminal` marks only the written cells. Migrating blind would under-report exactly the selections we are fixing. `features/virtual-screen.feature:a row highlighted by erasing to end of line reads as reversed throughout` pins the behaviour a user sees, so it binds whichever emulator sits underneath.
+2. **Our own adapter is the worse defect and is emulator-independent.** `src/screen.rs` joins each row with `concat()` over blank cells held as empty strings, so column gaps collapse and a screen showing `a     b` reports `ab`. `parse()` also discards `is_wide()` and `is_wide_continuation()`, leaving a wide character's second column indistinguishable from a blank. Every full-screen program positions by address, so `contains()` and `contents()` currently misreport the screen, and every region boundary the TOM derives from them lands in the wrong column.
+
+Watch1 now carries four `virtual-screen` scenarios covering both obligations. Installation of `alacritty_terminal` and removal of `vt100` route to Shipwright per the Rigging read contract.
+
 ## Voyage 2 — everything remaining from idea.md, isolation.md and help.md
 
 User directive: take the whole remaining scope in one voyage, no backlog debt. 89 directed scenario targets across 8 watches, then the `@sandbox` and `@inference` tier sweeps as watch9 and watch10.

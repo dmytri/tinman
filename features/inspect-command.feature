@@ -13,4 +13,4 @@ Feature: inspect command
 
   Scenario: inspect reports a program that draws nothing
     When the operator inspects the command "true"
-    Then the inspect output reports an empty screen
+    Then the inspect output reports "no regions on screen"

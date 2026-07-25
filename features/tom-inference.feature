@@ -5,6 +5,46 @@ Feature: terminal object model inference
 
   Rule: inference enriches the terminal object model at capture time only. The deterministic model is the spine; the inference engine is a second producer of the same shape, so a plan authored by hand needs no model at all.
 
+  Rule: an inferred name is a claim until the deterministic pass confirms it. Inference selects among names the screen already carries and never invents one, because replay rebuilds the model with no model invocation and can only find a name the screen still yields. Every inferred locator is round-tripped before it reaches a plan: the model is rebuilt deterministically from the same screen, and the locator must bind, bind to exactly one region, and bind to the region inference named. A locator failing the round trip descends a fallback ladder rather than being written as it stands.
+
+  Rule: the fallback ladder serves action steps alone. An expectation resolves its locator exactly or the recording fails. A mis-bound action announces itself on the next step, so a fallback that goes wrong there is caught; an assertion is the thing that would have caught it. An assertion rebinding to a region it did not name passes while asserting nothing, and an absence assertion that rebinds fails while the product is correct.
+
+  Scenario: an expectation whose locator needs a fallback is refused
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that names the first item "source directory"
+    When an expectation on that item is recorded
+    Then recording fails and reports the expectation's locator did not bind
+
+  Scenario: a confirmed locator is written as inference proposed it
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that names the pane "Files"
+    When the inferred locator is round-tripped against the deterministic model
+    Then the locator binds to the region named "Files"
+
+  Scenario: a name the screen does not carry is rejected
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that names the pane "File Browser"
+    When the inferred locator is round-tripped against the deterministic model
+    Then the locator is rejected as unbindable
+
+  Scenario: a name matching two regions is scoped to its parent
+    Given a virtual screen showing two bordered panes each listing an item named "README"
+    And an engine that names the second item "README"
+    When the inferred locator is round-tripped against the deterministic model
+    Then the locator is scoped to the region containing that item
+
+  Scenario: a rejected name falls back to a deterministic locator
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that names the first item "source directory"
+    When the inferred locator is round-tripped against the deterministic model
+    Then the locator addresses the first "listitem" of the region named "Files"
+
+  Scenario: the written plan names the fallback a locator needed
+    Given a virtual screen showing two bordered panes each listing an item named "README"
+    And an engine that names the second item "README"
+    When the plan is written
+    Then the plan records the locator's binding as "scoped"
+
   Scenario: an unavailable engine leaves the deterministic model standing
     Given inference is unavailable
     And a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"

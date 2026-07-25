@@ -1,3 +1,4 @@
+@sandbox
 Feature: driver protocol
   As a test author working in pytest, jest or bun test
   I want to drive Tinman from my own test runner

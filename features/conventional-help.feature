@@ -21,5 +21,5 @@ Feature: conventional help
     Then the count is 1
 
   Scenario: help exits successfully
-    When the operator runs "tinman --help"
+    When the operator executes "tinman --help"
     Then the command exits with status 0

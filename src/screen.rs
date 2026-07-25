@@ -11,14 +11,17 @@
 const ROWS: u16 = 24;
 const COLS: u16 = 80;
 
-/// A parsed terminal screen: rows of cell contents. Row and column addressing
-/// is 1-based, matching ANSI cursor addressing.
+/// A parsed terminal screen: rows of cell contents, with the reversed video a
+/// program highlights a line with. Row and column addressing is 1-based,
+/// matching ANSI cursor addressing.
 ///
 /// @planks("a virtual screen that shows {string}")
 /// @planks("the process is captured through a PTY")
+/// @planks("the line {string} is rendered with reversed video")
 #[derive(Debug, Clone)]
 pub struct VirtualScreen {
     rows: Vec<Vec<String>>,
+    reversed: Vec<Vec<bool>>,
 }
 
 impl VirtualScreen {
@@ -43,18 +46,22 @@ impl VirtualScreen {
         parser.process(bytes);
         let screen = parser.screen();
         let mut rows = Vec::with_capacity(ROWS as usize);
+        let mut reversed = Vec::with_capacity(ROWS as usize);
         for row in 0..ROWS {
             let mut cells = Vec::with_capacity(COLS as usize);
+            let mut inverses = Vec::with_capacity(COLS as usize);
             for col in 0..COLS {
-                let contents = screen
-                    .cell(row, col)
-                    .map(|cell| cell.contents().to_string())
-                    .unwrap_or_default();
-                cells.push(contents);
+                let cell = screen.cell(row, col);
+                cells.push(
+                    cell.map(|cell| cell.contents().to_string())
+                        .unwrap_or_default(),
+                );
+                inverses.push(cell.is_some_and(|cell| cell.inverse()));
             }
             rows.push(cells);
+            reversed.push(inverses);
         }
-        VirtualScreen { rows }
+        VirtualScreen { rows, reversed }
     }
 
     /// Whether the screen displays the given text on any single row.
@@ -72,6 +79,18 @@ impl VirtualScreen {
             .get((row - 1) as usize)
             .and_then(|cells| cells.get((col - 1) as usize))
             .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Whether the cell at the given 1-based row and column is drawn with
+    /// reversed video, as a highlighted line is.
+    ///
+    /// @planks("the line {string} is rendered with reversed video")
+    pub fn reverse(&self, row: u16, col: u16) -> bool {
+        self.reversed
+            .get((row - 1) as usize)
+            .and_then(|cells| cells.get((col - 1) as usize))
+            .copied()
             .unwrap_or_default()
     }
 

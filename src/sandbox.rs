@@ -5,10 +5,12 @@
 /// A backend-neutral network policy for the sandbox.
 ///
 /// @planks("a sandbox specification that denies network access")
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+/// @planks("the parsed sandbox specification denies network access")
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
     Allow,
+    #[default]
     Deny,
 }
 
@@ -25,9 +27,10 @@ pub struct CommandSpec {
 /// A backend identity the operator can request.
 ///
 /// @planks("the requested backend is {string}")
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
+    #[default]
     Auto,
     Bubblewrap,
     Mac,
@@ -37,10 +40,49 @@ pub enum Backend {
 /// How the sandbox home directory is provisioned.
 ///
 /// @planks("the specification is serialized")
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+/// @planks("the parsed sandbox specification provisions an empty home")
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Home {
+    #[default]
     Empty,
+}
+
+/// How an explicitly mounted fixture tree is exposed to the target.
+///
+/// @planks("the mount's mode is {string}")
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MountMode {
+    #[default]
+    Readonly,
+    Copy,
+    Writable,
+}
+
+impl MountMode {
+    /// The mode's name, as the plan writes it.
+    ///
+    /// @planks("the mount's mode is {string}")
+    pub fn as_name(&self) -> &'static str {
+        match self {
+            MountMode::Readonly => "readonly",
+            MountMode::Copy => "copy",
+            MountMode::Writable => "writable",
+        }
+    }
+}
+
+/// An explicitly mounted fixture tree. A mount the plan gives no mode is
+/// read-only, so a grant is never wider than the plan states.
+///
+/// @planks("the mount's mode is {string}")
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Mount {
+    pub source: String,
+    pub target: String,
+    #[serde(default)]
+    pub mode: MountMode,
 }
 
 impl Backend {
@@ -62,11 +104,16 @@ impl Backend {
 ///
 /// @planks("a sandbox specification that denies network access")
 /// @planks("the specification is serialized")
-#[derive(Debug, Clone, serde::Serialize)]
+/// @planks("the parsed sandbox specification names no Bubblewrap flag")
+/// @planks("the parsed sandbox specification denies network access")
+/// @planks("the parsed sandbox specification provisions an empty home")
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SandboxSpec {
     pub backend: Backend,
     pub home: Home,
     pub network: Network,
+    pub mounts: Vec<Mount>,
 }
 
 impl SandboxSpec {
@@ -80,6 +127,7 @@ impl SandboxSpec {
             backend: Backend::Auto,
             home: Home::Empty,
             network: Network::Deny,
+            mounts: Vec::new(),
         }
     }
 }

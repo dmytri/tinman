@@ -1,7 +1,10 @@
+@sandbox
 Feature: driver session
   As a test author driving a terminal program from my own test runner
   I want the same semantic verbs a browser driver offers
   So that a terminal test reads like the interaction a person would perform
+
+  Rule: a terminal has no pointer, so activation is navigation followed by confirmation. Activating a locator sends directional keys until the model reports the named region as the selected one, then sends Enter. The model's selected item is read after each key, so the driver knows where the selection stands rather than counting blind. Activation fails and reports rather than confirming a selection that never reached the named region.
 
   Background:
     Given the Tinman driver has a session running the fixture terminal program
