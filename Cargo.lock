@@ -289,23 +289,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
-name = "clanker"
-version = "0.1.0"
-dependencies = [
- "clap",
- "crossterm",
- "cucumber",
- "jsonschema",
- "portable-pty",
- "ratatui",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
- "vt100",
-]
-
-[[package]]
 name = "clap"
 version = "4.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3001,6 +2984,23 @@ name = "time-core"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
+
+[[package]]
+name = "tinman"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "cucumber",
+ "jsonschema",
+ "portable-pty",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "vt100",
+]
 
 [[package]]
 name = "tinystr"
