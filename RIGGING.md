@@ -50,4 +50,6 @@
 - dependency: jsonschema
 
 ## Outbound
-- outbound: none
+- outbound: crates.io
+- ship: `cargo publish`
+- verify: `cargo search tinman`

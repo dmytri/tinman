@@ -2,6 +2,12 @@
 name = "tinman"
 version = "0.1.0"
 edition = "2024"
+description = "Deterministic black-box testing framework for CLIs and full-screen TUIs — webrat/capybara/selenium for terminals. Drives real programs through a PTY under a Bubblewrap sandbox. Early prototype."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["testing", "tui", "cli", "pty", "sandbox"]
+categories = ["development-tools::testing", "command-line-utilities"]
+exclude = ["idea.md", "isolation.md", "CAPTAIN.md", ".claude"]
 
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
