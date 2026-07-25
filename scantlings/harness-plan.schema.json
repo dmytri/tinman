@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "harness-plan",
+  "title": "Tinman harness plan",
+  "description": "The canonical YAML representation of a recorded or authored flow. A plan is either the full form, carrying a flow of run and tui entries, or the shorthand form, carrying one command and its steps. Both normalize to the same parsed plan. Referenced by features/harness-plan.feature and features/plan-shorthand.feature.",
+  "type": "object",
+  "oneOf": [
+    { "required": ["flow"] },
+    { "required": ["tui"] }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "sandbox": {
+      "description": "Backend-neutral sandbox specification. Omitted means the secure defaults: empty home, network denied.",
+      "type": "object"
+    },
+    "flow": {
+      "description": "Full form: ordered process entries.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/flowEntry" }
+    },
+    "tui": {
+      "description": "Shorthand form: the single terminal program this plan drives.",
+      "type": "string",
+      "minLength": 1
+    },
+    "steps": {
+      "description": "Shorthand form: the steps driving the program named by tui.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "flowEntry": {
+      "description": "One process in the flow: a plain command, or a terminal program driven by steps.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "run": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["command"],
+              "properties": {
+                "command": { "type": "string", "minLength": 1 },
+                "cwd": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "tui": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "steps": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/step" }
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "description": "One semantic action or assertion against the driven program.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "activate": {
+          "description": "Activate the region a locator resolves to. A bare string is the locator's name.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "$ref": "#/$defs/locator" }
+          ]
+        },
+        "fill": {
+          "description": "Enter a value into the textbox carrying a label.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "value"],
+          "properties": {
+            "label": { "type": "string", "minLength": 1 },
+            "value": { "type": "string" }
+          }
+        },
+        "press": {
+          "description": "Send one key to the program.",
+          "type": "string",
+          "minLength": 1
+        },
+        "expect": {
+          "description": "Assert text is present on screen. A bare string is the text.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string", "minLength": 1 },
+                "within": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "capture": {
+          "description": "Collect the items of a pane into named structured data.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "items", "as"],
+          "properties": {
+            "role": { "type": "string", "minLength": 1 },
+            "items": { "type": "string", "minLength": 1 },
+            "scope": { "enum": ["all", "visible"], "default": "all" },
+            "as": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "locator": {
+      "description": "Addresses a region of the terminal object model by role and name. An absent role matches any role.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "within": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

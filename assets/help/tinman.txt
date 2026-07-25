@@ -1,0 +1,23 @@
+tinman
+
+{{tagline}}
+
+Record, inspect and test terminal applications and coding agents.
+
+Usage:
+  tinman <COMMAND>
+
+Commands:
+  record     Capture a live session into an editable plan
+  replay     Replay a recorded plan exactly, with no inference
+  test       Run a plan and report whether it passed
+  inspect    Print the terminal object model of a running program
+  driver     Speak the JSON driver protocol on stdin and stdout
+  help       Show this help
+
+Options:
+  -h, --help       Show this help
+  -V, --version    Show the version
+
+Tinman drives real terminal programs through a sandboxed PTY. Capture time may
+infer; replay time is deterministic, with no model invocation and no network.

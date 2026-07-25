@@ -9,14 +9,15 @@
 - implementation: src
 - specs: features
 - verification: tests
-- assets: none
+- assets: assets
 - scantlings: scantlings
 
 ## Commands
 - discover: none
 - focused: `ref="{scenario}"; cargo test --test cucumber -- -i "${ref%%:*}" --name "^${ref#*:}$"`
-- broad: `CUCUMBER_FILTER_TAGS="not @sandbox and not @captain and not @shipwright" cargo test --test cucumber`
+- broad: `CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @captain and not @shipwright" cargo test --test cucumber`
 - broad-sandbox: `CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo test --test cucumber`
+- broad-inference: `CUCUMBER_FILTER_TAGS="@inference and not @captain and not @shipwright" cargo test --test cucumber`
 - coverage: none
 - step-usage: none
 - plank-inventory: none
@@ -31,7 +32,8 @@
 ## Tiers
 - default: @logic
 - sandbox: @sandbox
-- policy: The default tier holds pure, local, deterministic tests that need no external tool; untagged scenarios belong to it. The @sandbox tier holds scenarios that launch a real process under Bubblewrap and requires the `bwrap` binary and unprivileged user namespaces.
+- inference: @inference
+- policy: The default tier holds pure, local, deterministic tests that need no external tool; untagged scenarios belong to it. The @sandbox tier holds scenarios that launch a real process under Bubblewrap and requires the `bwrap` binary and unprivileged user namespaces. The @inference tier holds scenarios that call the configured inference provider for real and requires `OPENROUTER_API_KEY`, read from the environment or from a git-ignored `.env` file; it costs money per run and is never on the inner loop.
 - weather: none
 - runrecord: none
 
@@ -48,6 +50,8 @@
 - dependency: serde_yaml
 - dependency: serde_json
 - dependency: jsonschema
+- dependency: ureq
+- dependency: dotenvy
 
 ## Outbound
 - outbound: crates.io

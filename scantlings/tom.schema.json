@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tom",
+  "title": "Tinman terminal object model",
+  "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names and text. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rows", "cols", "root"],
+  "properties": {
+    "rows": {
+      "description": "Height of the screen the model was built from.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "cols": {
+      "description": "Width of the screen the model was built from.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "root": { "$ref": "#/$defs/region" }
+  },
+  "$defs": {
+    "rect": {
+      "description": "A Ratatui-shaped rectangle in screen cells.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "region": {
+      "description": "One node of the model. A region owns a rectangle of the screen and may split into child regions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "rect", "children"],
+      "properties": {
+        "role": {
+          "description": "The semantic role the region plays on screen.",
+          "enum": [
+            "screen",
+            "region",
+            "menu",
+            "menuitem",
+            "list",
+            "listitem",
+            "table",
+            "row",
+            "column",
+            "dialog",
+            "button",
+            "textbox",
+            "statusbar",
+            "message-pane",
+            "message",
+            "tree",
+            "treeitem"
+          ]
+        },
+        "name": {
+          "description": "The accessible name a locator matches, such as a pane title or an item's label.",
+          "type": ["string", "null"]
+        },
+        "text": {
+          "description": "The region's rendered text, with trailing blanks removed.",
+          "type": ["string", "null"]
+        },
+        "selected": {
+          "description": "Whether the region is the currently selected or highlighted one among its siblings.",
+          "type": "boolean"
+        },
+        "rect": { "$ref": "#/$defs/rect" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/region" }
+        }
+      }
+    }
+  }
+}

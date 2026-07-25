@@ -1,0 +1,9 @@
+# Shorthand form of settings-flow.yaml. Both parse to the same plan: the
+# omitted sandbox block is the secure default, a single tui with steps needs no
+# flow wrapper, and a bare expect is a text expectation.
+tui: opencode
+steps:
+  - activate: {role: menuitem, name: Settings}
+  - fill: {label: Username, value: dmytri}
+  - activate: {role: button, name: Save}
+  - expect: Saved

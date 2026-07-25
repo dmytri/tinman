@@ -4,54 +4,42 @@
 
 Binding behaviour lives in `.feature` specs and referenced scantlings. History lives in git. These notes carry only what the next cycle needs.
 
-## Voyage 1 — full first milestone (sandboxed-by-default)
+## Voyage 2 — everything remaining from idea.md, isolation.md and help.md
 
-Scope confirmed with the user: the whole idea.md first milestone in one voyage, plus the isolation.md secure launch spine. Scantling-first per user directive.
+User directive: take the whole remaining scope in one voyage, no backlog debt. 94 directed scenario targets across 7 watches, plus the `@sandbox` and `@inference` tier sweeps.
 
-In scope (watchbill order):
-- Secure launch spine: SandboxSpec + PreparedProcess schemas, PTY-not-Bubblewrap boundary, bwrap-argv isolation policy, backend selection, CommandSpec parse.
-- Capture: PTY runner takes a PreparedProcess, vt100 -> virtual Screen, Ratatui render (TestBackend).
-- Recording + YAML: key recording (order + forwarding), screen snapshots, interaction-log YAML (schema + @contract).
-- Real isolation (@sandbox): home/secret hidden, network denied.
+Voyage 1 shipped the capture spine: sandbox launch, PTY, virtual screen, Ratatui view, key recording, interaction log. Those 11 feature files are untouched and stay out of the watchbill.
 
-Deferred (later voyages, user-confirmed exclusion): TOM inference, semantic capture, replay, harness/flow YAML, multi-process orchestration, macOS backend, `none` backend beyond the dev/debug path the selection scenarios pin.
+## Design decisions this voyage (user-confirmed)
+
+- **Tinman is a driver, not only a CLI.** Tests live in pytest, jest, bun test and drive Tinman the way Playwright's language clients drive the Node driver. `tinman driver` speaks newline-delimited JSON on stdin and stdout. This is the primary consumption surface; the YAML plan stays canonical for recorded flows. Keeps idea.md's "no programming-language DSL" intact, because the protocol is RPC, not a second test format.
+- **TOM is the DOM equivalent and inference is codegen.** Deterministic builder is the spine: geometry from Ratatui-shaped nested rects, roles and names from heuristics. The LLM engine is a second producer of the same shape, capture time only. A hand-authored plan needs no model. This is why replay needs no model.
+- **Plan YAML grows with the test.** One canonical model, several surface forms. Shorthand removes typing, never adds capability, never weakens a default. `features/plan-shorthand.feature` pins that both example assets parse identically, and that an omitted `sandbox:` block means secure defaults rather than no sandbox.
+- **Help text is an asset, not a scenario.** Per the content policy: copy lives in `assets/help/`, scenarios own only the seams we own. `assets/help/tinman.txt` carries one `{{tagline}}` placeholder that inference fills; `inference-unavailable.txt` and `assistant-prompt.txt` carry the other two operator-visible strings. Inlined at build time.
+- **Acronym validator: six acronym-bearing capitalized words, lowercase connectives permitted and ignored.** help.md says "exactly six words" but its own shipped example, `Terminal Inference for Navigating Model Agent Networks`, has seven. Strict-six would reject the user's own example at runtime. Both forms are pinned in `features/acronym.feature`. Revisit if the user prefers strict-six.
+- **Inference: OpenRouter with DeepSeek, behind a provider trait.** `ureq` for the call, blocking, keeps tokio a dev-dependency. `dotenvy` for `.env`, which is git-ignored. Environment beats dotenv file.
+- **Tier placement.** `@sandbox` marks scenarios whose assertion is isolation itself, matching voyage 1's line; ordinary PTY launches stay default tier. `@inference` is new: real paid provider calls, never on the inner loop. If QM finds a fixture-launching default-tier scenario needs real bwrap, retag it rather than weaken the tier policy.
+
+## Blocker to clear before QM sails
+
+`ureq` and `dotenvy` are recorded under `## Dependencies` but not installed. Installation is Shipwright's per the Rigging read contract. Watch1 does not need them; watch2 onward does. Dispatch Shipwright to install before QM, so the voyage does not block mid-watch.
 
 ## Rigging quirks learned
 
 - cucumber-rs makes `--tags` and `--name` mutually exclusive. Tag exclusion rides `CUCUMBER_FILTER_TAGS`; `--name` selects the scenario. Encoded in RIGGING.md `focused`.
 - Runner is `tests/cucumber.rs`, `harness = false`, `fail_on_skipped()` so undefined steps redden.
-- No clean cucumber-rs dry-run, so `discover: none`; undefined steps surface in focused runs.
+- No clean cucumber-rs dry-run, so `discover: none`. A tag filter matching nothing reports `0 features` and proves nothing; to prove specs parse, run the default tier and read the feature count in the summary.
 - No Rust CLI for step-usage / plank-inventory; both `none`, plank checks land at first harbour.
-- Env confirmed: rustc 1.97 (edition 2024), bwrap 0.11.2, user namespaces enabled. @sandbox tier is runnable in this VM.
+- Env confirmed: rustc 1.97 (edition 2024), bwrap 0.11.2, user namespaces enabled.
 
-## Voyage 1 progress
-
-- QM run 1: watch1 7/9 green (gates clean), returned two fitting-out blockers.
-  - Fixed `focused` (dropped `--tags`; cucumber-rs forbids `--tags`+`--name`; name-anchoring excludes skeletons). Proven green.
-  - Installed `serde_json` + `jsonschema` (dev) for the schema `@contract` scenarios. Decision: standard Rust validator; dev-only. `cargo check` clean.
-  - Refit committed as new base; watch1 code + specs remain work-in-flight to Boatswain.
-- Next: fresh QM resumes the 2 schema scenarios (Crew must expand `SandboxSpec`/`PreparedProcess` to full serde shapes), then watch2 (PTY capture, Ratatui render, recording, YAML) and watch3 (@sandbox isolation).
-
-## Harbour findings (from QM run 1, deferred to first harbour)
+## Harbour findings carried
 
 - No derived plank check: `plank-inventory`/`step-usage`/`conformance` are `none`; Rust here has no docblock reader. Shipwright derives a docblock plank-form check, proven by a planted red.
 - `check_bwrap_policy`/`check_pty_boundary` read JSON scantlings via `serde_yaml`; may migrate to `serde_json` now it is present.
-- `src/main.rs` still the base stub; no scenario drives the binary end-to-end (command-invocation asserts the `parse_command_line` seam). Candidate end-to-end scenario for a later voyage.
-- idea.md / isolation.md are intent-source reference docs, not sanctioned artifacts; binding shape lives in specs + scantlings. Fold any still-durable constraint into `Rule:` prose if a gap appears.
-
-## Rename decision (Clanker -> Tinman)
-
-- User renamed the project (too many tools called "clanker"). Directory moved to `~/tinman` by the user; crate/binary/code/specs/scantlings/docs/memory renamed by Captain.
-- A global identifier rename spans Crew (`src/`) and QM (`tests/`) scopes; no single role cleanly owns it. Taken as Captain minimal-action-to-restore-progress: behaviour-preserving textual refactor of uncommitted in-flight work, re-proven by `cargo check` + a re-run watch scenario, and the re-dispatched QM re-verifies from scratch.
-- Settings allowlist absolute path updated to `~/tinman`. Memory relocated to the `-home-exedev-tinman` keyed store for future sessions.
-- An orphan Crew from the killed QM landed watch2's first 3 scenarios (virtual-screen x2, terminal-view) green under tinman; kept as work-in-flight.
-
-## TOM roadmap (design constraint, user-confirmed)
-
-- Voyage 1 capture = whole virtual screen (full PTY grid), no pane/role, no TOM. User confirmed this is fine "as long as we plan to make it TOM-bindable later."
-- `VirtualScreen` is the binding substrate and MUST keep the full cell grid (position + content); the `cell at row/col` scenarios protect that surface. A later voyage adds TOM inference (nested rects + roles) over `VirtualScreen`, then the semantic `capture: {role, items, scope}` op and webrat-style role binding.
-- Do not collapse `VirtualScreen` to a flat string or drop cell positions; that would break future TOM binding.
+- `Cargo.toml` `exclude` lists `idea.md`, `isolation.md`, `CAPTAIN.md`, `.claude`. `help.md` is not listed. Harmless while it stays untracked, since cargo honours git; add it if the intent-source docs are ever committed.
+- idea.md, isolation.md and help.md are intent-source reference docs, not sanctioned artifacts. Binding shape lives in specs, scantlings and `assets/**`.
 
 ## Open questions
 
-- None blocking. macOS backend and the full harness/sandbox YAML parser are deferred by design.
+- Strict-six acronym validation instead of the connective rule, if the user prefers it over their shipped example.
+- `.env` currently holds an empty `OPENROUTER_API_KEY`. The `@inference` tier cannot run until the user supplies a key; every other watch is runnable without one.

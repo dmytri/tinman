@@ -1,0 +1,19 @@
+{
+  "$id": "assistant-command-boundary",
+  "title": "Interactive assistant / command parser boundary",
+  "description": "help.md invariant: the interactive assistant must never execute arbitrary shell commands and must never bypass Tinman's existing CLI. Every action it proposes reaches the operating system only through Tinman's normal command parser. Discharged by the assistant-command-boundary checker in verification support, which scans the assistant source. Attested by the @contract scenario in features/interactive-help.feature.",
+  "module": "src/assistant.rs",
+  "forbiddenReferences": [
+    "std::process::Command",
+    "Command::new",
+    "tokio::process",
+    "exec",
+    "sh -c",
+    "bash -c",
+    "system("
+  ],
+  "requiredReferences": [
+    "parse_command_line"
+  ],
+  "rationale": "The assistant infers a Tinman command, displays it, and asks for confirmation. A confirmed proposal is handed to the same parser that serves the command line, so an inferred string can only ever name a Tinman subcommand. Any path from the assistant to a process spawn would make it a general-purpose shell."
+}

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "driver-protocol",
+  "title": "Tinman driver protocol message",
+  "description": "One newline-delimited JSON message exchanged with the Tinman driver on stdin and stdout. A client in any language needs only a subprocess and a JSON parser. Referenced by features/driver-protocol.feature.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "request": {
+      "description": "A message from the test runner to the driver.",
+      "type": "object",
+      "required": ["id", "op"],
+      "properties": {
+        "id": {
+          "description": "Client-assigned request identifier, echoed on the reply.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "op": {
+          "description": "The operation requested.",
+          "enum": [
+            "launch",
+            "activate",
+            "fill",
+            "press",
+            "expect",
+            "capture",
+            "screen",
+            "tom",
+            "sandbox",
+            "close"
+          ]
+        },
+        "session": {
+          "description": "The session the operation addresses. Absent on launch.",
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "description": "The target command, on a launch request.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sandbox": {
+          "description": "Backend-neutral sandbox specification for the session, on a launch request.",
+          "type": "object"
+        },
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "value": { "type": "string" },
+        "key": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "within": {
+          "description": "Restricts a locator to the named region.",
+          "type": "string",
+          "minLength": 1
+        },
+        "items": { "type": "string", "minLength": 1 },
+        "scope": { "enum": ["all", "visible"] },
+        "as": { "type": "string", "minLength": 1 }
+      }
+    },
+    "response": {
+      "description": "A reply from the driver to the test runner.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ok"],
+      "properties": {
+        "id": {
+          "description": "The identifier of the request being answered.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "ok": {
+          "description": "Whether the operation succeeded. A failed action is a reply, never a dropped session.",
+          "type": "boolean"
+        },
+        "session": { "type": "string", "minLength": 1 },
+        "error": {
+          "description": "Why the operation failed. Present when ok is false.",
+          "type": "string",
+          "minLength": 1
+        },
+        "screen": {
+          "description": "The virtual screen, present when the failure or the operation reports one.",
+          "type": "object"
+        },
+        "tom": { "type": "object" },
+        "items": {
+          "description": "Structured data returned by a capture.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "backend": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" }
+      }
+    }
+  }
+}
