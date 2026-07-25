@@ -20,4 +20,4 @@ unless explicitly granted.
 
 ## License
 
-Licensed under either of MIT or Apache-2.0 at your option.
+Licensed under the BSD Zero Clause License (0BSD). See `LICENSE`.
