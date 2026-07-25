@@ -4,6 +4,18 @@
 
 Binding behaviour lives in `.feature` specs and referenced scantlings. History lives in git. These notes carry only what the next cycle needs.
 
+## Prior art: ratatui-testlib
+
+Checked 2026-07-25. `ratatui-testlib`, crates.io, MIT, first published 12 June 2026, v0.1.0 MVP, single maintainer `beengud` at `github.com/raibid-labs/ratatui-testlib`.
+
+Despite the name it is framework-neutral: `ratatui` is an optional dependency behind a `ratatui-helpers` feature. Core dependencies are `portable-pty`, `termwiz`, `vtparse`. `TuiTestHarness` spawns any terminal program through `CommandBuilder` and asserts against the emulated screen.
+
+It occupies Tinman's transport layer, and it uses the same `portable-pty` crate; the emulator differs, `termwiz`/`vtparse` against our `vt100`. What it does not carry: any semantic model, assertions are `text_at`, `cursor_position` and sixel bounds against raw cells; no sandboxing; no replay; no inference. So the commoditized part is plumbing Tinman would never have differentiated on, and the TOM, isolation-by-default and deterministic replay are untouched.
+
+Two consequences. Not a dependency candidate: it ships no sandbox, which is a hard requirement here, and it would replace a layer we already have. And a positioning note: a crate named for one framework under-indexes for general TUI testing, so Tinman's framework-neutral naming is an advantage to keep. `assets/skill/SKILL.md` already says "CLIs and full-screen TUIs" and names no framework; keep it that way.
+
+Snapshot testing was considered and rejected in the same pass. `insta` asserts "same as last time", which is drift detection rather than specification: a snapshot passes whatever it recorded, including a regression recorded before anyone looked. That contradicts the falsifiable-scenario line the project runs on. The existing `TestBackend` use at `tests/cucumber/support.rs` is the right depth.
+
 ## Voyage 2 — everything remaining from idea.md, isolation.md and help.md
 
 User directive: take the whole remaining scope in one voyage, no backlog debt. 89 directed scenario targets across 8 watches, then the `@sandbox` and `@inference` tier sweeps as watch9 and watch10.
