@@ -20,9 +20,12 @@ Voyage 1 shipped the capture spine: sandbox launch, PTY, virtual screen, Ratatui
 - **Inference: OpenRouter with DeepSeek, behind a provider trait.** `ureq` for the call, blocking, keeps tokio a dev-dependency. `dotenvy` for `.env`, which is git-ignored. Environment beats dotenv file.
 - **Tier placement.** `@sandbox` marks scenarios whose assertion is isolation itself, matching voyage 1's line; ordinary PTY launches stay default tier. `@inference` is new: real paid provider calls, never on the inner loop. If QM finds a fixture-launching default-tier scenario needs real bwrap, retag it rather than weaken the tier policy.
 
-## Blocker to clear before QM sails
+## Blockers to clear before QM sails
 
-`ureq` and `dotenvy` are recorded under `## Dependencies` but not installed. Installation is Shipwright's per the Rigging read contract. Watch1 does not need them; watch2 onward does. Dispatch Shipwright to install before QM, so the voyage does not block mid-watch.
+Both are Shipwright's, both confirmed by command, neither resolvable by Captain.
+
+1. `ureq` and `dotenvy` are recorded under `## Dependencies` but absent from `Cargo.toml`. Installation is Shipwright's per the Rigging read contract. Watch1 does not need them; watch2 onward does. Install before QM so the voyage does not block mid-watch.
+2. `help.md` and `isolation.md` are now tracked as of `33ca946`, and `cargo package --list` shows `help.md` in the crate. `Cargo.toml` `exclude` lists `idea.md`, `isolation.md`, `CAPTAIN.md`, `.claude`, not `help.md`. Add it. Only bites at `cargo publish`, which is Captain-only outbound, so it is not urgent, but it is live rather than hypothetical.
 
 ## Rigging quirks learned
 
@@ -36,7 +39,7 @@ Voyage 1 shipped the capture spine: sandbox launch, PTY, virtual screen, Ratatui
 
 - No derived plank check: `plank-inventory`/`step-usage`/`conformance` are `none`; Rust here has no docblock reader. Shipwright derives a docblock plank-form check, proven by a planted red.
 - `check_bwrap_policy`/`check_pty_boundary` read JSON scantlings via `serde_yaml`; may migrate to `serde_json` now it is present.
-- `Cargo.toml` `exclude` lists `idea.md`, `isolation.md`, `CAPTAIN.md`, `.claude`. `help.md` is not listed. Harmless while it stays untracked, since cargo honours git; add it if the intent-source docs are ever committed.
+- No derived check joins a proof scantling to its attesting scenario. A path grep across the specs reports `pty-sandbox-boundary.json` and `assistant-command-boundary.json` unreferenced, because the attestation form names the seam rather than the path. Both do have attesting scenarios. Any future scantling-reference check must know the two forms apart, or it reddens on correct specs.
 - idea.md, isolation.md and help.md are intent-source reference docs, not sanctioned artifacts. Binding shape lives in specs, scantlings and `assets/**`.
 
 ## Open questions
