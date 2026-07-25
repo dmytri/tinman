@@ -12,7 +12,16 @@ Despite the name it is framework-neutral: `ratatui` is an optional dependency be
 
 It occupies Tinman's transport layer, and it uses the same `portable-pty` crate; the emulator differs, `termwiz`/`vtparse` against our `vt100`. What it does not carry: any semantic model, assertions are `text_at`, `cursor_position` and sixel bounds against raw cells; no sandboxing; no replay; no inference. So the commoditized part is plumbing Tinman would never have differentiated on, and the TOM, isolation-by-default and deterministic replay are untouched.
 
-Two consequences. Not a dependency candidate: it ships no sandbox, which is a hard requirement here, and it would replace a layer we already have. And a positioning note: a crate named for one framework under-indexes for general TUI testing, so Tinman's framework-neutral naming is an advantage to keep. `assets/skill/SKILL.md` already says "CLIs and full-screen TUIs" and names no framework; keep it that way.
+**Open decision, reopened by the user on 2026-07-25 after an earlier note closed it too fast.** "Not a dependency candidate" was the wrong shape of answer, because it collapsed two separable questions:
+
+1. **Its harness.** Adopting the spawning and driving layer fights the architecture: launch must happen inside bwrap, and the PTY runner accepts only a prepared process, per `AGENTS.md`. `TuiTestHarness` owns spawning through `CommandBuilder` and ships no sandbox. Leaning no, on architecture rather than on maturity.
+2. **Its emulator choice, `termwiz`/`vtparse` against our `vt100`.** This is the live question and it is separable from the crate entirely: `termwiz` can be adopted directly. The TOM is derived from emulated cells, so emulator fidelity is foundational. Wide and CJK characters, combining marks, and styling drive region geometry and role heuristics, and a mis-celled screen yields a wrong model that no scenario above it can detect.
+
+User constraint: adopt only if well maintained. That gate probably splits the two. `ratatui-testlib` is six weeks old at v0.1.0 with a single maintainer, which likely fails it for a foundational layer whatever the code quality. `termwiz` is WezTerm's engine and likely passes; unconfirmed, and a study is in flight to settle both with evidence rather than priors.
+
+Timing: this is harbour work, not mid-voyage. Voyage 2 is building `src/screen.rs` and `src/tom.rs` right now, and swapping the emulator underneath that is the opposite of the simplest sufficient change. Decide at the next harbour, on the study's evidence.
+
+Positioning note, unchanged: a crate named for one framework under-indexes for general TUI testing, so Tinman's framework-neutral naming is an advantage to keep. `assets/skill/SKILL.md` already says "CLIs and full-screen TUIs" and names no framework; keep it that way.
 
 Snapshot testing was considered and rejected in the same pass. `insta` asserts "same as last time", which is drift detection rather than specification: a snapshot passes whatever it recorded, including a regression recorded before anyone looked. That contradicts the falsifiable-scenario line the project runs on. The existing `TestBackend` use at `tests/cucumber/support.rs` is the right depth.
 
