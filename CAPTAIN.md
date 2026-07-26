@@ -231,22 +231,27 @@ The other two became watch1, both `@conformance` in `features/methodology-confor
 
 Plant 3 is the one worth having done. It proves the count guard is load-bearing rather than decorative, which was the argument for writing it; a check that only compares the URIs it happens to find would have passed that plant while a pin went missing.
 
-**Boatswain asked why a third target was advanced outside the watchbill. The answer is that it was never a QM target.** `activation fails when the selection cannot reach the item` appears in no watch, and Boatswain was right to flag rather than theorize. QM swept `@logic` and `@sandbox` because the support edit's blast radius reaches every tier, per the Planking agreement's support-edit rule, and the `@sandbox` sweep surfaced the intermittent failure this file had carried as "re-observe someday". A non-product failure is a harness defect, which the Verification agreement puts in QM's own scope and bars from being a Crew target. So no watchbill channel was owed and none was bypassed. The watchbill creates *QM targets*; it does not gate QM repairing its own harness.
+**Boatswain asked why a third target was advanced outside the watchbill. The answer is that it was never a QM target.** `activation fails when the selection cannot reach the item` appears in no watch, and Boatswain was right to flag rather than theorize. QM swept `@logic` and `@sandbox` because the support edit's blast radius reaches every tier, per the Planking agreement's support-edit rule, and the `@sandbox` sweep surfaced the intermittent failure this file had parked with no pivot on it. A non-product failure is a harness defect, which the Verification agreement puts in QM's own scope and bars from being a Crew target. So no watchbill channel was owed and none was bypassed. The watchbill creates *QM targets*; it does not gate QM repairing its own harness.
 
 **Boatswain labelled the planted-red proof unverified, and it is correct to.** The plants ran in Captain's session and left no durable trace: the run record carries greens only, and a green looks identical proven or not. The Scantling agreement already concedes this, which is why it puts the obligation in the deferral rather than in the record. There is no deferral left here because the proof is done, so the residual is that no role but Captain can confirm it. Worth naming as a doctrine gap: an adoption proof that only its author can see is one context clear away from being unproven again.
 
 **Both new scenarios name their count, deliberately.** `all eight` and `all thirteen` are the null control in the form this domain allows: a glob that reads nothing would otherwise satisfy "each one validates" exactly as a full read does. The counts are load-bearing rather than decorative, since a scantling added without a pin is precisely the drift watch1 exists to catch, and the count is what reddens.
 
-**Carried to harbour, none blocking:**
+**Scheduled work. Every item names its pivot and its role. An item with no pivot is backlog debt, so it is either scheduled here or struck.**
 
-- Five orphaned step definitions in `tests/cucumber.rs`, unchanged since `44266d6`. QM's scope.
-- Three planks in `src/inference.rs` naming patterns among those five orphans. The string join stays green because the definitions still exist, so those seams trace to a contract no scenario asserts. This is behaviour-staleness, which no command on this stack can reach.
-- **The strongest harbour item: derive `step-usage`.** Three roles in a row discharged the plank join with an ad-hoc script. That is not repeatable custody, and it is the one check that would also catch the orphan drift above. A checker extracting the `#[given]`, `#[when]` and `#[then]` pattern literals closes both.
-- `focused` cannot compose the tag exclusions the Rigging read contract asks of every verification command; cucumber-rs answers `error: the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`. The value is correct as written and a role obeying the contract literally gets a hard error. Wants a note in `RIGGING.md`, which is Shipwright's file.
-- `cwd` documented in `prepared-process.schema.json` and absent from `PreparedProcess`.
-- Two unplanked seams in `src/skill.rs`.
-- ~~Unexplained nondeterminism in `activation fails when the selection cannot reach the item`.~~ **Closed 2026-07-26, root-caused rather than re-observed.** QM found a missing readiness gate at `launch_driver_session`: the driver's launch reply says the program started, not that it drew, so a step could read the menu line mid-write with reverse video not yet reset and see every item as selected. Gated on the driver's own `expect` for `READY`, which each fixture draws last. `@sandbox` went 30 of 31 to 31 of 31. It was harness, as suspected, and QM engineered it out.
-- No derived check joins a scantling enum to the production enum it constrains. That is how the 17-role `Role` drift against the 11-role `tom.schema.json` went unseen. A plausible `@conformance` candidate, and the last of this shape left standing.
+Next harbour, Shipwright:
+
+1. **Derive `step-usage`.** The strongest item. Four roles in a row have now discharged the plank join with an ad-hoc script, which is not repeatable custody. A checker extracting the `#[given]`, `#[when]` and `#[then]` pattern literals makes it a real project command and closes item 2 with it.
+2. **Five orphaned step definitions in `tests/cucumber.rs`, and three planks in `src/inference.rs` naming three of them.** One fault, not two: the seams trace to a contract no scenario asserts, and the string join stays green because the definitions still exist. Behaviour-staleness, which no command on this stack reaches until item 1 lands.
+3. **Two unplanked seams in `src/skill.rs`**, `FrontMatter` and `Skill`. Shipwright writes `@captain` skeletons or condemns them.
+4. **Note the `focused` tag-exclusion exception in `RIGGING.md`.** cucumber-rs answers `error: the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`, so this stack cannot satisfy the Rigging read contract on that one command. The value is correct as written and a role obeying the contract literally gets a hard error. `RIGGING.md` is Shipwright's file.
+5. **Derive the scantling-enum join.** No check joins a scantling enum to the production enum it constrains, which is how the 17-role `Role` drift against the 11-role `tom.schema.json` went unseen.
+6. **Shape-validate the three proof contracts.** `bwrap-isolation-policy`, `pty-sandbox-boundary` and `assistant-command-boundary` declare no dialect, so nothing validates their own shape and a typo'd key would be silently ignored by the checker reading it, leaving its attestation green. Identical to the false green watch1 closed for the other eight. Captain authors the meta-scantling; Shipwright derives the check.
+7. **Decide `ratatui-testlib`'s harness layer** on the study's evidence, per the prior-art section above. The emulator half is settled and shipped; only the harness question stands.
+
+Next voyage, Captain:
+
+8. **`cwd` is documented in `prepared-process.schema.json` and absent from `PreparedProcess`.** The conformance scenario is green because the field is optional, so this is latent divergence. `AGENTS.md` says the PTY runner accepts only a prepared process and never constructs backend arguments itself, which argues the field lands rather than the scantling drops it. Captain writes the scenario that drives it.
 
 ## The release taught two things, and the first was my error. 2026-07-26.
 
