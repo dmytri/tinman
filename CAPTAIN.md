@@ -147,7 +147,7 @@ Every item names its pivot and its role. No "someday".
 
 ## The false-green pattern. The most expensive thing this project has learned.
 
-Twelve instances now, every one green while asserting nothing. The six older ones: a perturbation discharged by deleting its line; a `menu` role the deterministic pass already produced; a launch answering `ok:true` before the program started; a recorded plan carrying no expectation; two activation scenarios asserting text the fixture drew anyway; and a scantling that is valid JSON and an invalid schema.
+Fifteen instances now, every one green while asserting nothing. The six older ones: a perturbation discharged by deleting its line; a `menu` role the deterministic pass already produced; a launch answering `ok:true` before the program started; a recorded plan carrying no expectation; two activation scenarios asserting text the fixture drew anyway; and a scantling that is valid JSON and an invalid schema.
 
 Two more this harbour, both caught only by planting:
 
@@ -167,6 +167,12 @@ Two more from voyage 4's own reports, and the first is the one to study, because
 Thirteenth, found 2026-07-26 while answering a plain user question, and the first one that is a production command rather than a scenario:
 
 - **`tinman replay` is declared and does nothing.** `src/cli.rs:35` declares `Replay` in the clap enum, so it appears in `tinman --help`, and `accepted_commands()` derives from clap, so the interactive assistant proposes it and `parse_command_line` accepts it. `src/main.rs` has no arm for it and ends the match at line 72 with `_ => {}`, which swallows it: the command exits 0 having done nothing. All six `replay.feature` scenarios are green because they drive the library seam and never the subcommand. The wildcard arm is what makes it invisible; an exhaustive match would not compile. It also takes no plan argument, so the intent is under-specified as well as unwired, and it lands on the headline capability: capture may infer, replay is deterministic.
+
+Fifteenth, 2026-07-26, and Captain wrote it into a scenario Captain never opened:
+
+- **An absence assertion disarmed by a change to the asset it names.** `features/inference-availability.feature:degraded help omits the assistant prompt` asserted the help output does not contain the body of `assets/help/assistant-prompt.txt`, as a contiguous string. Captain grew that asset from one line to two and drew it in a ratatui box, where line one becomes a border title and line two a bordered row. The contiguous two-line body can therefore never appear, whether the assistant opened or not, so the scenario passes with the `expansion.is_some()` gate in `src/main.rs` present **or removed**. Boatswain established the mechanism from the diff and labelled the conclusion unverified, wanting the planted red QM owes at adoption. Rewritten to assert against the terminal object model, the same place its positive twin already asserts.
+
+**The lesson is the standing corollary, paid for a second time in one session:** a change to a definition narrows what every scenario counting on it may claim, so re-read them in the same pass. Captain re-read the scenarios that assert the box's **presence** and never the one that asserts its **absence**. Absence assertions are the ones that go quiet, because nothing about their output changes when they stop testing.
 
 **The test: when a scenario goes green early and cheaply, ask what it would take to make it red. If nothing would, the scenario is the defect.**
 

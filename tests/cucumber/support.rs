@@ -862,10 +862,16 @@ pub fn unreachable_base_url() -> String {
 }
 
 /// The outcome of running the real `tinman` binary.
+///
+/// `stdout` is the text an assertion reads, with carriage returns removed.
+/// `raw` is what the program actually wrote, carriage returns and control
+/// sequences intact, so a screen assertion parses the same bytes a terminal
+/// received rather than a text view that has already lost the column resets.
 #[derive(Debug)]
 pub struct RunOutcome {
     pub stdout: String,
     pub status: i32,
+    pub raw: Vec<u8>,
 }
 
 /// Run the real `tinman` binary with the given arguments, in `dir`, with only
@@ -895,6 +901,7 @@ pub fn run_tinman(
             Ok(RunOutcome {
                 stdout: std::fs::read_to_string(path)?,
                 status: status.code().unwrap_or(-1),
+                raw: std::fs::read(path)?,
             })
         }
         None => {
@@ -902,6 +909,7 @@ pub fn run_tinman(
             Ok(RunOutcome {
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                 status: output.status.code().unwrap_or(-1),
+                raw: output.stdout,
             })
         }
     }
@@ -1229,10 +1237,16 @@ pub struct TerminalSession {
     _master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     writer: Box<dyn std::io::Write + Send>,
-    output: std::sync::Arc<std::sync::Mutex<String>>,
+    output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
     reader: Option<std::thread::JoinHandle<()>>,
     mark: usize,
 }
+
+/// The size of the pseudo-terminal a session opens. The width is the width a
+/// screen assertion parses the run's bytes at, so the model reads the program's
+/// cursor addressing on the same grid the program drew on.
+const TERMINAL_ROWS: u16 = 60;
+const TERMINAL_COLS: u16 = 120;
 
 impl std::fmt::Debug for TerminalSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1253,8 +1267,8 @@ impl TerminalSession {
 
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: 60,
-                cols: 120,
+                rows: TERMINAL_ROWS,
+                cols: TERMINAL_COLS,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -1282,7 +1296,7 @@ impl TerminalSession {
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-        let output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
         let sink = std::sync::Arc::clone(&output);
         let drain = std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
@@ -1290,10 +1304,9 @@ impl TerminalSession {
                 match reader.read(&mut buffer) {
                     Ok(0) | Err(_) => break,
                     Ok(read) => {
-                        let text = String::from_utf8_lossy(&buffer[..read]).replace('\r', "");
                         sink.lock()
                             .expect("the terminal output buffer is not poisoned")
-                            .push_str(&text);
+                            .extend_from_slice(&buffer[..read]);
                     }
                 }
             }
@@ -1309,17 +1322,43 @@ impl TerminalSession {
         })
     }
 
-    /// Everything the program has written to the terminal so far.
+    /// Everything the program has written to the terminal so far, as text: the
+    /// carriage returns a terminal ends a line with are removed, so an
+    /// assertion reads the lines rather than the terminal's own line endings.
     pub fn output(&self) -> String {
+        String::from_utf8_lossy(&self.raw_output()).replace('\r', "")
+    }
+
+    /// The bytes the program has written to the terminal so far, exactly as the
+    /// terminal received them.
+    pub fn raw_output(&self) -> Vec<u8> {
         self.output
             .lock()
             .expect("the terminal output buffer is not poisoned")
             .clone()
     }
 
-    /// Wait until `needle` is on the terminal, bounded by `budget`.
-    pub fn await_output(&self, needle: &str, budget: std::time::Duration) {
-        self.await_from(0, needle, budget, "the terminal never showed");
+    /// Wait until Tinman's own model reads a region named `name` on the
+    /// terminal, bounded by `budget`, failing with the screen last observed.
+    ///
+    /// A bordered region is the signal a drawn box gives: its title sits on the
+    /// top border row and its body rows below, so no run of the region's text
+    /// appears contiguously in the bytes and only the model can see it stand.
+    pub fn await_region(&self, name: &str, budget: std::time::Duration) {
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            let screen = terminal_screen(&self.raw_output());
+            if tinman::tom::build(&screen).find_named(name).is_some() {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "the terminal never showed a region named {name:?}; screen:\n{}",
+                    screen.contents()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     /// Wait until `needle` appears in what the terminal showed after the last
@@ -1369,7 +1408,13 @@ impl TerminalSession {
     pub fn press(&mut self, key: &str) {
         use std::io::Write;
         self.mark = self.output().len();
-        let bytes = if key == "Enter" { "\r" } else { key };
+        let bytes = match key {
+            "Enter" => "\r",
+            // The escape key sends the escape character itself, which is what a
+            // program reading keys sees when the operator presses it.
+            "esc" | "Esc" => "\u{1b}",
+            other => other,
+        };
         let _ = write!(self.writer, "{bytes}");
         let _ = self.writer.flush();
     }
@@ -1414,8 +1459,17 @@ impl TerminalSession {
         RunOutcome {
             stdout: self.output(),
             status,
+            raw: self.raw_output(),
         }
     }
+}
+
+/// Read what a program wrote to a terminal into Tinman's own virtual screen,
+/// parsed at the width the session opened the terminal at, so a region
+/// assertion reads the program's drawing through the same emulation a captured
+/// program goes through.
+pub fn terminal_screen(raw: &[u8]) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_pty_output_at(raw, TERMINAL_COLS)
 }
 
 impl Drop for TerminalSession {

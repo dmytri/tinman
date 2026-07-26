@@ -5,10 +5,19 @@ Feature: interactive help
 
   Rule: the assistant has a deliberately narrow scope. It answers questions about Tinman and proposes Tinman commands. Every action it proposes runs through Tinman's normal command parser, so it can never become a general-purpose shell.
 
-  Scenario: the assistant is appended beneath the conventional help
+  Rule: the assistant draws an inline box rather than taking the screen. A full-screen prompt would clear the conventional help the operator just asked for, and scroll it out of reach; an inline viewport leaves that output in the scrollback and claims only the rows beneath it. The box is the same shape Tinman reads in the programs it drives, a bordered region carrying a title, so the assistant is legible to Tinman's own model.
+
+  Scenario: the assistant box is drawn beneath the conventional help
     Given inference is available
     When the operator runs "tinman --help" in an interactive terminal
-    Then the help output ends with the body of the asset at "assets/help/assistant-prompt.txt"
+    Then the conventional help is still on the screen
+    And a bordered region titled "Ask Tinman" is drawn beneath it
+
+  Scenario: what the operator types is shown in the box
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "how do I record a session" at the assistant prompt
+    Then the region titled "Ask Tinman" shows "how do I record a session"
 
   Scenario: a question typed at the prompt is answered
     Given inference is available
@@ -17,10 +26,24 @@ Feature: interactive help
     When the operator types "what does inspect do" at the assistant prompt
     Then the output displays the answer "Inspect prints the terminal object model of a running program."
 
+  Rule: the prompt names the keys that work it, because an operator dropped into a prompt has no other way to learn them and a terminal offers no menu to discover. The keys are asserted by name here rather than only through the asset body, since a scenario comparing output to an asset passes just as well when the asset loses the line.
+
+  Scenario: the assistant prompt names the keys that send and leave
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the assistant prompt names "enter" as the key that sends
+    And the assistant prompt names "esc" as the key that leaves
+
   Scenario: the assistant session ends when the operator ends the input
     Given inference is available
     And the operator runs "tinman --help" in an interactive terminal
     When the operator ends the input
+    Then the command exits with status 0
+
+  Scenario: the assistant session ends when the operator presses escape
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator presses "esc" at the assistant prompt
     Then the command exits with status 0
 
   Scenario: a proposed command is displayed before it runs

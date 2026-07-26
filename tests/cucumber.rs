@@ -105,6 +105,9 @@ struct TinmanWorld {
     provider: Option<support::LocalProvider>,
     run_stdout: Option<String>,
     run_status: Option<i32>,
+    // what the run wrote to the terminal, control sequences intact, so a screen
+    // assertion reads the bytes the terminal received
+    run_raw: Option<Vec<u8>>,
     // flow orchestration
     flow_outcome: Option<tinman::flow::FlowOutcome>,
     flow_error: Option<String>,
@@ -1637,6 +1640,7 @@ async fn operator_runs_interactive(world: &mut TinmanWorld, line: String) {
         .unwrap_or_else(|e| panic!("running {line:?} on a terminal failed: {e}"));
     world.run_stdout = Some(outcome.stdout);
     world.run_status = Some(outcome.status);
+    world.run_raw = Some(outcome.raw);
 }
 
 #[given(expr = "the operator runs {string} in an interactive terminal")]
@@ -1647,12 +1651,15 @@ async fn given_operator_runs_interactive(world: &mut TinmanWorld, line: String) 
     let env = configured_env(world);
     let session = support::TerminalSession::start(&dir, &argv, &env)
         .unwrap_or_else(|e| panic!("starting {line:?} on a terminal failed: {e}"));
-    // The session is up once the prompt inviting a question stands on the
-    // terminal, so nothing is typed before the program can read it.
-    session.await_output(
-        &asset_body("assets/help/assistant-prompt.txt"),
-        std::time::Duration::from_secs(10),
-    );
+    // The session is up once the box inviting a question stands on the
+    // terminal, so nothing is typed before the program can read it. The asset's
+    // first line is the box's title, which is the name the model reads it by.
+    let prompt = asset_body("assets/help/assistant-prompt.txt");
+    let title = prompt
+        .lines()
+        .next()
+        .expect("the assistant prompt asset carries a title");
+    session.await_region(title, std::time::Duration::from_secs(10));
     world.terminal_session = Some(session);
 }
 
@@ -1687,6 +1694,162 @@ async fn the_operator_ends_the_input(world: &mut TinmanWorld) {
     world.run_status = Some(status);
 }
 
+/// Every line of the conventional help that carries text. These are the lines
+/// the operator asked for, and they must still be readable after the assistant
+/// opens beneath them.
+fn conventional_help_lines() -> Vec<String> {
+    tinman::help::conventional()
+        .lines()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+#[then("the conventional help is still on the screen")]
+async fn the_conventional_help_is_still_on_the_screen(world: &mut TinmanWorld) {
+    let output = world.run_stdout.as_ref().expect("the help output was read");
+    for line in conventional_help_lines() {
+        assert!(
+            output.contains(&line),
+            "the terminal no longer shows the conventional help line {line:?}; output:\n{output}"
+        );
+    }
+}
+
+#[then(expr = "a bordered region titled {string} is drawn beneath it")]
+async fn a_bordered_region_is_drawn_beneath_it(world: &mut TinmanWorld, title: String) {
+    let output = world.run_stdout.as_ref().expect("the help output was read");
+    let last_help_line = conventional_help_lines()
+        .pop()
+        .expect("the conventional help carries a line");
+    let help_ends = output
+        .rfind(&last_help_line)
+        .map(|at| at + last_help_line.len())
+        .unwrap_or_else(|| {
+            panic!("the conventional help is not on the terminal; output:\n{output}")
+        });
+    let titled_at = output.rfind(&title).unwrap_or_else(|| {
+        panic!("nothing on the terminal is titled {title:?}; output:\n{output}")
+    });
+    assert!(
+        titled_at > help_ends,
+        "the region titled {title:?} is drawn above the conventional help rather than beneath it; \
+         output:\n{output}"
+    );
+    // The box must be legible to Tinman's own model, so it is read back through
+    // the same virtual screen a captured program goes through.
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    let screen = support::terminal_screen(raw);
+    assert!(
+        tinman::tom::build(&screen).find_named(&title).is_some(),
+        "the terminal object model reads no bordered region titled {title:?}; screen:\n{}",
+        screen.contents()
+    );
+}
+
+#[then(expr = "no bordered region titled {string} is drawn")]
+async fn no_bordered_region_is_drawn(world: &mut TinmanWorld, title: String) {
+    // Read through the same virtual screen the positive assertion uses: the
+    // title sits on the top border row and the body rows below, so no run of
+    // the region's text appears contiguously in the bytes and a search of the
+    // raw output would report the box absent whether or not it was drawn.
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    let screen = support::terminal_screen(raw);
+    assert!(
+        tinman::tom::build(&screen).find_named(&title).is_none(),
+        "the terminal object model reads a bordered region titled {title:?}; screen:\n{}",
+        screen.contents()
+    );
+}
+
+/// Assert the terminal carries a prompt line naming `key` as the key that
+/// performs `action`. One line must carry both, so the prompt loses the
+/// assertion the moment it stops pairing the key with what it does.
+fn assert_prompt_names_key(output: &str, key: &str, action: &str) {
+    let named = output
+        .lines()
+        .any(|line| line.contains(key) && line.contains(action));
+    assert!(
+        named,
+        "no line of the terminal names {key:?} as the key that {action}s; output:\n{output}"
+    );
+}
+
+#[then(expr = "the assistant prompt names {string} as the key that sends")]
+async fn the_assistant_prompt_names_the_sending_key(world: &mut TinmanWorld, key: String) {
+    let output = world.run_stdout.as_ref().expect("the help output was read");
+    assert_prompt_names_key(output, &key, "send");
+}
+
+#[then(expr = "the assistant prompt names {string} as the key that leaves")]
+async fn the_assistant_prompt_names_the_leaving_key(world: &mut TinmanWorld, key: String) {
+    let output = world.run_stdout.as_ref().expect("the help output was read");
+    assert_prompt_names_key(output, &key, "leave");
+}
+
+/// Everything a region shows: its own name and text, and those of every region
+/// nested inside it.
+fn region_contents(region: &tinman::tom::Region) -> String {
+    let mut shown = String::new();
+    if let Some(name) = region.name.as_deref() {
+        shown.push_str(name);
+        shown.push('\n');
+    }
+    if let Some(text) = region.text.as_deref() {
+        shown.push_str(text);
+        shown.push('\n');
+    }
+    for child in &region.children {
+        shown.push_str(&region_contents(child));
+    }
+    shown
+}
+
+#[then(expr = "the region titled {string} shows {string}")]
+async fn the_region_titled_shows(world: &mut TinmanWorld, title: String, expected: String) {
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    // The typed line reaches the box only when the program redraws it, so the
+    // wait ends on the box carrying the text rather than on a clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let screen = support::terminal_screen(&session.raw_output());
+        if let Some(region) = tinman::tom::build(&screen).find_named(&title)
+            && region_contents(region).contains(&expected)
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the region titled {title:?} never showed {expected:?}; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[when(expr = "the operator presses {string} at the assistant prompt")]
+async fn the_operator_presses_at_the_assistant_prompt(world: &mut TinmanWorld, key: String) {
+    let status = {
+        let session = world
+            .terminal_session
+            .as_mut()
+            .expect("an interactive terminal session");
+        session.press(&key);
+        session.wait(std::time::Duration::from_secs(20))
+    };
+    world.run_status = Some(status);
+}
+
 /// The line of the run's output that the help asset reserves for the tagline.
 fn tagline_line(world: &TinmanWorld) -> String {
     let asset = std::fs::read_to_string("assets/help/tinman.txt")
@@ -1709,26 +1872,6 @@ async fn the_tagline_line_is(world: &mut TinmanWorld, expected: String) {
 #[then(expr = "the tagline line is the body of the asset at {string}")]
 async fn the_tagline_line_is_the_asset_body(world: &mut TinmanWorld, path: String) {
     assert_eq!(tagline_line(world), asset_body(&path), "tagline line");
-}
-
-#[then(expr = "the help output omits the body of the asset at {string}")]
-async fn the_help_output_omits_asset_body(world: &mut TinmanWorld, path: String) {
-    let body = asset_body(&path);
-    let output = world.run_stdout.as_ref().expect("the help output was read");
-    assert!(
-        !output.contains(&body),
-        "the help output carries {body:?}; output:\n{output}"
-    );
-}
-
-#[then(expr = "the help output ends with the body of the asset at {string}")]
-async fn the_help_output_ends_with_asset_body(world: &mut TinmanWorld, path: String) {
-    let body = asset_body(&path);
-    let output = world.run_stdout.as_ref().expect("the help output was read");
-    assert!(
-        output.trim_end().ends_with(&body),
-        "the help output does not end with {body:?}; output:\n{output}"
-    );
 }
 
 // ---------------------------------------------------------------------------

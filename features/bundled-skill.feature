@@ -27,6 +27,13 @@ Feature: bundled skill
     Given the bundled skill at "assets/skill/SKILL.md"
     When the acronym context is built
     Then the context begins with the body of the asset at "assets/help/acronym-prompt.txt"
+
+  Rule: the skill tells the model what Tinman is; it does not tell it how to answer. An operator at a terminal wants one line and a command to run, and a model given only reference material answers at the length of the reference material. How to answer is therefore its own asset, carried ahead of the skill in the same way the acronym context carries its own instruction.
+
+  Scenario: the assistant context instructs the model how to answer before naming the skill
+    Given the bundled skill at "assets/skill/SKILL.md"
+    When the assistant context is built
+    Then the context begins with the body of the asset at "assets/help/assistant-instruction.txt"
     And the context carries the skill's "name" and "description" fields
 
   Scenario: the assistant answers from the whole bundled skill

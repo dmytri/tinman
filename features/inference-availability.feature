@@ -27,10 +27,12 @@ Feature: inference availability
     When the operator runs "tinman --help" in an interactive terminal
     Then the tagline line is the body of the asset at "assets/help/inference-unavailable.txt"
 
+  Rule: the absence of the box is asserted against the terminal object model, for the same reason its presence is. A bordered region's text never appears contiguously in the bytes, since border characters sit between the title and the body, so a search of the raw output for the prompt asset's body cannot find it whether the box was drawn or not. An absence assertion that cannot fail is worse than none: it reports the degraded path guarded while the guard is gone.
+
   Scenario: degraded help omits the assistant prompt
     Given inference is unavailable
     When the operator runs "tinman --help" in an interactive terminal
-    Then the help output omits the body of the asset at "assets/help/assistant-prompt.txt"
+    Then no bordered region titled "Ask Tinman" is drawn
 
   Scenario: degraded help exits successfully
     Given inference is unavailable

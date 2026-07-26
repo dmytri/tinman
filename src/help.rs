@@ -13,36 +13,24 @@ const HELP: &str = include_str!("../assets/help/tinman.txt");
 /// build time.
 const UNAVAILABLE: &str = include_str!("../assets/help/inference-unavailable.txt");
 
-/// The prompt inviting the operator to put a question to the assistant, inlined
-/// at build time.
-const ASSISTANT_PROMPT: &str = include_str!("../assets/help/assistant-prompt.txt");
-
 /// The help an operator on a terminal sees: the bundled help with whatever the
-/// model made of the skill on the tagline line, or the unavailable notice. The
-/// assistant prompt closes the help wherever inference answers.
+/// model made of the skill on the tagline line, or the unavailable notice when
+/// the model gave no `expansion`. The assistant draws its own box beneath this
+/// output, so the help itself carries no prompt.
 ///
 /// @planks("the operator runs {string} in an interactive terminal")
-pub fn interactive(settings: &crate::inference::Settings) -> String {
-    let expansion = crate::inference::expansion(settings);
-    let tagline = expansion
-        .as_deref()
-        .unwrap_or_else(|| UNAVAILABLE.trim())
-        .to_string();
-    let filled = HELP
-        .lines()
+pub fn interactive(expansion: Option<&str>) -> String {
+    let tagline = expansion.unwrap_or_else(|| UNAVAILABLE.trim());
+    HELP.lines()
         .map(|line| {
             if line.contains(TAGLINE_PLACEHOLDER) {
-                tagline.as_str()
+                tagline
             } else {
                 line
             }
         })
         .collect::<Vec<&str>>()
-        .join("\n");
-    match expansion {
-        Some(_) => format!("{}\n\n{}", filled.trim_end(), ASSISTANT_PROMPT.trim()),
-        None => filled,
-    }
+        .join("\n")
 }
 
 /// The conventional help with nothing filling the tagline: every asset line but

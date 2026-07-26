@@ -15,6 +15,10 @@ const BUNDLED: &str = include_str!("../assets/skill/SKILL.md");
 /// description, inlined at build time.
 const ACRONYM_PROMPT: &str = include_str!("../assets/help/acronym-prompt.txt");
 
+/// The instruction the assistant is given before the skill, inlined at build
+/// time.
+const ASSISTANT_INSTRUCTION: &str = include_str!("../assets/help/assistant-instruction.txt");
+
 /// The front matter of a skills.sh skill.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontMatter {
@@ -70,9 +74,17 @@ pub fn acronym_context() -> String {
     )
 }
 
-/// The context the assistant answers from: the whole skill body.
+/// The context the assistant answers from: the instruction the asset carries,
+/// then the skill's name and description, then the whole skill body.
 ///
 /// @planks("the assistant context is built")
 pub fn assistant_context() -> String {
-    bundled().body
+    let skill = bundled();
+    format!(
+        "{}\n\n{}\n{}\n{}",
+        ASSISTANT_INSTRUCTION.trim(),
+        skill.front_matter.name,
+        skill.front_matter.description,
+        skill.body
+    )
 }

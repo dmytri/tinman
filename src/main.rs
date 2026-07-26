@@ -27,8 +27,11 @@ fn main() {
     if cli.help || matches!(cli.command, Some(Command::Help)) {
         if std::io::stdout().is_terminal() {
             let settings = tinman::inference::Settings::from_process();
-            println!("{}", tinman::help::interactive(&settings));
-            tinman::assistant::converse(&settings);
+            let expansion = tinman::inference::expansion(&settings);
+            println!("{}", tinman::help::interactive(expansion.as_deref()));
+            if expansion.is_some() {
+                tinman::assistant::converse(&settings);
+            }
         } else {
             println!("{}", tinman::help::conventional());
         }

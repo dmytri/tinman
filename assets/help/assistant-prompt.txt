@@ -1,1 +1,2 @@
-Ask Tinman:
+Ask Tinman
+enter to send | esc to leave
