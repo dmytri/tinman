@@ -207,7 +207,31 @@ Fixed by hoisting the `Background:` above the first `Rule:`, which makes it feat
 - **Inference: any OpenAI-compatible provider, OpenRouter as the default. Settled 2026-07-25.** Three configuration values, environment or dotenv, environment winning: `TINMAN_API_KEY` for the credential, `TINMAN_BASE_URL` defaulting to `https://openrouter.ai/api/v1`, `TINMAN_MODEL` defaulting to `deepseek/deepseek-v4-flash`. The credential is vendor-neutral by name so the default choice is never a lock-in. `features/inference-provider.feature` pins both defaults and both overrides plus bearer-token construction. `ureq` for the call, blocking, keeps tokio a dev-dependency. `dotenvy` for `.env`, which is git-ignored.
 - **Tier placement.** `@sandbox` marks scenarios whose assertion is isolation itself, matching voyage 1's line; ordinary PTY launches stay default tier. `@inference` is new: real paid provider calls, never on the inner loop. If QM finds a fixture-launching default-tier scenario needs real bwrap, retag it rather than weaken the tier policy.
 
-## Deck state at hand-off, 2026-07-25
+## Deck state at hand-off, 2026-07-26. Read this first.
+
+**Clean tree, three commits ahead of `origin/main`, nothing pending but the operator's outbound decision.**
+
+`dc88983` stale-green repair on driver-session activation; `44266d6` driver session verbs, sandbox grants, recorded expectations; `190a7ee` terminal object model, locators, inference, record and replay. Base for any next voyage is `dc88983`.
+
+All three tiers green at custody, rerun fresh by Boatswain rather than inherited: `@logic` 123 of 123 in 24.3s, `@sandbox` 31 of 31 in 26.4s, both inside the 120s budget. 336 planks, 174 distinct, zero stale or malformed, zero provisional. Conformance, `fmt` and `clippy` clean. No perturbation stands. Watchbill struck.
+
+**Awaiting the operator, and only these:**
+
+1. **Outbound.** `cargo publish` then `cargo search tinman`, per `RIGGING.md` `## Outbound`. Not run and not to be run without their word.
+2. **The `@main` pinning decision, which rides with outbound.** Eleven scantling `$id`s point at `cdn.jsdelivr.net/gh/dmytri/tinman@main`, and both files under `assets/examples/` carry a `$schema` header pointing there. No git tags exist, so a plan authored today validates against whatever `main` later becomes. Tagging a release and repinning to a tag closes it, and it is owed before anyone outside this repo writes a plan.
+3. **The `@inference` sweep, optional and it costs money.** Boatswain labelled one claim unverified: it judged by reading that the rebuilt fixture's opening frame is byte-identical at `sel=0`, so the two `@inference` scenarios in `tom-inference.feature` are unaffected. The check that would answer it is a `broad-inference` sweep. No watch named it, so billing one is the operator's call rather than Captain's to spend on.
+
+**Carried to harbour, none blocking:**
+
+- Five orphaned step definitions in `tests/cucumber.rs`, unchanged since `44266d6`. QM's scope.
+- Three planks in `src/inference.rs` naming patterns among those five orphans. The string join stays green because the definitions still exist, so those seams trace to a contract no scenario asserts. This is behaviour-staleness, which no command on this stack can reach.
+- **The strongest harbour item: derive `step-usage`.** Three roles in a row discharged the plank join with an ad-hoc script. That is not repeatable custody, and it is the one check that would also catch the orphan drift above. A checker extracting the `#[given]`, `#[when]` and `#[then]` pattern literals closes both.
+- `focused` cannot compose the tag exclusions the Rigging read contract asks of every verification command; cucumber-rs answers `error: the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`. The value is correct as written and a role obeying the contract literally gets a hard error. Wants a note in `RIGGING.md`, which is Shipwright's file.
+- `cwd` documented in `prepared-process.schema.json` and absent from `PreparedProcess`.
+- Two unplanked seams in `src/skill.rs`.
+- Unexplained nondeterminism seen once in `activation fails when the selection cannot reach the item`, across two sweeps on an unchanged tree. It did not recur after the background fix. Re-observe; if harness, QM engineers it out.
+
+## Superseded: deck state at hand-off, 2026-07-25
 
 Harbour is closed. Both harbour blockers cleared, condemnation processed, zero `@captain` and zero `@shipwright` in the specs. Voyage 2 is mid-flight and the watchbill is live, so the next move is not another harbour.
 
