@@ -209,17 +209,15 @@ Fixed by hoisting the `Background:` above the first `Rule:`, which makes it feat
 
 ## Deck state at hand-off, 2026-07-26. Read this first.
 
-**Clean tree, three commits ahead of `origin/main`, nothing pending but the operator's outbound decision.**
+**Voyage 2 shipped as 0.1.2. See the release section below for what the publish taught.**
 
-`dc88983` stale-green repair on driver-session activation; `44266d6` driver session verbs, sandbox grants, recorded expectations; `190a7ee` terminal object model, locators, inference, record and replay. Base for any next voyage is `dc88983`.
+`dc88983` stale-green repair on driver-session activation; `44266d6` driver session verbs, sandbox grants, recorded expectations; `190a7ee` terminal object model, locators, inference, record and replay.
 
 All three tiers green at custody, rerun fresh by Boatswain rather than inherited: `@logic` 123 of 123 in 24.3s, `@sandbox` 31 of 31 in 26.4s, both inside the 120s budget. 336 planks, 174 distinct, zero stale or malformed, zero provisional. Conformance, `fmt` and `clippy` clean. No perturbation stands. Watchbill struck.
 
-**Awaiting the operator, and only these:**
+**Still open, and only this:**
 
-1. **Outbound.** `cargo publish` then `cargo search tinman`, per `RIGGING.md` `## Outbound`. Not run and not to be run without their word.
-2. **The `@main` pinning decision, which rides with outbound.** Eleven scantling `$id`s point at `cdn.jsdelivr.net/gh/dmytri/tinman@main`, and both files under `assets/examples/` carry a `$schema` header pointing there. No git tags exist, so a plan authored today validates against whatever `main` later becomes. Tagging a release and repinning to a tag closes it, and it is owed before anyone outside this repo writes a plan.
-3. **The `@inference` sweep, optional and it costs money.** Boatswain labelled one claim unverified: it judged by reading that the rebuilt fixture's opening frame is byte-identical at `sel=0`, so the two `@inference` scenarios in `tom-inference.feature` are unaffected. The check that would answer it is a `broad-inference` sweep. No watch named it, so billing one is the operator's call rather than Captain's to spend on.
+**The `@inference` sweep, optional and it costs money.** Boatswain labelled one claim unverified: it judged by reading that the rebuilt fixture's opening frame is byte-identical at `sel=0`, so the two `@inference` scenarios in `tom-inference.feature` are unaffected. The check that would answer it is a `broad-inference` sweep. No watch named it, so billing one is the operator's call rather than Captain's to spend on.
 
 **Carried to harbour, none blocking:**
 
@@ -230,76 +228,20 @@ All three tiers green at custody, rerun fresh by Boatswain rather than inherited
 - `cwd` documented in `prepared-process.schema.json` and absent from `PreparedProcess`.
 - Two unplanked seams in `src/skill.rs`.
 - Unexplained nondeterminism seen once in `activation fails when the selection cannot reach the item`, across two sweeps on an unchanged tree. It did not recur after the background fix. Re-observe; if harness, QM engineers it out.
+- No derived check joins a scantling enum to the production enum it constrains. That is how the 17-role `Role` drift against the 11-role `tom.schema.json` went unseen. A plausible `@conformance` candidate.
+- Neither `scantlings/**` nor `assets/examples/**` is reached by any gate: every lint slot in `RIGGING.md` reads Rust only, so a malformed schema or example plan reddens nothing. Boatswain named it at the 0.1.2 custody. Choosing the checker is Captain's, installing it Shipwright's.
 
-## Superseded: deck state at hand-off, 2026-07-25
+## The release taught two things, and the first was my error. 2026-07-26.
 
-Harbour is closed. Both harbour blockers cleared, condemnation processed, zero `@captain` and zero `@shipwright` in the specs. Voyage 2 is mid-flight and the watchbill is live, so the next move is not another harbour.
+**0.1.1 was already on crates.io and I did not check before recommending the tag.** `cargo publish` refused with `crate tinman@0.1.1 already exists on crates.io index`. The registry carries 0.1.0 at 2026-07-25 11:36Z and 0.1.1 at 12:25Z, both by `dmytri`, neither yanked. 0.1.1 was published from `1daee60`, which predates every commit of this voyage. So the version in `Cargo.toml` had been spent for a day and the whole of voyage 2 was unpublished.
 
-`HEAD` is `88da55d`, and `origin/main` is the same commit, so nothing is pending outbound. Uncommitted on top of it, from at least three roles and never taken into custody:
+The damage was a tag pointing at a lie: I had already pushed `v0.1.1` at `5b5289e`, which carries voyage 2, while crates.io 0.1.1 carries none of it. The schema URIs pinned into that tag, which is exactly the drift the pinning existed to close, re-created under a new name. Operator ruled: force-move `v0.1.1` to `1daee60`, its true source. Done and pushed, so both names now tell the truth.
 
-- Captain: 12 feature files, 11 scantlings, both example plans, new `assets/help/acronym-prompt.txt`, `watchbill.json`
-- Shipwright: `RIGGING.md` weather append with explicit `-c` worker counts and `budget: 120s`, `AGENTS.md` Run data section, `alacritty_terminal` installed in `Cargo.toml` and `Cargo.lock`
-- QM and Crew: `src/screen.rs` +73, `src/inference.rs` +42, `tests/cucumber.rs` +144
+**The rule worth carrying: read the registry before naming a version.** A published version is immutable, so the check is cheap and the mistake is not. `cargo search tinman` answers it in one command, and it is the same command `RIGGING.md` already names under `## Outbound` as the verify step. It works as a pre-flight read too.
 
-**Nothing here is verified.** The deck-state hash is `75c0b403`; the newest run-record entry carries `ff265228`, so no inherited green stands and every entry in the record is void. All four weather lines carry `result: 101`. The prior notes' base `3c72894` is not a rev in this repository; do not chase it.
+**Captain bumped `Cargo.toml` to 0.1.2 directly, and that is a recorded departure.** No role owns a release version bump: the write-scope list gives Shipwright the manifest for dependency install and upgrade, which this is not, and Shipwright is a harbour role while this was mid-outbound. Under Captain's authority at sea this is the minimal action that restores progress, so it was taken and is recorded here. Worth raising as a doctrine gap: the release version is an outbound decision with no write scope naming it.
 
-**Dispatch order: QM first. Corrected 2026-07-25, replacing an earlier Boatswain-first order in these notes.** Three findings against custody now, each from a command rather than a recollection:
-
-1. **Nothing is verified.** Custody commits on verification evidence, and there is none to inherit: the hash mismatch above voids every run-record entry, and every weather line is red. Boatswain would have to run verification itself and would find red.
-2. **A perturbation stands by design.** `src/screen.rs` panics inside `parse`, the seam both `from_text` and `from_pty_output` route through. Boatswain names a standing `PERTURBATION` in the diff as a foul, correctly: committing it freezes a deliberately red seam into history. Watch2 exists to drive its removal, so the statement clears as part of the work, never before it.
-3. **Nothing here is dirt.** Every changed path is owned by a role in this voyage. Under the Working tree policy that is work in flight: QM reads the artifacts as they stand, and Boatswain later stages them with the production change they order. A pre-clean has nothing to clean.
-
-Custody comes when the watches are spent and green, at base `88da55d`, per the flat QM-to-Boatswain hand-off.
-
-**The watchbill was checked before dispatch, by command.** All 121 scenario references resolved to a real scenario in the specs. Of the 15 scenarios added since `88da55d`, 14 were billed by name and the fifteenth, `a run step executes its command under the sandbox`, is `@sandbox` and rode the tier tag. No spec edit was unbilled.
-
-## QM's first pass, 2026-07-25. Watchbill renumbered after it.
-
-QM spent the old watches 1, 2, 3, 4, 6 and 8 green, and left 5 and 7 partly spent. Crew landed the acronym context, the version flag, the assistant loop, the role vocabulary in `src/tom.rs` and `src/inference.rs`, and the perturbation removal. QM fixed two faults in its own scope: an unbounded `read_to_end` that hung every run-to-completion terminal scenario, replaced with a budgeted `TerminalSession`, and an engine fixture still building replies with the superseded root role `"screen"`.
-
-QM stopped rather than half-build the shared fixture terminal program, which gates three remaining watches. That was the right call.
-
-**The emulator migration landed on QM's second pass.** Watch1 went 11/11 green and `src/screen.rs` now imports `alacritty_terminal`, confirmed by grep. The four sequence scenarios drove it with no perturbation, which settles the method: where durable context changes and no scenario reddens, write the scenario that reddens. QM's own note records that its HPA step emits the ECMA-48 backtick rather than CHA's `G`, so the discriminator held.
-
-QM also converted the driver step definitions from a superseded `{"id","op","session"}` framing to JSON-RPC 2.0, matching the spec and the scantling. Dispatching on the old evidence would have sent Crew to build the wrong wire protocol.
-
-**Second-pass results, all fresh:** watch1 spent 11/11; inference 16/17; TOM 14/20; driver 0/21; commands 3/24; `@logic` sweep 122 scenarios, 89 passed and 33 failed in 1138ms, inside the 120s budget; `@sandbox` sweep 25 scenarios, 2 passed and 23 failed. `@inference` deliberately not run: the tier ordering bars the costliest tier while cheaper tiers carry blocked reds.
-
-**The watchbill was rewritten twice. Only the current shape is live; cite no earlier numbering.** It is now ordered by build dependency rather than by feature file, 10 watches and 70 references, all verified to resolve: 1 TOM core and locators, 2 inference remainder, 3 inspect and test, 4 record and replay, 5 tom-inference, 6 flow and sandbox configuration, 7 semantic capture, 8 `@logic`, 9 `@sandbox`, 10 `@inference`.
-
-**Two structural facts drove that shape.** `driver-session.feature` and `driver-protocol.feature` carry feature-level `@sandbox` tags, so all 16 of their scenarios are sandbox tier; directing them by name and sweeping the tier would double-list them, so they ride watch9 alone. And TOM leads because locator binding is the base that driver session, semantic capture and replay all resolve against.
-
-**QM's real blocker, and the decision it asked for.** Fifty red targets have no production seam. On a compiled stack a step definition naming a seam that does not exist fails to compile and takes the whole cucumber binary down, so steps cannot be written subsystem-wide ahead of the seams. The answer is the dependency ordering above: one subsystem at a time, QM writing steps and Crew building seams within a watch before the next opens. Scope is unchanged; only the order is now stated.
-
-**Two rigging faults routed to Shipwright, 2026-07-25. Refit complete.** `serde_json` now sits under `[dependencies]` and `vt100` is gone from both `Cargo.toml` and `Cargo.lock`, confirmed by grep. Shipwright proved it properly: `cargo check --all-targets` green before the change as a baseline against the dirty deck, `--locked` green after so manifest and lock agree with no re-resolution, and exactly one version line left the lockfile. The `locked` policy held. All thirteen manifest entries now have a `## Dependencies` line.
-
-Moving `serde_json` makes it a runtime dependency of the published crate; the spec requires it, so it is not an open question, but note it at the next outbound.
-
-**Captain's ruling on Shipwright's judgment call, asked for and given.** Shipwright did not apply the harbour-entry guard against the dirty deck, on the reasoning that the guard governs direct entry into a harbour inventory while this was a Captain-dispatched scoped rigging refit. That reasoning is correct and is now settled doctrine here. The Blocker policy routes a rigging fault to Shipwright and the Rigging read contract names the one-round-trip route for a spec needing an uninstalled dependency; both exist precisely for mid-voyage, so blocking them on a dirty deck would deadlock the route they were written to serve. A scoped refit is not harbour entry.
-
-`idea.md:43` still names vt100 as a candidate parser, stale after the migration. It is an intent-source reference doc rather than a sanctioned artifact and sits in the crate's `exclude` list, so it binds nothing; left as found.
-
-**Two undischargeable checks, unchanged and already in `AGENTS.md`:** `discover` and `step-usage` are `none` on this stack, so plank drift and orphaned step definitions are caught by reading rather than by running. `plank-inventory` runs; QM reports 552 planks with form intact. The `focused` command cannot compose tag exclusions, cucumber-rs refusing `--name` with `--tags`, so a `@captain` or `@shipwright` scenario named directly in a watchbill would still execute. None of the three blocks the voyage.
-
-**Shipwright owed three. Two are discharged, one stands:**
-
-1. `alacritty_terminal` is installed. The migration is not; see the emulator section above for the perturbation that now drives it.
-2. **Still open.** `serde_json` sits under `[dev-dependencies]` and appears nowhere in `src/`, while `features/driver-protocol.feature` needs it in the library graph. Latent rather than live, because the driver is unimplemented; it fires as a Crew blocker the moment watch9 opens, and routes back to Shipwright. `Cargo.lock` already pins 1.0.151, so nothing resolves from the network.
-3. The `broad` commands now append the weather line themselves. Discharged.
-
-**QM owes three orphaned step definitions**, confirmed by grepping the specs for each pattern: `the request carries the authorization header {string}` and `the request names the model {string}`, orphaned by the inference-provider rewrite, and `the driver replies to request {int} with the error {string}`, orphaned when the `-32601` error-code step replaced its only binding. `the request addresses {string}` is no longer orphaned; `inference-provider.feature` binds it twice. Also `features/inference-provider.feature:a built request satisfies the provider contract`, whose schema step panics because the built request never reaches the world slot the generic conformance step reads.
-
-**Crew owes the role taxonomy, created by this voyage's spec edit.** `src/tom.rs` still enumerates 17 roles in `Role`, `const ROLES: [Role; 17]` and `as_str()`, including `Screen`, `Statusbar`, `MessagePane`, `Message`, `Table`, `Row`, `Column`, `Dialog`, `Tree` and `Treeitem`, none admitted by the in-flight 11-role `tom.schema.json`, and missing `application`, `status`, `log` and `article`. It reddens as a target; no Captain action.
-
-**Captain fixed the `as` gap, 2026-07-25.** The JSON-RPC rewrite of `driver-protocol.schema.json` re-added `scope` and dropped both `items` and `as`, under `additionalProperties: false`. `role` covers the old `items`; nothing covered `as`, and all five `semantic-capture` scenarios name one. Restored with a description; all eleven scantlings parse. No check joins a scantling enum to a production enum, which is why the role drift above went unseen too; a plausible `@conformance` candidate for the next harbour.
-
-**Run-step isolation: settled 2026-07-25, and now a failing target.** `src/flow.rs:31` runs `Command::new("sh").arg("-c")` on the host with no Bubblewrap wrapper, confirmed by reading, and `grep` finds no caller of `flow::` anywhere in `src/`, so the seam is unwired as well as unsandboxed. User confirmed a run step is sandboxed exactly like a tui step, same sandbox section, same secure defaults. `features/flow-orchestration.feature:a run step executes its command under the sandbox` pins it, `@sandbox`, mirroring the tui scenario beside it.
-
-One scenario, not three. The parse-time default is already pinned by `features/plan-shorthand.feature:a plan with no sandbox section is sandboxed by default`, and secret absence at the launch seam by `features/sandboxed-launch.feature`; restating either here would be one rule per variable. The gap was execution only. No watchbill edit: the scenario is `@sandbox`, so watch11 sweeps it with the tier.
-
-**Watchbill-shape conformance is deliberately absent**, one of the two checks Shipwright's derivation names as required. Condemning it means a malformed watchbill blocks QM at dispatch rather than reddening as a target. Recorded in `AGENTS.md` so a later harbour does not re-derive a settled decision.
-
-**Schema `$id`s are pinned to `@main` and serve a stale shape.** All eleven point at `https://cdn.jsdelivr.net/gh/dmytri/tinman@main/...`, and both files under `assets/examples/` carry a `# yaml-language-server: $schema=` header pointing there. `HEAD` now equals `origin/main`, so those URLs resolve, but the eleven scantling edits in flight are uncommitted, so `@main` serves the pre-edit shape until the next push. Verification is unaffected: it loads scantlings by path and every `$ref` is local, so no cross-scantling reference crosses the network. No git tags exist, so a plan written now validates against whatever `main` becomes. Tagging a release and repinning to `@v0.1.1` is an outbound decision, owed before anyone outside this repo authors a plan.
+`cargo check --all-targets --offline` refreshed the lock; the diff is one line, our own version, so the `locked` policy held and nothing re-resolved.
 
 ## Rigging quirks learned
 

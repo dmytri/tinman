@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/bwrap-isolation-policy.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/bwrap-isolation-policy.json",
   "title": "Bubblewrap isolation policy",
   "description": "Structural invariants the generated Bubblewrap argument vector MUST satisfy. Discharged by the bwrap-argv checker in verification support, which reads these rules and the generated argv. Attested, not re-enacted, by the @contract scenario in features/bwrap-argument-generation.feature.",
   "requiredFlags": [

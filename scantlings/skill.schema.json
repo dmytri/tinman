@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/skill.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/skill.schema.json",
   "title": "skills.sh skill front matter",
   "description": "The front matter of the bundled skills.sh-compatible skill. A compatible coding agent installs and reads the skill unmodified; Tinman loads the same file to answer help questions, and the acronym generator reads its name and description. Referenced by features/bundled-skill.feature.",
   "type": "object",

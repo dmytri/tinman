@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/pty-sandbox-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/pty-sandbox-boundary.json",
   "title": "PTY / sandbox dependency boundary",
   "description": "isolation.md invariant: the PTY layer must not know about Bubblewrap. The PTY runner source MUST NOT reference the Bubblewrap backend or bwrap mechanics; it accepts only a prepared process. Discharged by the pty-sandbox-boundary checker in verification support, which scans the PTY runner source. Attested by the @contract scenario in features/pty-sandbox-boundary.feature.",
   "module": "src/pty.rs",

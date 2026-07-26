@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/inference-request.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/inference-request.schema.json",
   "title": "Outbound inference request",
   "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. Referenced by features/inference-provider.feature.",
   "type": "object",

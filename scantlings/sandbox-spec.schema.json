@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/sandbox-spec.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/sandbox-spec.schema.json",
   "title": "Tinman backend-neutral sandbox specification",
   "description": "The portable, backend-neutral shape every sandbox backend reads. Referenced by features/sandbox-specification.feature. No Bubblewrap mechanics appear here.",
   "type": "object",

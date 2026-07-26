@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/harness-plan.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/harness-plan.schema.json",
   "title": "Tinman harness plan",
   "description": "The canonical YAML representation of a recorded or authored flow. A plan is either the full form, carrying a flow of run and tui entries, or the shorthand form, carrying one command and its steps. Both normalize to the same parsed plan. Referenced by features/harness-plan.feature and features/plan-shorthand.feature.",
   "type": "object",
