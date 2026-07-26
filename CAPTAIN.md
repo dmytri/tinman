@@ -25,6 +25,29 @@ Positioning note, unchanged: a crate named for one framework under-indexes for g
 
 Snapshot testing was considered and rejected in the same pass. `insta` asserts "same as last time", which is drift detection rather than specification: a snapshot passes whatever it recorded, including a regression recorded before anyone looked. That contradicts the falsifiable-scenario line the project runs on. The existing `TestBackend` use at `tests/cucumber/support.rs` is the right depth.
 
+## Accessibility is the TOM's second consumer. Noted 2026-07-25.
+
+Not scope, and not a promise. A standing reason to hold the model honest, plus a positioning asset worth stating when the moment comes.
+
+Terminal accessibility is an empty category and the frameworks say so. VTE exposes a flat `AtkText` with no children; Windows Terminal exposes a UIA `TextPattern`. Both model a terminal as text rather than as a control tree, so an ncurses menu reaches a screen reader indistinguishable from a paragraph. Ratatui's a11y issue is open and unassigned, its maintainer stating that no terminal UI framework in any language has found a reasonable path. Textual's and Bubble Tea's equivalents have been open since 2023. Every system that ever succeeded needed the application to cooperate: emacspeak speaks Emacs structures, FrankenTUI requires the app be written in FrankenTUI.
+
+A black-box model deriving ARIA roles and accessible names from an attributed cell grid is the missing piece, and after the 2026-07-25 alignment the TOM already emits that shape. AccessKit is the cross-platform accessibility-tree abstraction with macOS, Unix and Windows adapters and a `Terminal` role, and no TUI has ever wired to it. Ghostty's accessibility work names AI screen readers as its consumer, so the field is drifting this way already.
+
+Two consequences for how the model is built, both free:
+
+1. **Accessibility is a forcing function for honesty.** A wrong role still passes a test, because the locator binds and the run goes green. A person listening notices at once. Holding the model to what a human would need spoken aloud improves it for testing rather than taxing it.
+2. **Never route the TOM through a lossy intermediate.** BRLTTY's AT-SPI driver rebuilds a grid from an accessibility hierarchy and fills only text, never colour, silently disabling every attribute-based command. Attribute-derived structure needs a genuine attributed grid, and a terminal is the one place that hands you one. That is the structural advantage over every GUI-derived approach.
+
+**AccessKit: map, do not adopt. Settled 2026-07-25 after checking the crate rather than the impression.**
+
+Three findings against taking its node shape into `scantlings/tom.schema.json`. `NodeId` is documented as a stable identity assigned by the provider, so it is a handle rather than a re-derivable key, and adopting it would import the one thing the locator design rejects. `TreeUpdate` is an atomic change to a tree, so the model is push-based and incremental, while Tinman derives a whole snapshot from a frame and knows nothing about deltas. And AccessKit is a crate at 0.24.1 on 0.x semver with no published JSON Schema, `schemars` being an optional feature rather than a released artifact, so a scantling based on it would transcribe one project's Rust enum rather than cite a specification.
+
+The payoff people reach for is platform bridges, and that payoff arrives at the bridge rather than at the model. Emitting AccessKit nodes needs an adapter walking the TOM, synthesizing node identity at that boundary where a handle is correct. It does not need the durable artifact to carry AccessKit's shape.
+
+Aligning to ARIA already bought the interoperability: AccessKit's roles are ARIA-derived, so the mapping is close to mechanical. Paying a second time in coupling would buy nothing.
+
+The general rule this settles, worth applying to the next candidate: **prefer specifications over implementations.** ARIA, JSON-RPC, JSON Schema and AccName outlive any library. A well-maintained crate is a sound dependency for code and a poor foundation for a durable artifact, because the artifact is meant to survive the code being replaced. `alacritty_terminal` can be swapped; a schema shape cannot.
+
 ## Emulator: migrate vt100 to alacritty_terminal. Decided 2026-07-25.
 
 User directive: do not carry technical debt this early; if `vt100` is debt, take something simple, current and well maintained. Differential probing against `alacritty_terminal`, `wezterm-term` and `avt` settled it on evidence rather than reputation.
@@ -42,15 +65,83 @@ Two obligations ride with this decision:
 1. **The migration's own regression risk is pinned first.** On the full-row highlight idiom, reverse video then text then erase-to-end-of-line, `vt100` and `wezterm-term` mark the whole row while `alacritty_terminal` marks only the written cells. Migrating blind would under-report exactly the selections we are fixing. `features/virtual-screen.feature:a row highlighted by erasing to end of line reads as reversed throughout` pins the behaviour a user sees, so it binds whichever emulator sits underneath.
 2. **Our own adapter is the worse defect and is emulator-independent.** `src/screen.rs` joins each row with `concat()` over blank cells held as empty strings, so column gaps collapse and a screen showing `a     b` reports `ab`. `parse()` also discards `is_wide()` and `is_wide_continuation()`, leaving a wide character's second column indistinguishable from a blank. Every full-screen program positions by address, so `contains()` and `contents()` currently misreport the screen, and every region boundary the TOM derives from them lands in the wrong column.
 
-Watch1 now carries four `virtual-screen` scenarios covering both obligations. Installation of `alacritty_terminal` and removal of `vt100` route to Shipwright per the Rigging read contract.
+**The install landed and the migration did not. Perturbation planted 2026-07-25.** Shipwright put `alacritty_terminal = "0.26.0"` in `[dependencies]`, and `src/screen.rs` still calls `vt100::Parser`. Both crates sit in the graph; only `vt100` is imported. Obligation 2, the adapter defect, was fixed on `vt100`, so the four scenarios written to drive the swap went green without it: they proved the column-gap and wide-cell fix, not the emulator change. Obligation 1 makes it worse, because `vt100` satisfies the erase-to-EOL row highlight natively while `alacritty_terminal` marks only written cells, so the migration reddens a currently green scenario rather than greening a red one.
+
+**The perturbation was struck and the migration stranded a third time. Confirmed 2026-07-25 by command, and the mechanism is now abandoned.** QM reported watch2 green 7/7 with the perturbation removed. `grep` finds no `PERTURBATION` token in `src/`, and `src/screen.rs:49` still reads `let mut parser = vt100::Parser::new(ROWS, COLS, 0)`. Both crates remain in `Cargo.toml`. Crew took the cheapest legal fix, which is deleting the statement, exactly as the watch3 ordering note predicted a merged watch would allow. Splitting the watches did not prevent it, because the seam's own scenarios never required the swap.
+
+**Root cause, and it was Captain's fault rather than Crew's.** No scenario in `virtual-screen.feature` fails on `vt100`. CUP, column gaps, wide cells, reversed video and erase-to-EOL all pass, the wide-cell case via the adapter workaround at `src/screen.rs:68`. The migration was never a failing target, so the perturbation was the only pressure on it, and a perturbation is discharged by deleting one line. A perturbation asks Crew to rebuild a seam whose behaviour is already satisfied; it cannot express "satisfied by the wrong dependency".
+
+**The replacement is ordinary failing verification.** Four scenarios added 2026-07-25 pinning sequences `vt100` does not implement: HVP, HPA, REP, and DECAWM autowrap. Watch1 carries them beside all six existing virtual-screen scenarios and `terminal-view.feature`, so the regression risk is pinned in the same watch as the change that creates it.
+
+**Both halves verified against crate source, 2026-07-25, not against the earlier probing summary.** The prior note's claim that `vt100` fails "HPA" was imprecise, and the imprecision was nearly fatal to the fix.
+
+`vt100` 0.16.2 `src/perform.rs` `csi_dispatch`: `'G'` maps to `cha` and `'d'` maps to `vpa`, so CHA and VPA are honoured. Absent from the match arms, falling through to `unhandled_csi`: `'f'` HVP, `'b'` REP, `'Z'` CBT, and backtick HPA. `decset` in `src/screen.rs` has no `[7]` arm, so DECAWM is unsupported and the emulator always wraps.
+
+`alacritty_terminal` 0.26.0 routes through `vte` 0.15 `src/ansi.rs`: `('H',[]) | ('f',[])` both reach `goto`, `('G',[]) | ('`',[])` both reach `goto_col`, `('b',[])` is REP, `('Z',[])` is `move_backward_tabs`, and `NamedPrivateMode::LineWrap` carries DECAWM in `term/mod.rs`.
+
+**So HPA had to be pinned by its true final byte.** CHA and HPA are one arm on `alacritty` and two different fates on `vt100`. A step reaching for `ESC[12G` would have gone green on both emulators and pinned nothing, which is the same false-green that let the perturbation discharge. A second `Rule:` in the feature carries that distinction so QM cannot resolve it the wrong way.
+
+CBT is also unimplemented on `vt100` and is deliberately not pinned: three discriminators plus HPA are sufficient, and a fourth adds no pressure the migration does not already carry.
+
+Expect the erase-to-EOL scenario to need adapter work rather than a straight port: `vt100` marks the whole row, `alacritty_terminal` marks only written cells. It pins what a user sees, so it binds whichever emulator sits underneath.
+
+Do not plant a fourth perturbation here. If Crew hand-implements the four sequences on `vt100` rather than switching, the scenarios go green and the user-visible behaviour is correct; the dependency choice is then a maintenance question for harbour, not a behaviour question, and `vt100` staying unmaintained is the argument to make there.
+
+**Both are recorded during the migration, deliberately.** The 2026-07-25 refit struck `alacritty_terminal` and recorded `vt100` in its place, reconciling the record toward the manifest. That inverts the Rigging read contract: Captain records the selection and installation follows it, so the record leads the manifest and a recorded-but-absent dependency is an install order, never a stale entry to strike. Restored, with `vt100` recorded alongside it because it is genuinely installed and stays until `src/screen.rs` migrates. Removal order: install `alacritty_terminal`, let watch1's virtual-screen scenarios drive `src/screen.rs` off `vt100::Parser`, then strike `vt100` once nothing imports it.
 
 ## Voyage 2 — everything remaining from idea.md, isolation.md and help.md
 
-User directive: take the whole remaining scope in one voyage, no backlog debt. 89 directed scenario targets across 8 watches, then the `@sandbox` and `@inference` tier sweeps as watch9 and watch10.
+User directive: take the whole remaining scope in one voyage, no backlog debt. See the QM section below for the live watchbill; the original 12-watch numbering is dead.
 
 Voyage 1 shipped the capture spine: sandbox launch, PTY, virtual screen, Ratatui view, key recording, interaction log. Those 11 feature files are untouched and stay out of the watchbill.
 
-Watch1 is now the three methodology-conformance scenarios. They gate the rest of the voyage: proving them first means every later watch runs under live plank-form, perturbation-quiescence and forbidden-doubles checks. QM owes each one a planted red at adoption, per the Verification policy.
+The three methodology-conformance scenarios are green and struck from the bill. They ride the `@logic` sweep now, so every later watch still runs under live plank-form, perturbation-quiescence and forbidden-doubles checks.
+
+**The lesson from the ordering that failed.** These scenarios were held below the emulator watch so that quiescence could not be discharged before the rebuild. That reasoning was sound and insufficient: Crew struck the perturbation from inside the emulator watch itself, because nothing in that watch required the swap. Watch ordering cannot substitute for a failing target. Where durable context changes and no scenario reddens, write the scenario that reddens; reach for a perturbation only where the behaviour genuinely cannot be pinned.
+
+## The deterministic model produces every addressable role. Ruled 2026-07-25.
+
+QM raised this as contradictory product intent. It is not: the durable artifacts already decided it, and only the implementation had not caught up. One spec did contradict them and is now fixed.
+
+**What QM found.** `src/tom.rs` `build()` constructs only `Application`, `List`, `Listitem`, `Region` and `Status`. `Menu`, `Menuitem`, `Button` and `Textbox` are reachable solely through `Role::from_name`, the hand-built and engine-reply path. Yet `inspect-command.feature` asserts a `menuitem` named `Settings` on the default tier, which excludes `@inference` and has no credential, and `driver-session.feature` activates the same item.
+
+**The ruling: the deterministic builder derives `menu`, `menuitem`, `button` and `textbox` from terminal idioms.** Three durable artifacts force it and none of them is in tension. `assets/examples/settings-flow.yaml` is the canonical plan and addresses `role: menuitem`, `label: Username` and `role: button`. `features/replay.feature:replay performs no inference` is a binding scenario. The `Rule:` at `tom-inference.feature:8` states replay rebuilds the model with no model invocation, and the `Rule:` at line 6 states a hand-authored plan needs no model at all. A locator a plan carries must therefore bind against the deterministic model alone. Were these roles inference-only, the canonical plan could never replay, which removes the product's reason to exist.
+
+The capture-time round trip already assumed this and is the strongest evidence: every `tom-inference` scenario validates a proposed locator against the deterministic model and falls back when it will not bind. A locator that reaches a plan is deterministically bindable by construction.
+
+**Three scenarios added to `terminal-object-model.feature`**, pinning the menu bar, the bracketed button and the labelled input field, with a `Rule:` carrying why. They ride watch1 beside all seven existing TOM scenarios and the four locator scenarios, because they change `build()` and the existing reads are the regression risk that change creates.
+
+**One scenario was genuinely wrong and is replaced.** `inference names a region the deterministic pass left unnamed` had an engine label a top line of words a `menu`. Once the deterministic pass reads a menu bar, that scenario passes whatever the engine returns: a false green asserting nothing. It is now `inference refines a role the deterministic pass cannot distinguish`, where an engine labels a bordered pane of lines a `log`. Geometry cannot separate `log` from `list`, so only inference can supply it, and `an unavailable engine leaves the deterministic model standing` is already its null control, asserting the same shape reads as `list` with no engine.
+
+**This also unblocks QM's second blocker.** The fixture terminal program's content is now fully determined by durable artifacts: a menu bar carrying `Settings`, a `Username` input, a `Save` button, and a scrolling pane. QM owns building it; nothing further is owed from Captain.
+
+## Five rulings on QM's third-pass blockers. 2026-07-25.
+
+Watches for the terminal object model, inference and the inspect and test commands all went green after the role ruling above, 14/14, 17/17 and 6/6. These five settle what QM raised next.
+
+**1. Record writes one file and it is a plan.** `record-command.feature` asserted a written interaction log of `command` and `events` and then replayed the same `tinman.yaml` as a plan, which cannot both hold. `assets/help/tinman.txt` already settled it: record "capture[s] a live session into an editable plan". The interaction log keeps its own artifact and `features/interaction-log.feature` owns it, so the scantling stays referenced. The record scenarios now say plan throughout.
+
+**2. The output path is `--output`, defaulting to `tinman.yaml`.** No durable artifact named a CLI form and QM correctly refused to invent one. Added a scenario pinning the option, and the overwrite-refusal scenario now uses it too. The top-level help advertises commands rather than per-command options, so `assets/help/tinman.txt` needs no edit and `every option the help text advertises is accepted by the parser` stays honest.
+
+**3. Terminal size is a property of the run, never of the plan.** The caller supplies it, defaulting to the operator's terminal, and it reaches the PTY and the virtual screen together. A plan recording its capture size would invite replay to restore that size, which is the one thing the width scenarios exist to prevent. `src/screen.rs` pinning 24x80 is now an ordinary Crew target, and `expect.within`, blocker 4, follows it.
+
+**4. Resolution and confirmation are two operations.** QM found one seam being asked to answer `Ambiguous(2)` for `tom-locators` and `One` for `tom-inference`. Resolution answers what a locator matches as the model stands and reports ambiguity as ambiguity, which is what a replaying test needs. Confirmation runs at capture time only, narrowing by scope or ordinal until one region binds and recording which of `exact`, `scoped` or `ordinal` it needed. Collapsing them makes an ambiguous locator look bindable to the test that must later resolve it alone. That is now a `Rule:` in `tom-inference.feature`, and blockers 5 and 6 become Crew targets.
+
+**5. Inference proposes names, never roles. This corrects my own error.** Ruling the deterministic model produces every addressable role has a consequence I missed one pass earlier: no role can be inference-only, because a plan may address any of them. My replacement scenario had an engine supply `log`, and `semantic-capture.feature` then needed `log` and `article` deterministically, with its own `Rule:` stating inference never runs at capture time. Both cannot hold.
+
+The original scenario title was right all along and only its body was wrong: it said inference *names* a region and then asserted a *role*. It now has an engine name an unbordered pane from its heading line, which is genuinely beyond the deterministic pass, since names come from border titles and an unbordered pane carries none. The name must still be text the screen shows, so `a name the screen does not carry is rejected` keeps its force. A `log` of `article` children is now derived deterministically from blank-line separated entries, pinned in `terminal-object-model.feature`, which unblocks all five semantic-capture targets.
+
+The general lesson, worth carrying: a ruling that widens what the deterministic layer owes narrows what any other layer may claim, and the scenarios asserting the other layer's contribution must be re-read the same pass. I did not, and QM found it one watch later.
+
+## Two more rulings, and interim custody. 2026-07-25.
+
+Watches for the terminal object model and locators, tom-inference, and record and replay all went green: 36 targets, 39 fresh focused runs. `@logic` reached 122 of 127 in 24s against the 120s budget; `@sandbox` rose from 2 to 8 of 25. Plank join clean at 150 planks, `ast-grep` conformance clean.
+
+**6. The semantic-capture window could not hold what it asserted, and that was my arithmetic.** Its Background held 12 messages in a 5 line window while `capturing the visible scope reads only the current window` asserted 5 visible `article` items. Ruling 5 had just defined an article as a blank-line separated entry, so 5 articles need 9 lines: 5 entries and 4 separators. The window is now 9 lines and the two agree. This is the second time a role definition landed without re-reading every scenario that counts on it; the lesson under ruling 5 stands and I paid it twice.
+
+**7. A launch that cannot execute its program is a failed launch.** Crew observed `/bin/sh: 1: /tmp/tinman-probe/p: not found`, because the bwrap vector binds `/bin`, `/lib` and `/lib64` only, while `launch` answered `ok:true` as soon as `/bin/sh` started. That is a vacuous pass: every later step then asserts against a blank screen and passes while doing it, which is the same false-green shape that let the perturbation discharge and that ruling 5 had to undo. A `Rule:` in `driver-protocol.feature` now states that a launch binds the system directories plus whatever the session's sandbox spec names and nothing more, that `home: fixture` in `scantlings/sandbox-spec.schema.json` is the provision for reaching a fixture, and that an unreachable program fails rather than yielding a session. A scenario pins it, and it rides the `@sandbox` sweep with the rest of that feature.
+
+**Interim custody dispatched at base `88da55d`.** The watchbill was not spent, so this departs from the usual trigger, and QM named custody as owed. Thirty-six verified green targets plus a full dependency refit had sat uncommitted across the whole voyage, and the exposure was no longer proportionate to waiting for a spent bill. The watchbill is now down to semantic capture and the three tier sweeps.
 
 ## Design decisions this voyage (user-confirmed)
 
@@ -62,16 +153,75 @@ Watch1 is now the three methodology-conformance scenarios. They gate the rest of
 - **Inference: any OpenAI-compatible provider, OpenRouter as the default. Settled 2026-07-25.** Three configuration values, environment or dotenv, environment winning: `TINMAN_API_KEY` for the credential, `TINMAN_BASE_URL` defaulting to `https://openrouter.ai/api/v1`, `TINMAN_MODEL` defaulting to `deepseek/deepseek-v4-flash`. The credential is vendor-neutral by name so the default choice is never a lock-in. `features/inference-provider.feature` pins both defaults and both overrides plus bearer-token construction. `ureq` for the call, blocking, keeps tokio a dev-dependency. `dotenvy` for `.env`, which is git-ignored.
 - **Tier placement.** `@sandbox` marks scenarios whose assertion is isolation itself, matching voyage 1's line; ordinary PTY launches stay default tier. `@inference` is new: real paid provider calls, never on the inner loop. If QM finds a fixture-launching default-tier scenario needs real bwrap, retag it rather than weaken the tier policy.
 
-## Deck state at this harbour review
+## Deck state at hand-off, 2026-07-25
 
-Shipwright's harbour work sits uncommitted and is confirmed by command, not by recall. Both prior blockers are cleared in the tree: `ureq` and `dotenvy` are in `Cargo.toml`, and `help.md` joined the `exclude` list. Rigging gained working `coverage`, `plank-inventory` and `conformance` commands plus weather and runrecord paths. `ast-grep scan` exits 0 clean and `plank-inventory` returns real entries; both were run, not read.
+Harbour is closed. Both harbour blockers cleared, condemnation processed, zero `@captain` and zero `@shipwright` in the specs. Voyage 2 is mid-flight and the watchbill is live, so the next move is not another harbour.
 
-Condemnation is processed. Shipwright removed both watchbill-shape scenarios; zero `@shipwright` and zero `@captain` remain, and `features/methodology-conformance.feature` now carries exactly the three rule-backed `@conformance` scenarios. Typecheck, lint and `ast-grep scan` all exited 0 after the removal, and the default tier parsed 32 features with 105 live scenarios, unchanged from before the removal.
+`HEAD` is `88da55d`, and `origin/main` is the same commit, so nothing is pending outbound. Uncommitted on top of it, from at least three roles and never taken into custody:
 
-Two things still open:
+- Captain: 12 feature files, 11 scantlings, both example plans, new `assets/help/acronym-prompt.txt`, `watchbill.json`
+- Shipwright: `RIGGING.md` weather append with explicit `-c` worker counts and `budget: 120s`, `AGENTS.md` Run data section, `alacritty_terminal` installed in `Cargo.toml` and `Cargo.lock`
+- QM and Crew: `src/screen.rs` +73, `src/inference.rs` +42, `tests/cucumber.rs` +144
 
-1. **Watchbill-shape conformance is deliberately absent.** It is one of the two checks Shipwright's derivation names as required. Condemning it means a malformed watchbill blocks QM at dispatch rather than reddening as a target. Recorded in `AGENTS.md` so a later harbour does not re-derive a settled decision.
-2. **Harbour's full regression is unevidenced.** Shipwright's report died with its context, so no run backs the harbour work. Harbour's own regression is what harbour work rides outbound on. Re-run it before any outbound, or accept that the harbour edits ship on voyage evidence alone.
+**Nothing here is verified.** The deck-state hash is `75c0b403`; the newest run-record entry carries `ff265228`, so no inherited green stands and every entry in the record is void. All four weather lines carry `result: 101`. The prior notes' base `3c72894` is not a rev in this repository; do not chase it.
+
+**Dispatch order: QM first. Corrected 2026-07-25, replacing an earlier Boatswain-first order in these notes.** Three findings against custody now, each from a command rather than a recollection:
+
+1. **Nothing is verified.** Custody commits on verification evidence, and there is none to inherit: the hash mismatch above voids every run-record entry, and every weather line is red. Boatswain would have to run verification itself and would find red.
+2. **A perturbation stands by design.** `src/screen.rs` panics inside `parse`, the seam both `from_text` and `from_pty_output` route through. Boatswain names a standing `PERTURBATION` in the diff as a foul, correctly: committing it freezes a deliberately red seam into history. Watch2 exists to drive its removal, so the statement clears as part of the work, never before it.
+3. **Nothing here is dirt.** Every changed path is owned by a role in this voyage. Under the Working tree policy that is work in flight: QM reads the artifacts as they stand, and Boatswain later stages them with the production change they order. A pre-clean has nothing to clean.
+
+Custody comes when the watches are spent and green, at base `88da55d`, per the flat QM-to-Boatswain hand-off.
+
+**The watchbill was checked before dispatch, by command.** All 121 scenario references resolved to a real scenario in the specs. Of the 15 scenarios added since `88da55d`, 14 were billed by name and the fifteenth, `a run step executes its command under the sandbox`, is `@sandbox` and rode the tier tag. No spec edit was unbilled.
+
+## QM's first pass, 2026-07-25. Watchbill renumbered after it.
+
+QM spent the old watches 1, 2, 3, 4, 6 and 8 green, and left 5 and 7 partly spent. Crew landed the acronym context, the version flag, the assistant loop, the role vocabulary in `src/tom.rs` and `src/inference.rs`, and the perturbation removal. QM fixed two faults in its own scope: an unbounded `read_to_end` that hung every run-to-completion terminal scenario, replaced with a budgeted `TerminalSession`, and an engine fixture still building replies with the superseded root role `"screen"`.
+
+QM stopped rather than half-build the shared fixture terminal program, which gates three remaining watches. That was the right call.
+
+**The emulator migration landed on QM's second pass.** Watch1 went 11/11 green and `src/screen.rs` now imports `alacritty_terminal`, confirmed by grep. The four sequence scenarios drove it with no perturbation, which settles the method: where durable context changes and no scenario reddens, write the scenario that reddens. QM's own note records that its HPA step emits the ECMA-48 backtick rather than CHA's `G`, so the discriminator held.
+
+QM also converted the driver step definitions from a superseded `{"id","op","session"}` framing to JSON-RPC 2.0, matching the spec and the scantling. Dispatching on the old evidence would have sent Crew to build the wrong wire protocol.
+
+**Second-pass results, all fresh:** watch1 spent 11/11; inference 16/17; TOM 14/20; driver 0/21; commands 3/24; `@logic` sweep 122 scenarios, 89 passed and 33 failed in 1138ms, inside the 120s budget; `@sandbox` sweep 25 scenarios, 2 passed and 23 failed. `@inference` deliberately not run: the tier ordering bars the costliest tier while cheaper tiers carry blocked reds.
+
+**The watchbill was rewritten twice. Only the current shape is live; cite no earlier numbering.** It is now ordered by build dependency rather than by feature file, 10 watches and 70 references, all verified to resolve: 1 TOM core and locators, 2 inference remainder, 3 inspect and test, 4 record and replay, 5 tom-inference, 6 flow and sandbox configuration, 7 semantic capture, 8 `@logic`, 9 `@sandbox`, 10 `@inference`.
+
+**Two structural facts drove that shape.** `driver-session.feature` and `driver-protocol.feature` carry feature-level `@sandbox` tags, so all 16 of their scenarios are sandbox tier; directing them by name and sweeping the tier would double-list them, so they ride watch9 alone. And TOM leads because locator binding is the base that driver session, semantic capture and replay all resolve against.
+
+**QM's real blocker, and the decision it asked for.** Fifty red targets have no production seam. On a compiled stack a step definition naming a seam that does not exist fails to compile and takes the whole cucumber binary down, so steps cannot be written subsystem-wide ahead of the seams. The answer is the dependency ordering above: one subsystem at a time, QM writing steps and Crew building seams within a watch before the next opens. Scope is unchanged; only the order is now stated.
+
+**Two rigging faults routed to Shipwright, 2026-07-25. Refit complete.** `serde_json` now sits under `[dependencies]` and `vt100` is gone from both `Cargo.toml` and `Cargo.lock`, confirmed by grep. Shipwright proved it properly: `cargo check --all-targets` green before the change as a baseline against the dirty deck, `--locked` green after so manifest and lock agree with no re-resolution, and exactly one version line left the lockfile. The `locked` policy held. All thirteen manifest entries now have a `## Dependencies` line.
+
+Moving `serde_json` makes it a runtime dependency of the published crate; the spec requires it, so it is not an open question, but note it at the next outbound.
+
+**Captain's ruling on Shipwright's judgment call, asked for and given.** Shipwright did not apply the harbour-entry guard against the dirty deck, on the reasoning that the guard governs direct entry into a harbour inventory while this was a Captain-dispatched scoped rigging refit. That reasoning is correct and is now settled doctrine here. The Blocker policy routes a rigging fault to Shipwright and the Rigging read contract names the one-round-trip route for a spec needing an uninstalled dependency; both exist precisely for mid-voyage, so blocking them on a dirty deck would deadlock the route they were written to serve. A scoped refit is not harbour entry.
+
+`idea.md:43` still names vt100 as a candidate parser, stale after the migration. It is an intent-source reference doc rather than a sanctioned artifact and sits in the crate's `exclude` list, so it binds nothing; left as found.
+
+**Two undischargeable checks, unchanged and already in `AGENTS.md`:** `discover` and `step-usage` are `none` on this stack, so plank drift and orphaned step definitions are caught by reading rather than by running. `plank-inventory` runs; QM reports 552 planks with form intact. The `focused` command cannot compose tag exclusions, cucumber-rs refusing `--name` with `--tags`, so a `@captain` or `@shipwright` scenario named directly in a watchbill would still execute. None of the three blocks the voyage.
+
+**Shipwright owed three. Two are discharged, one stands:**
+
+1. `alacritty_terminal` is installed. The migration is not; see the emulator section above for the perturbation that now drives it.
+2. **Still open.** `serde_json` sits under `[dev-dependencies]` and appears nowhere in `src/`, while `features/driver-protocol.feature` needs it in the library graph. Latent rather than live, because the driver is unimplemented; it fires as a Crew blocker the moment watch9 opens, and routes back to Shipwright. `Cargo.lock` already pins 1.0.151, so nothing resolves from the network.
+3. The `broad` commands now append the weather line themselves. Discharged.
+
+**QM owes three orphaned step definitions**, confirmed by grepping the specs for each pattern: `the request carries the authorization header {string}` and `the request names the model {string}`, orphaned by the inference-provider rewrite, and `the driver replies to request {int} with the error {string}`, orphaned when the `-32601` error-code step replaced its only binding. `the request addresses {string}` is no longer orphaned; `inference-provider.feature` binds it twice. Also `features/inference-provider.feature:a built request satisfies the provider contract`, whose schema step panics because the built request never reaches the world slot the generic conformance step reads.
+
+**Crew owes the role taxonomy, created by this voyage's spec edit.** `src/tom.rs` still enumerates 17 roles in `Role`, `const ROLES: [Role; 17]` and `as_str()`, including `Screen`, `Statusbar`, `MessagePane`, `Message`, `Table`, `Row`, `Column`, `Dialog`, `Tree` and `Treeitem`, none admitted by the in-flight 11-role `tom.schema.json`, and missing `application`, `status`, `log` and `article`. It reddens as a target; no Captain action.
+
+**Captain fixed the `as` gap, 2026-07-25.** The JSON-RPC rewrite of `driver-protocol.schema.json` re-added `scope` and dropped both `items` and `as`, under `additionalProperties: false`. `role` covers the old `items`; nothing covered `as`, and all five `semantic-capture` scenarios name one. Restored with a description; all eleven scantlings parse. No check joins a scantling enum to a production enum, which is why the role drift above went unseen too; a plausible `@conformance` candidate for the next harbour.
+
+**Run-step isolation: settled 2026-07-25, and now a failing target.** `src/flow.rs:31` runs `Command::new("sh").arg("-c")` on the host with no Bubblewrap wrapper, confirmed by reading, and `grep` finds no caller of `flow::` anywhere in `src/`, so the seam is unwired as well as unsandboxed. User confirmed a run step is sandboxed exactly like a tui step, same sandbox section, same secure defaults. `features/flow-orchestration.feature:a run step executes its command under the sandbox` pins it, `@sandbox`, mirroring the tui scenario beside it.
+
+One scenario, not three. The parse-time default is already pinned by `features/plan-shorthand.feature:a plan with no sandbox section is sandboxed by default`, and secret absence at the launch seam by `features/sandboxed-launch.feature`; restating either here would be one rule per variable. The gap was execution only. No watchbill edit: the scenario is `@sandbox`, so watch11 sweeps it with the tier.
+
+**Watchbill-shape conformance is deliberately absent**, one of the two checks Shipwright's derivation names as required. Condemning it means a malformed watchbill blocks QM at dispatch rather than reddening as a target. Recorded in `AGENTS.md` so a later harbour does not re-derive a settled decision.
+
+**Schema `$id`s are pinned to `@main` and serve a stale shape.** All eleven point at `https://cdn.jsdelivr.net/gh/dmytri/tinman@main/...`, and both files under `assets/examples/` carry a `# yaml-language-server: $schema=` header pointing there. `HEAD` now equals `origin/main`, so those URLs resolve, but the eleven scantling edits in flight are uncommitted, so `@main` serves the pre-edit shape until the next push. Verification is unaffected: it loads scantlings by path and every `$ref` is local, so no cross-scantling reference crosses the network. No git tags exist, so a plan written now validates against whatever `main` becomes. Tagging a release and repinning to `@v0.1.1` is an outbound decision, owed before anyone outside this repo authors a plan.
 
 ## Rigging quirks learned
 
@@ -86,6 +236,45 @@ Two things still open:
 - `check_bwrap_policy`/`check_pty_boundary` read JSON scantlings via `serde_yaml`; may migrate to `serde_json` now it is present.
 - No derived check joins a proof scantling to its attesting scenario. A path grep across the specs reports `pty-sandbox-boundary.json` and `assistant-command-boundary.json` unreferenced, because the attestation form names the seam rather than the path. Both do have attesting scenarios. Any future scantling-reference check must know the two forms apart, or it reddens on correct specs.
 - idea.md, isolation.md and help.md are intent-source reference docs, not sanctioned artifacts. Binding shape lives in specs, scantlings and `assets/**`.
+
+## Standing preferences the user has stated
+
+These govern how specs are written here and are worth reading before authoring any.
+
+- **Prefer a concise attestation on a scantling over verbose behavioural scenarios**, and audit freshly authored specs against that, not only inherited ones. The tell is one rule restated once per variable: five `inference-provider` scenarios collapsed to two behaviour scenarios plus one `@contract` this way.
+- **A scantling based on a well-known standard beats a bespoke one.** Applied so far: JSON-RPC 2.0 for the driver protocol, WAI-ARIA for the role taxonomy, JSON Schema 2020-12 throughout. Prefer a specification over a library's data model, which is why AccessKit's node shape was declined.
+- **`Rule:` prose carries durable context only.** Requirements belong in scenarios. Five Rules were trimmed on 2026-07-25 after one stated the whole activation convention with no scenario pinning any of it.
+- **Tinman must stay useful for plain command-line testing**, not only full-screen work. A coding agent is both: one prompt non-interactively is a CLI, the same binary interactive is a TUI, and a suite driving it should need one tool. This is why a run step reads pipes and keeps its streams and exit status distinguishable.
+- Breaking changes are acceptable at 0.1.x, so a correct reshape does not wait for a major version.
+- **Specify the floor as well as the ceiling.** A scenario asserting a measurement against a threshold also carries a null control: an empty or no-op operation measures near zero. Executable specs make behaviour legible and calibration opaque, so a threshold scenario reads as a product claim while the step definition quietly binds a number no reader of the feature can see. The worked case is `ratatui-testlib`, checked 2026-07-25: `assert_render_budget(60.0)` asserts input-to-render latency under 16.67ms while the harness held an unconditional 50ms sleep and a 100ms read timeout, a measurement floor near 150ms, about nine times the threshold asserted. A null control exposes a floor instantly and is writable without knowing the constant exists. Add a metamorphic relation where one fits, such as ten keystrokes measuring about ten times one keystroke. Never instrument a latency measurement across a synchronization primitive we control: mark t0 at the write and t1 at the first response byte, never across our own poll loop. The residual risk this guards is specific to this workflow: the step definition and the production code are authored by the same process, so they can agree perfectly and both be wrong, and the counter-pressure is specifications constraining the shape of the answer rather than restating the implementation.
+
+## Tier budgets: one set, two withheld. 2026-07-25.
+
+`budget: 120s` on the default tier, against an observed 22.3s. That is the one defensible figure the weather carries, and even it is a red run.
+
+The other three weather entries are aborts, not measurements, and setting a ceiling from one would redden the moment scenarios did real work. `@logic` 631ms and 22329ms are the same tier minutes apart, which is the tell. The 11 `@sandbox` scenarios cannot launch real `bwrap` in 424ms, and the refit confirmed no `@inference` scenario reached a real provider call, so 426ms measures three undefined-step failures. `budget-sandbox` and `budget-inference` stay unset until a run in those tiers reaches real work; the floors they need do not exist yet.
+
+Read the `result` field before trusting a weather line: `101` is a cargo test failure, so a fast line with `result: 101` is an early abort wearing a duration.
+
+## Hand-testing found two spec faults, not code faults. 2026-07-25.
+
+The operator ran `tinman --help` on a real terminal. The acronym came back as a block of prose, and the assistant prompt printed and exited. Both are specification gaps, and in both the implementation obeys its spec exactly.
+
+**The acronym prompt carried no instruction.** `skill::acronym_context()` sent the skill's name and its 60-word description and nothing else, because `features/bundled-skill.feature` pinned the context to exactly those two fields. A model handed a name and a description with no instruction returns prose, correctly. `assets/help/acronym-prompt.txt` now carries the instruction and the scenario is renamed to pin it first in the context. The instruction constrains output shape only, one line and nothing around it, so the 2026-07-25 no-validation directive still holds: shaping the request is not validating the response, and no content rule came back.
+
+**Nothing pinned the read loop.** Every `interactive-help.feature` scenario drove `assistant::ask()` as a seam through `the operator asks {string}`, so `main()` printing the prompt and returning satisfied the whole file. Two scenarios added: a question typed at the prompt is answered, and ending the input exits successfully.
+
+**A third gap, from the same session.** The help asset advertises `-V, --version` and `src/cli.rs` declares no version argument, so the flag exits 2. The existing scenario pins that every accepted command appears in the help; nothing pinned the converse, so the asset and the parser drift apart and stay green. `features/conventional-help.feature:every option the help text advertises is accepted by the parser` closes that direction.
+
+All three are watchbilled, watch1 and watch4. Hand-run again 2026-07-25 at the current deck: `tinman --help` exits 0, and both faults are still live. The tagline line comes back empty rather than carrying the acronym or the unavailable notice, with `TINMAN_API_KEY` set in `.env`, so `an empty generation falls back to the unavailable notice` is unimplemented. `--version` exits 2 with `unexpected argument '--version' found`, so `every option the help text advertises is accepted by the parser` is unimplemented. Both wait on QM.
+
+## Auto-memory is off. Discipline instead. Decided 2026-07-25.
+
+User directive: no auto-memory on this project, durable artifacts instead. The mechanism contradicts the method it was running under. Shipshape's first Article is that durable artifacts outrank chat, and the Context bulkhead names an agent memory store as the specific way that Article gets circumvented. A store that re-injects Captain decisions into every role session makes the bulkhead advisory: QM cannot tell which of its judgments came from a spec and which from a remembered decision, and no report can show the difference.
+
+`autoMemoryEnabled: false` in both `~/.claude/settings.json` and this project's `.claude/settings.local.json`. The nine entries were deleted after each was confirmed present in a durable artifact; only the null-control rule needed migrating, and it is now in the standing preferences above. Do not write memories on this project. Anything worth keeping goes to a `.feature`, a scantling, `AGENTS.md`, `RIGGING.md`, or these notes.
+
+**The residual is discharged. Confirmed 2026-07-25 by reading both settings files and this session's own context.** `autoMemoryEnabled: false` in both, and no memory index renders into a fresh session. The earlier QM refusals came from sessions constructed before the flag was set; a restart cleared them, as expected. No operator action stands.
 
 ## Open questions
 

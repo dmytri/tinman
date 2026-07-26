@@ -3,9 +3,11 @@
 use clap::{CommandFactory, Parser, Subcommand};
 
 /// The Tinman command line. The help flag renders the bundled help asset, so
-/// the parser's own help output is disabled.
+/// the parser's own help output is disabled. The version flag is clap's own.
+///
+/// @planks("each is passed to the command parser")
 #[derive(Debug, Parser)]
-#[command(name = "tinman", disable_help_flag = true)]
+#[command(name = "tinman", version, disable_help_flag = true)]
 pub struct Cli {
     /// Show this help
     #[arg(short = 'h', long = "help")]
@@ -15,16 +17,35 @@ pub struct Cli {
 }
 
 /// The commands Tinman accepts.
+///
+/// @planks("the operator records the command {string}")
+/// @planks("the operator records the command {string} with {string}")
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Capture a live session into an editable plan
-    Record,
+    Record {
+        /// Where the plan is written
+        #[arg(long)]
+        output: Option<String>,
+        /// The terminal program to record, and the arguments it takes
+        #[arg(required = true)]
+        command: Vec<String>,
+    },
     /// Replay a recorded plan exactly, with no inference
     Replay,
     /// Run a plan and report whether it passed
-    Test,
+    Test {
+        /// The plan file to run
+        plan: std::path::PathBuf,
+    },
     /// Print the terminal object model of a running program
-    Inspect,
+    Inspect {
+        /// The terminal command to inspect
+        command: String,
+        /// Write the model as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Speak the JSON driver protocol on stdin and stdout
     Driver,
 }

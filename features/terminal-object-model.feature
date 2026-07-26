@@ -31,13 +31,38 @@ Feature: terminal object model
   Scenario: the bottom line becomes the status bar
     Given a virtual screen whose bottom line reads "NORMAL  main*  3 files"
     When the terminal object model is built
-    Then the model contains a region with the role "statusbar"
+    Then the model contains a region with the role "status"
     And that region's text is "NORMAL  main*  3 files"
 
   Scenario: a region keeps the screen cells it was built from
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
     When the terminal object model is built
     Then the region named "Files" reports the screen cell at its own row 1 column 1
+
+  Rule: the deterministic reading produces every role a written plan can address, because replay rebuilds the model with no model invocation. Inference enriches this model at capture time and is never a precondition for binding a locator a plan already carries.
+
+  Scenario: a menu bar becomes a menu of named menu items
+    Given a virtual screen whose top line reads "  Files   Settings   Quit  "
+    When the terminal object model is built
+    Then the model contains a region with the role "menu"
+    And that region has 3 child regions with the role "menuitem"
+    And the second "menuitem" of that region is named "Settings"
+
+  Scenario: a bracketed label becomes a button
+    Given a virtual screen showing "[ Save ]" at row 5 column 3
+    When the terminal object model is built
+    Then the model contains a region with the role "button" named "Save"
+
+  Scenario: a labelled input field becomes a textbox
+    Given a virtual screen showing "Username: ________" at row 3 column 1
+    When the terminal object model is built
+    Then the model contains a region with the role "textbox" labelled "Username"
+
+  Scenario: a pane of blank-line separated entries becomes a log of articles
+    Given a virtual screen showing a bordered pane titled "Output" holding the entries "build started" and "build finished" separated by a blank line
+    When the terminal object model is built
+    Then the region named "Output" has the role "log"
+    And that region has 2 child regions with the role "article"
 
   @contract
   Scenario: the terminal object model conforms to its schema

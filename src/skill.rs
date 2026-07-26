@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 /// bytes an installing coding agent reads.
 const BUNDLED: &str = include_str!("../assets/skill/SKILL.md");
 
+/// The instruction the acronym generator is given before the skill's name and
+/// description, inlined at build time.
+const ACRONYM_PROMPT: &str = include_str!("../assets/help/acronym-prompt.txt");
+
 /// The front matter of a skills.sh skill.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontMatter {
@@ -52,15 +56,17 @@ pub fn bundled() -> Skill {
     parse(BUNDLED).expect("the bundled skill parses")
 }
 
-/// The context the acronym generator is given: the skill's name and
-/// description, and nothing else.
+/// The context the acronym generator is given: the instruction the asset
+/// carries, then the skill's name and description.
 ///
 /// @planks("the acronym context is built")
 pub fn acronym_context() -> String {
     let skill = bundled();
     format!(
-        "{}\n{}",
-        skill.front_matter.name, skill.front_matter.description
+        "{}\n\n{}\n{}",
+        ACRONYM_PROMPT.trim(),
+        skill.front_matter.name,
+        skill.front_matter.description
     )
 }
 

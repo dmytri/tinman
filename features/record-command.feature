@@ -3,10 +3,12 @@ Feature: record command
   I want "tinman record" to capture a live session to an editable file
   So that I can turn an interaction I performed into a test
 
-  Scenario: record writes an interaction log for the captured program
+  Rule: record writes one file and that file is a plan. The interaction log is the capture spine's own artifact and `features/interaction-log.feature` owns it; what the operator edits and replays is a plan, as `assets/help/tinman.txt` advertises. The output path is given by the `--output` option and defaults to `tinman.yaml`.
+
+  Scenario: record writes a replayable plan for the captured program
     When the operator records the command "printf READY" and presses "q"
-    Then the written interaction log names the program "printf"
-    And the written interaction log lists a key press "q"
+    Then the written plan names the command "printf READY"
+    And the written plan records a key press "q"
 
   @sandbox
   Scenario: record launches its target inside the sandbox
@@ -14,7 +16,7 @@ Feature: record command
     When the operator records the fixture terminal program
     Then the recorded snapshots show the secret value is absent
 
-  Rule: a recording that cannot replay itself is a draft, not a recording. Record replays the captured plan deterministically before writing it, so every locator is proved to rebind with no model invocation while the operator is still present to correct it.
+  Rule: a recording that cannot replay itself is a draft, not a recording. The operator is present at capture time and absent at replay time, so a locator proved while they are still here costs a moment, and one that fails after they leave costs a debugging session.
 
   Scenario: a written plan replays the interaction it recorded
     When the operator records the fixture terminal program
@@ -24,13 +26,17 @@ Feature: record command
     Given a fixture terminal program whose pane titles change between draws
     When the operator records that program
     Then recording fails and reports the plan did not replay
-    And no interaction log is written
+    And no plan is written
 
   Scenario: record writes to a default file when no path is given
     When the operator records the command "printf READY"
-    Then the interaction log is written to "tinman.yaml"
+    Then the plan is written to "tinman.yaml"
 
-  Scenario: record refuses to overwrite an existing log
+  Scenario: record writes to the path the output option names
+    When the operator records the command "printf READY" with "--output session.yaml"
+    Then the plan is written to "session.yaml"
+
+  Scenario: record refuses to overwrite an existing plan
     Given the file "session.yaml" already exists
-    When the operator records the command "printf READY" into "session.yaml"
+    When the operator records the command "printf READY" with "--output session.yaml"
     Then recording fails and reports the file already exists

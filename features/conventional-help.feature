@@ -15,6 +15,11 @@ Feature: conventional help
     When each is looked for in the asset at "assets/help/tinman.txt"
     Then every accepted command appears in the help text
 
+  Scenario: every option the help text advertises is accepted by the parser
+    Given the options the asset at "assets/help/tinman.txt" advertises
+    When each is passed to the command parser
+    Then the parser accepts every advertised option
+
   Scenario: the help text carries exactly one tagline placeholder
     Given the asset at "assets/help/tinman.txt"
     When its tagline placeholders are counted

@@ -42,45 +42,32 @@ pub struct Rect {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
-    Screen,
+    Application,
     Region,
     Menu,
     Menuitem,
     List,
     Listitem,
-    Table,
-    Row,
-    Column,
-    Dialog,
     Button,
     Textbox,
-    Statusbar,
-    #[serde(rename = "message-pane")]
-    MessagePane,
-    Message,
-    Tree,
-    Treeitem,
+    Status,
+    Log,
+    Article,
 }
 
 /// Every role the model defines, so a name maps to its role through one list.
-const ROLES: [Role; 17] = [
-    Role::Screen,
+const ROLES: [Role; 11] = [
+    Role::Application,
     Role::Region,
     Role::Menu,
     Role::Menuitem,
     Role::List,
     Role::Listitem,
-    Role::Table,
-    Role::Row,
-    Role::Column,
-    Role::Dialog,
     Role::Button,
     Role::Textbox,
-    Role::Statusbar,
-    Role::MessagePane,
-    Role::Message,
-    Role::Tree,
-    Role::Treeitem,
+    Role::Status,
+    Role::Log,
+    Role::Article,
 ];
 
 impl Role {
@@ -89,23 +76,17 @@ impl Role {
     /// @planks("the region named {string} has the role {string}")
     pub fn as_str(&self) -> &'static str {
         match self {
-            Role::Screen => "screen",
+            Role::Application => "application",
             Role::Region => "region",
             Role::Menu => "menu",
             Role::Menuitem => "menuitem",
             Role::List => "list",
             Role::Listitem => "listitem",
-            Role::Table => "table",
-            Role::Row => "row",
-            Role::Column => "column",
-            Role::Dialog => "dialog",
             Role::Button => "button",
             Role::Textbox => "textbox",
-            Role::Statusbar => "statusbar",
-            Role::MessagePane => "message-pane",
-            Role::Message => "message",
-            Role::Tree => "tree",
-            Role::Treeitem => "treeitem",
+            Role::Status => "status",
+            Role::Log => "log",
+            Role::Article => "article",
         }
     }
 
@@ -249,7 +230,7 @@ impl Model {
             rows,
             cols,
             root: Region {
-                role: Role::Screen,
+                role: Role::Application,
                 name: None,
                 text: None,
                 selected: false,
@@ -286,8 +267,9 @@ impl Model {
 }
 
 /// Read `screen` into a terminal object model: the bordered panes it draws with
-/// the lines they list, the sibling regions a vertical rule splits it into, and
-/// the status bar its bottom line carries.
+/// the lines they list, the sibling regions a vertical rule splits it into, the
+/// menu bar its top line carries, the buttons and textboxes it draws, and the
+/// status bar its bottom line carries.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the terminal object model is serialized")
@@ -302,6 +284,10 @@ pub fn build(screen: &VirtualScreen) -> Model {
         children.push(plain_region(grid, 0, column, rows));
         children.push(plain_region(grid, column + 1, cols - column - 1, rows));
     }
+    if let Some(menu) = menu_bar(grid, cols) {
+        children.push(menu);
+    }
+    children.extend(controls(grid));
     if let Some(status) = status_bar(grid, rows, cols) {
         children.push(status);
     }
@@ -315,7 +301,7 @@ pub fn build(screen: &VirtualScreen) -> Model {
         rows,
         cols,
         root: Region {
-            role: Role::Screen,
+            role: Role::Application,
             name: None,
             text: None,
             selected: false,
@@ -366,9 +352,12 @@ fn panes(grid: &[Vec<String>], screen: &VirtualScreen) -> Vec<Region> {
 }
 
 /// One bordered pane read as a list: its title is its name and each line it
-/// shows is an item, the reversed line being the selected one.
+/// shows is an item, the reversed line being the selected one. A pane whose
+/// lines are separated into several runs by blank lines is a log instead, each
+/// run of lines an article.
 ///
 /// @planks("the terminal object model is built")
+/// @planks("the region named {string} has the role {string}")
 fn pane_region(
     grid: &[Vec<String>],
     screen: &VirtualScreen,
@@ -388,12 +377,38 @@ fn pane_region(
         .take_while(|cell| cell.as_str() != HORIZONTAL)
         .cloned()
         .collect();
-    let mut items = Vec::new();
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    let mut run: Vec<usize> = Vec::new();
     for row in y + 1..bottom {
-        let text = grid[row][x + 1..right].concat().trim_end().to_string();
-        if text.is_empty() {
+        if line_of(grid, row, x, right).is_empty() {
+            if !run.is_empty() {
+                runs.push(std::mem::take(&mut run));
+            }
             continue;
         }
+        run.push(row);
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    if runs.len() > 1 {
+        let articles = runs
+            .iter()
+            .map(|rows| article_region(grid, x, right, rows))
+            .collect();
+        return Region {
+            role: Role::Log,
+            name: Some(title),
+            text: None,
+            selected: false,
+            rect,
+            children: articles,
+            cells: cells_of(grid, rect),
+        };
+    }
+    let mut items = Vec::new();
+    for row in runs.concat() {
+        let text = line_of(grid, row, x, right);
         let item = Rect {
             x: (x + 1) as u16,
             y: row as u16,
@@ -418,6 +433,41 @@ fn pane_region(
         selected: false,
         rect,
         children: items,
+        cells: cells_of(grid, rect),
+    }
+}
+
+/// The text row `row` of `grid` shows inside a pane whose borders run down
+/// columns `x` and `right`.
+///
+/// @planks("the terminal object model is built")
+fn line_of(grid: &[Vec<String>], row: usize, x: usize, right: usize) -> String {
+    grid[row][x + 1..right].concat().trim_end().to_string()
+}
+
+/// One entry of a log: the run of lines `rows` covers, read as an article
+/// carrying the text those lines show.
+///
+/// @planks("that region has {int} child regions with the role {string}")
+fn article_region(grid: &[Vec<String>], x: usize, right: usize, rows: &[usize]) -> Region {
+    let text = rows
+        .iter()
+        .map(|&row| line_of(grid, row, x, right))
+        .collect::<Vec<String>>()
+        .join("\n");
+    let rect = Rect {
+        x: (x + 1) as u16,
+        y: rows[0] as u16,
+        width: (right - x - 1) as u16,
+        height: rows.len() as u16,
+    };
+    Region {
+        role: Role::Article,
+        name: Some(text.clone()),
+        text: Some(text),
+        selected: false,
+        rect,
+        children: Vec::new(),
         cells: cells_of(grid, rect),
     }
 }
@@ -468,9 +518,156 @@ fn status_bar(grid: &[Vec<String>], rows: u16, cols: u16) -> Option<Region> {
         height: 1,
     };
     Some(Region {
-        role: Role::Statusbar,
+        role: Role::Status,
         name: None,
         text: Some(text),
+        selected: false,
+        rect,
+        children: Vec::new(),
+        cells: cells_of(grid, rect),
+    })
+}
+
+/// The top line of `grid` read as a menu bar, each label it carries a menu
+/// item. A line drawing a border is a pane's edge rather than a menu, and a
+/// line carrying one label is a heading rather than a bar of items.
+///
+/// @planks("the terminal object model is built")
+/// @planks("the second {string} of that region is named {string}")
+fn menu_bar(grid: &[Vec<String>], cols: u16) -> Option<Region> {
+    let row = &grid[0];
+    if draws_a_border(row) {
+        return None;
+    }
+    let labels = labels_of(row);
+    if labels.len() < 2 {
+        return None;
+    }
+    let items = labels
+        .into_iter()
+        .map(|(x, width, text)| {
+            let item = Rect {
+                x,
+                y: 0,
+                width,
+                height: 1,
+            };
+            Region {
+                role: Role::Menuitem,
+                name: Some(text.clone()),
+                text: Some(text),
+                selected: false,
+                rect: item,
+                children: Vec::new(),
+                cells: cells_of(grid, item),
+            }
+        })
+        .collect();
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width: cols,
+        height: 1,
+    };
+    Some(Region {
+        role: Role::Menu,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children: items,
+        cells: cells_of(grid, rect),
+    })
+}
+
+/// Whether `row` draws box-drawing characters, as a pane's border does.
+///
+/// @planks("the terminal object model is built")
+fn draws_a_border(row: &[String]) -> bool {
+    row.iter()
+        .any(|cell| cell.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)))
+}
+
+/// The labels `row` carries: each run of text between blank cells, with the
+/// column it starts at and the number of cells it covers.
+///
+/// @planks("the second {string} of that region is named {string}")
+fn labels_of(row: &[String]) -> Vec<(u16, u16, String)> {
+    let mut labels = Vec::new();
+    let mut start = None;
+    for x in 0..=row.len() {
+        let blank = x == row.len() || row[x].trim().is_empty();
+        match (blank, start) {
+            (false, None) => start = Some(x),
+            (true, Some(from)) => {
+                labels.push((from as u16, (x - from) as u16, row[from..x].concat()));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    labels
+}
+
+/// The controls `grid` draws, read line by line: the buttons its bracketed
+/// labels are and the textboxes its labelled input fields are.
+///
+/// @planks("the terminal object model is built")
+fn controls(grid: &[Vec<String>]) -> Vec<Region> {
+    let mut regions = Vec::new();
+    for (y, row) in grid.iter().enumerate() {
+        regions.extend(button(grid, row, y));
+        regions.extend(textbox(grid, row, y));
+    }
+    regions
+}
+
+/// The button `row` draws: a label between square brackets, the label naming
+/// the button.
+///
+/// @planks("the model contains a region with the role {string} named {string}")
+fn button(grid: &[Vec<String>], row: &[String], y: usize) -> Option<Region> {
+    let open = row.iter().position(|cell| cell.as_str() == "[")?;
+    let close = (open + 1..row.len()).find(|&x| row[x].as_str() == "]")?;
+    let label = row[open + 1..close].concat().trim().to_string();
+    let rect = Rect {
+        x: open as u16,
+        y: y as u16,
+        width: (close - open + 1) as u16,
+        height: 1,
+    };
+    Some(Region {
+        role: Role::Button,
+        name: Some(label.clone()),
+        text: Some(label),
+        selected: false,
+        rect,
+        children: Vec::new(),
+        cells: cells_of(grid, rect),
+    })
+}
+
+/// The textbox `row` draws: a field of underscores, named by the label ending
+/// in the colon before it.
+///
+/// @planks("the model contains a region with the role {string} labelled {string}")
+fn textbox(grid: &[Vec<String>], row: &[String], y: usize) -> Option<Region> {
+    let start = row.iter().position(|cell| cell.as_str() == "_")?;
+    let colon = row[..start].iter().rposition(|cell| cell.as_str() == ":")?;
+    let label = row[..colon].concat().trim().to_string();
+    let end = (start..row.len())
+        .find(|&x| row[x].as_str() != "_")
+        .unwrap_or(row.len());
+    let rect = Rect {
+        x: start as u16,
+        y: y as u16,
+        width: (end - start) as u16,
+        height: 1,
+    };
+    Some(Region {
+        role: Role::Textbox,
+        name: Some(label),
+        text: None,
         selected: false,
         rect,
         children: Vec::new(),
@@ -499,8 +696,9 @@ fn cells_of(grid: &[Vec<String>], rect: Rect) -> Vec<Vec<String>> {
 #[derive(Debug, Clone)]
 pub struct Locator {
     role: String,
-    name: String,
+    name: Option<String>,
     scope: Option<String>,
+    ordinal: Option<usize>,
 }
 
 impl Locator {
@@ -510,8 +708,23 @@ impl Locator {
     pub fn new(role: &str, name: &str) -> Locator {
         Locator {
             role: role.to_string(),
-            name: name.to_string(),
+            name: Some(name.to_string()),
             scope: None,
+            ordinal: None,
+        }
+    }
+
+    /// A locator for the region playing `role` at position `ordinal`, counted
+    /// from one among the regions of that role it searches, so a region carrying
+    /// no name a locator can trust is still addressed deterministically.
+    ///
+    /// @planks("the locator addresses the first {string} of the region named {string}")
+    pub fn nth(role: &str, ordinal: usize) -> Locator {
+        Locator {
+            role: role.to_string(),
+            name: None,
+            scope: None,
+            ordinal: Some(ordinal),
         }
     }
 
@@ -525,12 +738,22 @@ impl Locator {
         }
     }
 
+    /// The name of the region this locator searches inside, when it is scoped.
+    ///
+    /// @planks("the plan records the locator's binding as {string}")
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
     /// Resolve this locator against `model`. Resolution is mechanical: it reads
     /// the model and invokes no inference. A name matches case-sensitively, and
-    /// several matches are an ambiguity rather than a choice.
+    /// several matches are an ambiguity rather than a choice. A locator carrying
+    /// an ordinal addresses the region at that position among the ones it
+    /// matches, so it binds one region or none.
     ///
     /// @planks("the locator for the {string} named {string} is resolved")
     /// @planks("the locator for the {string} named {string} is resolved within the region named {string}")
+    /// @planks("the locator addresses the first {string} of the region named {string}")
     pub fn resolve(&self, model: &Model) -> Resolution {
         let root = match &self.scope {
             Some(scope) => model
@@ -541,10 +764,20 @@ impl Locator {
         let mut found = Vec::new();
         root.collect(
             &|region| {
-                region.role() == self.role && region.name.as_deref() == Some(self.name.as_str())
+                region.role() == self.role
+                    && self
+                        .name
+                        .as_ref()
+                        .is_none_or(|name| region.name.as_deref() == Some(name.as_str()))
             },
             &mut found,
         );
+        if let Some(ordinal) = self.ordinal {
+            return match found.into_iter().nth(ordinal - 1) {
+                Some(region) => Resolution::One(region),
+                None => Resolution::NoMatch,
+            };
+        }
         match found.len() {
             0 => Resolution::NoMatch,
             1 => Resolution::One(found.remove(0)),
@@ -566,4 +799,104 @@ pub enum Resolution {
     NoMatch,
     /// The locator addresses several regions, and reports how many.
     Ambiguous(usize),
+}
+
+/// The narrowing a proposed locator needed before exactly one region bound.
+///
+/// @planks("the plan records the locator's binding as {string}")
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Binding {
+    /// The proposed role and name address one region on their own.
+    Exact,
+    /// The proposed name addresses several regions, narrowed by the name of the
+    /// region containing the one it binds.
+    Scoped,
+    /// The proposed name is not on the screen, so the region is addressed by its
+    /// position among the regions of its role inside a named region.
+    Ordinal,
+}
+
+impl Binding {
+    /// The name this binding carries in a written plan.
+    ///
+    /// @planks("the plan records the locator's binding as {string}")
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Binding::Exact => "exact",
+            Binding::Scoped => "scoped",
+            Binding::Ordinal => "ordinal",
+        }
+    }
+}
+
+/// A confirmed locator: the address that binds exactly one region, and the
+/// narrowing it needed to get there.
+///
+/// @planks("the inferred locator is round-tripped against the deterministic model")
+#[derive(Debug)]
+pub struct Confirmation {
+    pub locator: Locator,
+    pub binding: Binding,
+}
+
+/// Confirm a proposed locator against `model`, the deterministic model the
+/// screen yields. Confirmation runs at capture time only: it resolves the
+/// proposed role and name, narrows an ambiguity to the region containing the
+/// first match, and falls back to the ordinal address of the first region of
+/// that role inside a named region where the proposed name is not on the screen
+/// at all. A proposal that nothing deterministic addresses is refused, so a name
+/// the engine invented never reaches a plan.
+///
+/// @planks("the inferred locator is round-tripped against the deterministic model")
+/// @planks("the locator is scoped to the region containing that item")
+/// @planks("the locator addresses the first {string} of the region named {string}")
+pub fn confirm(model: &Model, role: &str, name: &str) -> Option<Confirmation> {
+    match Locator::new(role, name).resolve(model) {
+        Resolution::One(_) => Some(Confirmation {
+            locator: Locator::new(role, name),
+            binding: Binding::Exact,
+        }),
+        Resolution::Ambiguous(_) => {
+            let scope = scope_of(&model.root, &|region| {
+                region.role() == role && region.name.as_deref() == Some(name)
+            })?;
+            let locator = Locator::new(role, name).within(&scope);
+            match locator.resolve(model) {
+                Resolution::One(_) => Some(Confirmation {
+                    locator,
+                    binding: Binding::Scoped,
+                }),
+                _ => None,
+            }
+        }
+        Resolution::NoMatch => {
+            let scope = scope_of(&model.root, &|region| region.role() == role)?;
+            let locator = Locator::nth(role, 1).within(&scope);
+            match locator.resolve(model) {
+                Resolution::One(_) => Some(Confirmation {
+                    locator,
+                    binding: Binding::Ordinal,
+                }),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The name of the region containing the first region under `region` that
+/// `matches`, which is the scope a locator narrows to. A match whose containing
+/// region carries no name yields none, because a scope a locator cannot address
+/// narrows nothing.
+///
+/// @planks("the locator is scoped to the region containing that item")
+fn scope_of(region: &Region, matches: &impl Fn(&Region) -> bool) -> Option<String> {
+    for child in &region.children {
+        if matches(child) {
+            return region.name.clone();
+        }
+        if let Some(name) = scope_of(child, matches) {
+            return Some(name);
+        }
+    }
+    None
 }

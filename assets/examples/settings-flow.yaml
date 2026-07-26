@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/harness-plan.schema.json
 # Canonical full-form plan. Paired with settings-flow-shorthand.yaml, which
 # parses to an identical plan.
 sandbox:

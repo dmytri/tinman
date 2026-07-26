@@ -7,28 +7,28 @@ Feature: semantic capture
 
   Background:
     Given the Tinman driver has a session running the fixture terminal program
-    And the fixture program shows a "message-pane" holding 12 messages in a 5 line window
+    And the fixture program shows a "log" holding 12 messages in a 9 line window
 
   Scenario: capturing every item collects past the visible window
-    When the test runner captures every "message" in the "message-pane" as "conversation"
+    When the test runner captures every "article" in the "log" as "conversation"
     Then the capture named "conversation" holds 12 items
 
   Scenario: captured items keep their screen order
-    When the test runner captures every "message" in the "message-pane" as "conversation"
+    When the test runner captures every "article" in the "log" as "conversation"
     Then the first item of the capture named "conversation" is "message 1"
     And the last item of the capture named "conversation" is "message 12"
 
   Scenario: items repeated across scroll positions are collected once
     Given the fixture program repeats its last 2 messages at each scroll position
-    When the test runner captures every "message" in the "message-pane" as "conversation"
+    When the test runner captures every "article" in the "log" as "conversation"
     Then the capture named "conversation" holds 12 items
 
   Scenario: capturing the visible scope reads only the current window
-    When the test runner captures the visible "message" items in the "message-pane" as "window"
+    When the test runner captures the visible "article" items in the "log" as "window"
     Then the capture named "window" holds 5 items
 
   Scenario: capturing a pane that never stops scrolling fails within its budget
-    Given the fixture program scrolls its "message-pane" without ever reaching an end
-    When the test runner captures every "message" in the "message-pane" as "conversation"
+    Given the fixture program scrolls its "log" without ever reaching an end
+    When the test runner captures every "article" in the "log" as "conversation"
     Then the driver replies with a failed result
     And the failure reports the capture reached its scroll limit

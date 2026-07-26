@@ -33,9 +33,9 @@ const TOM_TEMPERATURE: f64 = 0.1;
 const TOM_INSTRUCTION: &str = concat!(
     "Read the terminal screen below and reply with a JSON terminal object model ",
     "and nothing else. The object carries the integer keys \"rows\" and \"cols\" ",
-    "and the key \"root\", a region. A region carries \"role\", one of screen, ",
-    "region, menu, menuitem, list, listitem, table, row, column, dialog, button, ",
-    "textbox, statusbar, message-pane, message, tree, treeitem; \"name\" and ",
+    "and the key \"root\", a region. A region carries \"role\", one of application, ",
+    "region, menu, menuitem, list, listitem, button, textbox, status, log, ",
+    "article; \"name\" and ",
     "\"text\", each a string or null; \"selected\", a boolean; \"rect\", with the ",
     "integer keys \"x\", \"y\", \"width\" and \"height\"; and \"children\", an ",
     "array of regions.\n",
@@ -120,6 +120,11 @@ impl Request {
         &self.base_url
     }
 
+    /// The absolute chat-completions endpoint this request is sent to.
+    fn url(&self) -> String {
+        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+    }
+
     /// The model this request names.
     ///
     /// @planks("the request names the model {string}")
@@ -142,6 +147,38 @@ impl Request {
     pub fn authorization(&self) -> Option<&str> {
         self.authorization.as_deref()
     }
+}
+
+/// The wire form of a request: the endpoint it addresses, the credential it
+/// carries, the model it names, how it samples and the chat messages it sends.
+///
+/// @planks("it conforms to the {string} schema in {string}")
+impl serde::Serialize for Request {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut wire = serializer.serialize_struct("Request", 5)?;
+        wire.serialize_field("url", &self.url())?;
+        wire.serialize_field("authorization", &self.authorization)?;
+        wire.serialize_field("model", &self.model)?;
+        wire.serialize_field("temperature", &self.temperature)?;
+        wire.serialize_field(
+            "messages",
+            &[WireMessage {
+                role: "user",
+                content: &self.prompt,
+            }],
+        )?;
+        wire.end()
+    }
+}
+
+/// One chat message on the wire.
+///
+/// @planks("it conforms to the {string} schema in {string}")
+#[derive(serde::Serialize)]
+struct WireMessage<'a> {
+    role: &'a str,
+    content: &'a str,
 }
 
 /// The acronym request: the bundled skill's name and description, sampled at a
@@ -224,10 +261,7 @@ pub fn is_available(settings: &Settings) -> bool {
 /// generated. Absent when the provider cannot be reached, rejects the request,
 /// or answers with nothing.
 fn complete(request: &Request) -> Option<String> {
-    let url = format!(
-        "{}/chat/completions",
-        request.base_url.trim_end_matches('/')
-    );
+    let url = request.url();
     let body = format!(
         r#"{{"model":{},"temperature":{},"messages":[{{"role":"user","content":{}}}]}}"#,
         json_string(&request.model),

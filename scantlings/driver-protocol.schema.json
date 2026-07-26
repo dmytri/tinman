@@ -1,25 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "driver-protocol",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/driver-protocol.schema.json",
   "title": "Tinman driver protocol message",
-  "description": "One newline-delimited JSON message exchanged with the Tinman driver on stdin and stdout. A client in any language needs only a subprocess and a JSON parser. Referenced by features/driver-protocol.feature.",
+  "description": "One newline-delimited JSON-RPC 2.0 message exchanged with the Tinman driver on stdin and stdout, per the specification at https://www.jsonrpc.org/specification. Tinman defines no wire protocol of its own: a client in any language reaches for an existing JSON-RPC library, and the language servers, debug adapters and model-context servers a test author already runs speak the same framing. A protocol fault is an `error` object carrying a reserved code. A failed expectation is not a protocol fault, because the call succeeded and the product disagreed, so it returns a `result` whose `ok` is false. Referenced by features/driver-protocol.feature.",
   "oneOf": [
     { "$ref": "#/$defs/request" },
     { "$ref": "#/$defs/response" }
   ],
   "$defs": {
     "request": {
-      "description": "A message from the test runner to the driver.",
+      "description": "A call from the test runner to the driver.",
       "type": "object",
-      "required": ["id", "op"],
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method"],
       "properties": {
+        "jsonrpc": { "const": "2.0" },
         "id": {
-          "description": "Client-assigned request identifier, echoed on the reply.",
-          "type": "integer",
-          "minimum": 1
+          "description": "Client-assigned call identifier, echoed on the reply. Tinman assigns it no meaning beyond correlation.",
+          "type": ["string", "integer"]
         },
-        "op": {
-          "description": "The operation requested.",
+        "method": {
+          "description": "The operation called. A method outside this set is answered with the reserved code -32601.",
           "enum": [
             "launch",
             "activate",
@@ -33,69 +34,113 @@
             "close"
           ]
         },
+        "params": { "$ref": "#/$defs/params" }
+      }
+    },
+    "params": {
+      "description": "Arguments for the called method. Every method except launch addresses an existing session.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
         "session": {
-          "description": "The session the operation addresses. Absent on launch.",
+          "description": "The session the call addresses. Absent on launch, which creates one.",
           "type": "string",
           "minLength": 1
         },
         "command": {
-          "description": "The target command, on a launch request.",
+          "description": "The target command, on a launch call.",
           "type": "string",
           "minLength": 1
         },
         "sandbox": {
-          "description": "Backend-neutral sandbox specification for the session, on a launch request.",
+          "description": "Backend-neutral sandbox specification for the session, on a launch call. Omitted means the secure defaults.",
           "type": "object"
         },
         "role": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
+        "within": { "type": "string", "minLength": 1 },
         "label": { "type": "string", "minLength": 1 },
         "value": { "type": "string" },
         "key": { "type": "string", "minLength": 1 },
         "text": { "type": "string" },
-        "within": {
-          "description": "Restricts a locator to the named region.",
+        "scope": { "enum": ["visible", "all"] },
+        "as": {
+          "description": "The name the captured collection is bound to, on a capture call.",
           "type": "string",
           "minLength": 1
-        },
-        "items": { "type": "string", "minLength": 1 },
-        "scope": { "enum": ["all", "visible"] },
-        "as": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "response": {
-      "description": "A reply from the driver to the test runner.",
+      "description": "A reply from the driver. Exactly one of result or error is present, per the JSON-RPC specification.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "ok"],
+      "required": ["jsonrpc", "id"],
+      "oneOf": [
+        { "required": ["result"] },
+        { "required": ["error"] }
+      ],
       "properties": {
-        "id": {
-          "description": "The identifier of the request being answered.",
-          "type": "integer",
-          "minimum": 1
-        },
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer", "null"] },
+        "result": { "$ref": "#/$defs/result" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "result": {
+      "description": "The outcome of a call the driver was able to make. A failed expectation reports here rather than as an error, because the call itself succeeded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok"],
+      "properties": {
         "ok": {
-          "description": "Whether the operation succeeded. A failed action is a reply, never a dropped session.",
+          "description": "Whether the operation did what it was asked. False on a failed expectation or a locator that did not resolve.",
           "type": "boolean"
         },
-        "session": { "type": "string", "minLength": 1 },
-        "error": {
-          "description": "Why the operation failed. Present when ok is false.",
+        "session": {
+          "description": "The session identifier, on a launch reply.",
+          "type": "string",
+          "minLength": 1
+        },
+        "failure": {
+          "description": "What went wrong, when ok is false. Names what was looked for and what was found, so the client reports without a second call.",
           "type": "string",
           "minLength": 1
         },
         "screen": {
-          "description": "The virtual screen, present when the failure or the operation reports one.",
+          "description": "The rendered screen, on a screen reply and on a failure that shows what the step saw.",
+          "type": "string"
+        },
+        "tom": {
+          "description": "The terminal object model, on a tom reply. Conforms to the tom schema.",
           "type": "object"
         },
-        "tom": { "type": "object" },
+        "backend": {
+          "description": "The sandbox backend the session runs under, on a sandbox reply.",
+          "type": "string",
+          "minLength": 1
+        },
         "items": {
-          "description": "Structured data returned by a capture.",
+          "description": "The captured items, on a capture reply, in screen order.",
           "type": "array",
           "items": { "type": "string" }
+        }
+      }
+    },
+    "error": {
+      "description": "A protocol fault, per the JSON-RPC specification's error object. Reserved codes carry their standard meanings: -32700 parse error, -32600 invalid request, -32601 method not found, -32602 invalid params, -32603 internal error. Tinman defines no codes of its own, because a fault outside that set is a product outcome and belongs in a result.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [-32700, -32600, -32601, -32602, -32603]
         },
-        "backend": { "type": "string", "minLength": 1 },
-        "text": { "type": "string" }
+        "message": { "type": "string", "minLength": 1 },
+        "data": {
+          "description": "What the fault concerned, such as the unknown method name."
+        }
       }
     }
   }

@@ -81,6 +81,21 @@ pub fn model_reply_answering(answer: &str) -> String {
     answer.to_string()
 }
 
+/// Read the operator's questions from the terminal until the input ends,
+/// displaying each answer beneath the line the operator typed.
+///
+/// @planks("the operator types {string} at the assistant prompt")
+/// @planks("the operator ends the input")
+pub fn converse(settings: &Settings) {
+    use std::io::BufRead;
+    for line in std::io::stdin().lock().lines() {
+        let question = line.expect("the terminal input is readable");
+        if let Response::Answer(answer) = ask(settings, &question) {
+            println!("{answer}");
+        }
+    }
+}
+
 /// Put the operator's question to the configured provider and read its reply: a
 /// proposal when the named command line is one Tinman's parser takes, a refusal
 /// when it is not, and an answer when the reply names no command.

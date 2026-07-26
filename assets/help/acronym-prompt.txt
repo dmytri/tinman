@@ -1,0 +1,1 @@
+Expand this name as an acronym. Return only the expansion itself, on one line, with nothing before or after it.

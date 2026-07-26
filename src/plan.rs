@@ -24,8 +24,74 @@ pub struct Plan {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FlowStep {
-    Run(String),
+    Run(RunProcess),
     Tui(TuiProcess),
+}
+
+/// A command and how the plan expects it to run: the exit status the command
+/// must leave, and the text fed to its standard input.
+///
+/// @planks("the flow passes")
+/// @planks("execution fails and reports the status {int}")
+/// @planks("the step's standard output is {string}")
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(from = "RunForm")]
+pub struct RunProcess {
+    pub command: String,
+    pub status: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<String>,
+}
+
+/// The written forms of a run entry: a bare command, or a command carrying the
+/// status and the standard input the plan expects. A bare command YAML reads as
+/// a boolean, such as the shell's `false`, is that command's name.
+///
+/// @planks("the flow passes")
+/// @planks("execution fails and reports the step that failed")
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum RunForm {
+    Command(String),
+    Boolean(bool),
+    Full {
+        command: String,
+        #[serde(default)]
+        status: i32,
+        #[serde(default)]
+        stdin: Option<String>,
+    },
+}
+
+impl From<RunForm> for RunProcess {
+    /// Normalize a written run entry: a bare command expects the status 0 and
+    /// carries no input.
+    ///
+    /// @planks("the flow passes")
+    /// @planks("the step's standard output is {string}")
+    fn from(form: RunForm) -> RunProcess {
+        match form {
+            RunForm::Command(command) => RunProcess {
+                command,
+                status: 0,
+                stdin: None,
+            },
+            RunForm::Boolean(flag) => RunProcess {
+                command: flag.to_string(),
+                status: 0,
+                stdin: None,
+            },
+            RunForm::Full {
+                command,
+                status,
+                stdin,
+            } => RunProcess {
+                command,
+                status,
+                stdin,
+            },
+        }
+    }
 }
 
 /// A terminal program and the steps driving it.
@@ -42,35 +108,51 @@ pub struct TuiProcess {
 /// map, so an unrecognized keyword is reported as an unknown variant.
 ///
 /// @planks("parsing fails and reports the unknown step keyword {string}")
+/// @planks("the written plan records a key press {string}")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     Activate(Locator),
     Fill(Fill),
+    Press(String),
     Expect(Expectation),
 }
 
 /// Addresses a region of the terminal object model by name, and by role when
-/// the plan names one.
+/// the plan names one. A locator a recording confirmed also carries the region
+/// it was scoped to and the binding it needed.
 ///
 /// @planks("the step's locator name is {string}")
 /// @planks("the step's locator names no role")
+/// @planks("the plan records the locator's binding as {string}")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "LocatorForm")]
 pub struct Locator {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<String>,
 }
 
-/// The two written forms of a locator: a bare name, or a role and a name.
+/// The two written forms of a locator: a bare name, or a role and a name with
+/// the scope and binding a confirmed locator records.
 ///
 /// @planks("the step's locator names no role")
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum LocatorForm {
     Name(String),
-    Full { role: Option<String>, name: String },
+    Full {
+        role: Option<String>,
+        name: String,
+        #[serde(default)]
+        scope: Option<String>,
+        #[serde(default)]
+        binding: Option<String>,
+    },
 }
 
 impl From<LocatorForm> for Locator {
@@ -80,8 +162,23 @@ impl From<LocatorForm> for Locator {
     /// @planks("the step's locator names no role")
     fn from(form: LocatorForm) -> Locator {
         match form {
-            LocatorForm::Name(name) => Locator { role: None, name },
-            LocatorForm::Full { role, name } => Locator { role, name },
+            LocatorForm::Name(name) => Locator {
+                role: None,
+                name,
+                scope: None,
+                binding: None,
+            },
+            LocatorForm::Full {
+                role,
+                name,
+                scope,
+                binding,
+            } => Locator {
+                role,
+                name,
+                scope,
+                binding,
+            },
         }
     }
 }
@@ -95,33 +192,64 @@ pub struct Fill {
     pub value: String,
 }
 
-/// Assert text is present on screen.
+/// Assert text is present on screen, in the region a recorded expectation
+/// addresses. A hand-authored expectation names that region by name under
+/// `within`, so the step stays bound to the region rather than to the cells the
+/// region occupied on the terminal it was captured on.
 ///
 /// @planks("the step expects the text {string}")
+/// @planks("the plan records the locator's binding as {string}")
+/// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "ExpectationForm")]
 pub struct Expectation {
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub within: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locator: Option<Locator>,
 }
 
-/// The two written forms of an expectation: a bare string, or a text map.
+/// The two written forms of an expectation: a bare string, or a text map
+/// carrying the region the expectation is scoped to and the locator a recorded
+/// expectation addresses.
 ///
 /// @planks("the step expects the text {string}")
+/// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum ExpectationForm {
     Text(String),
-    Full { text: String },
+    Full {
+        text: String,
+        #[serde(default)]
+        within: Option<String>,
+        #[serde(default)]
+        locator: Option<Locator>,
+    },
 }
 
 impl From<ExpectationForm> for Expectation {
     /// Normalize a written expectation: a bare string is the expected text.
     ///
     /// @planks("the step expects the text {string}")
+    /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
     fn from(form: ExpectationForm) -> Expectation {
         match form {
-            ExpectationForm::Text(text) => Expectation { text },
-            ExpectationForm::Full { text } => Expectation { text },
+            ExpectationForm::Text(text) => Expectation {
+                text,
+                within: None,
+                locator: None,
+            },
+            ExpectationForm::Full {
+                text,
+                within,
+                locator,
+            } => Expectation {
+                text,
+                within,
+                locator,
+            },
         }
     }
 }

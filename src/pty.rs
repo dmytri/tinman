@@ -64,7 +64,9 @@ pub fn capture(prepared: &PreparedProcess) -> Result<VirtualScreen, String> {
 pub struct InteractiveCapture {
     writer: Box<dyn Write + Send>,
     output: Arc<Mutex<Vec<u8>>>,
-    _child: Box<dyn Child + Send + Sync>,
+    child: Box<dyn Child + Send + Sync>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    columns: u16,
 }
 
 impl std::fmt::Debug for InteractiveCapture {
@@ -79,9 +81,28 @@ impl std::fmt::Debug for InteractiveCapture {
 ///
 /// @planks("the process is captured through a PTY")
 pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapture, String> {
+    capture_interactive_at(prepared, None)
+}
+
+/// Launch a prepared process the same way, on a terminal `columns` wide. Size is
+/// a property of the run, so the caller states it, and an unstated width leaves
+/// the program on the operator's own terminal size. The width reaches the PTY
+/// and the virtual screen together, so the program draws and is read at one
+/// width.
+///
+/// @planks("the process is captured through a PTY")
+/// @planks("that plan is replayed at {int} columns")
+pub fn capture_interactive_at(
+    prepared: &PreparedProcess,
+    columns: Option<u16>,
+) -> Result<InteractiveCapture, String> {
     let pty_system = native_pty_system();
+    let columns = columns.unwrap_or(PtySize::default().cols);
     let pair = pty_system
-        .openpty(PtySize::default())
+        .openpty(PtySize {
+            cols: columns,
+            ..PtySize::default()
+        })
         .map_err(|e| e.to_string())?;
     let mut cmd = CommandBuilder::new(prepared.program.clone());
     for arg in &prepared.args {
@@ -95,7 +116,7 @@ pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapt
     drop(pair.slave);
     let output = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&output);
-    std::thread::spawn(move || {
+    let drain = std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         while let Ok(read) = reader.read(&mut buf) {
             if read == 0 {
@@ -107,7 +128,9 @@ pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapt
     Ok(InteractiveCapture {
         writer,
         output,
-        _child: child,
+        child,
+        reader: Some(drain),
+        columns,
     })
 }
 
@@ -124,11 +147,47 @@ impl InteractiveCapture {
         self.writer.flush().expect("flush the PTY");
     }
 
-    /// The current virtual screen, parsed from all output read so far.
+    /// Whether the running program has already exited, so a caller sends it
+    /// nothing it can no longer read.
+    ///
+    /// @planks("the operator records the command {string} and presses {string}")
+    pub fn finished(&mut self) -> bool {
+        self.child
+            .try_wait()
+            .expect("read the launched program's status")
+            .is_some()
+    }
+
+    /// End the running program's input and wait for it to finish, so the screen
+    /// read afterwards is the screen the program left.
+    ///
+    /// The terminal's own end-of-transmission character is how a program
+    /// reading a terminal sees its input end, and it answers one read. A closed
+    /// input answers every read, so it is sent again for each read the program
+    /// makes until the program exits. Joining the reader is what completes the
+    /// screen: the exit is observed before the last bytes the program wrote
+    /// have necessarily been read.
+    ///
+    /// @planks("the operator records the fixture terminal program")
+    /// @planks("the operator records that program")
+    pub fn end_session(&mut self) {
+        while !self.finished() {
+            self.writer.write_all(&[0x04]).expect("end the PTY input");
+            self.writer.flush().expect("flush the PTY");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if let Some(drain) = self.reader.take() {
+            drain.join().expect("join the PTY output reader");
+        }
+    }
+
+    /// The current virtual screen, parsed from all output read so far, at the
+    /// width the program was given.
     ///
     /// @planks("the virtual screen contains the text {string}")
+    /// @planks("that plan is replayed at {int} columns")
     pub fn screen(&self) -> VirtualScreen {
         let output = self.output.lock().unwrap();
-        VirtualScreen::from_pty_output(&output)
+        VirtualScreen::from_pty_output_at(&output, self.columns)
     }
 }

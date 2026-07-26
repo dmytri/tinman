@@ -1,112 +1,6 @@
 {
   "watch1": {
     "scenarios": [
-      "features/virtual-screen.feature:text positioned with a gap keeps its column spacing",
-      "features/virtual-screen.feature:a wide character occupies both of its columns",
-      "features/virtual-screen.feature:reversed video covers every column of a wide character",
-      "features/virtual-screen.feature:a row highlighted by erasing to end of line reads as reversed throughout",
-      "features/methodology-conformance.feature:the implementation carries no standing perturbation",
-      "features/methodology-conformance.feature:every plank is a doc comment on a declaration",
-      "features/methodology-conformance.feature:verification support declares no unmarked test double"
-    ]
-  },
-  "watch2": {
-    "scenarios": [
-      "features/conventional-help.feature:help renders the bundled help text",
-      "features/conventional-help.feature:every command the parser accepts appears in the help text",
-      "features/conventional-help.feature:the help text carries exactly one tagline placeholder",
-      "features/conventional-help.feature:help exits successfully",
-      "features/bundled-skill.feature:the bundled skill conforms to the skill schema",
-      "features/bundled-skill.feature:Tinman loads the skill it ships",
-      "features/bundled-skill.feature:the acronym context is the skill's name and description",
-      "features/bundled-skill.feature:the assistant answers from the whole bundled skill"
-    ]
-  },
-  "watch3": {
-    "scenarios": [
-      "features/inference-availability.feature:a dotenv file supplies the provider credential",
-      "features/inference-availability.feature:the environment overrides the dotenv file",
-      "features/inference-availability.feature:inference is unavailable without a credential",
-      "features/inference-availability.feature:degraded help fills the tagline with the unavailable notice",
-      "features/inference-availability.feature:degraded help omits the assistant prompt",
-      "features/inference-availability.feature:degraded help exits successfully",
-      "features/inference-availability.feature:replay runs without a credential",
-      "features/acronym.feature:the generated expansion fills the tagline line",
-      "features/acronym.feature:an empty generation falls back to the unavailable notice",
-      "features/inference-profiles.feature:the acronym profile samples at a very high temperature",
-      "features/inference-profiles.feature:the assistant profile samples at a low temperature",
-      "features/inference-profiles.feature:both profiles address the same configured model",
-      "features/inference-provider.feature:an unconfigured provider is OpenRouter",
-      "features/inference-provider.feature:a configured provider replaces the default",
-      "features/inference-provider.feature:a built request satisfies the provider contract",
-      "features/inference-provider.feature:an unreachable provider reports inference unavailable",
-      "features/inference-provider.feature:a rejected credential reports inference unavailable"
-    ]
-  },
-  "watch4": {
-    "scenarios": [
-      "features/interactive-help.feature:the assistant is appended beneath the conventional help",
-      "features/interactive-help.feature:a proposed command is displayed before it runs",
-      "features/interactive-help.feature:a declined proposal does not run",
-      "features/interactive-help.feature:a confirmed proposal runs through the command parser",
-      "features/interactive-help.feature:a proposal outside Tinman's command set is refused",
-      "features/interactive-help.feature:a proposal naming an unknown Tinman subcommand is refused",
-      "features/interactive-help.feature:a question is answered without proposing a command",
-      "features/interactive-help.feature:the assistant discharges the command-parser boundary contract"
-    ]
-  },
-  "watch5": {
-    "scenarios": [
-      "features/terminal-object-model.feature:a vertical split becomes two sibling regions",
-      "features/terminal-object-model.feature:a bordered pane becomes a region carrying its title as its name",
-      "features/terminal-object-model.feature:the lines of a bordered pane become list items",
-      "features/terminal-object-model.feature:a highlighted line is the selected item",
-      "features/terminal-object-model.feature:the bottom line becomes the status bar",
-      "features/terminal-object-model.feature:a region keeps the screen cells it was built from",
-      "features/terminal-object-model.feature:the terminal object model conforms to its schema",
-      "features/tom-locators.feature:a locator finds an item by role and name",
-      "features/tom-locators.feature:a locator matches a name case-sensitively",
-      "features/tom-locators.feature:a locator scoped to a named region searches only that region",
-      "features/tom-locators.feature:an unscoped locator matching two regions reports the ambiguity",
-      "features/tom-inference.feature:an expectation whose locator needs a fallback is refused",
-      "features/tom-inference.feature:a confirmed locator is written as inference proposed it",
-      "features/tom-inference.feature:a name the screen does not carry is rejected",
-      "features/tom-inference.feature:a name matching two regions is scoped to its parent",
-      "features/tom-inference.feature:a rejected name falls back to a deterministic locator",
-      "features/tom-inference.feature:the written plan names the fallback a locator needed",
-      "features/tom-inference.feature:an unavailable engine leaves the deterministic model standing",
-      "features/tom-inference.feature:inference names a region the deterministic pass left unnamed",
-      "features/tom-inference.feature:an engine result that violates the model schema is discarded"
-    ]
-  },
-  "watch6": {
-    "scenarios": [
-      "features/harness-plan.feature:the example flow conforms to the harness schema",
-      "features/harness-plan.feature:a plan step naming an unknown keyword is rejected",
-      "features/harness-plan.feature:a plan with no flow is rejected",
-      "features/harness-plan.feature:the plan's sandbox section is backend-neutral",
-      "features/plan-shorthand.feature:a bare command with steps is a single-process flow",
-      "features/plan-shorthand.feature:a scalar expectation normalizes to a text expectation",
-      "features/plan-shorthand.feature:a scalar activation normalizes to a name locator",
-      "features/plan-shorthand.feature:a plan with no sandbox section is sandboxed by default",
-      "features/plan-shorthand.feature:the shorthand form and the full form parse to the same plan",
-      "features/sandbox-configuration.feature:a mount is read-only unless the plan says otherwise"
-    ]
-  },
-  "watch7": {
-    "scenarios": [
-      "features/driver-protocol.feature:the driver answers a launch request with a session identifier",
-      "features/driver-protocol.feature:the driver rejects an unknown operation",
-      "features/driver-protocol.feature:a failed action leaves the session usable",
-      "features/driver-protocol.feature:closing a session reclaims its sandbox resources",
-      "features/driver-protocol.feature:driver messages conform to the protocol schema",
-      "features/driver-session.feature:a launched program is sandboxed by default",
-      "features/driver-session.feature:activating a menu item opens what it names",
-      "features/driver-session.feature:filling a textbox enters the value",
-      "features/driver-session.feature:pressing a key reaches the program",
-      "features/driver-session.feature:an expectation on absent text fails with the screen contents",
-      "features/driver-session.feature:a locator that matches nothing names what it looked for",
-      "features/driver-session.feature:a locator that matches several regions reports the ambiguity",
       "features/semantic-capture.feature:capturing every item collects past the visible window",
       "features/semantic-capture.feature:captured items keep their screen order",
       "features/semantic-capture.feature:items repeated across scroll positions are collected once",
@@ -114,36 +8,17 @@
       "features/semantic-capture.feature:capturing a pane that never stops scrolling fails within its budget"
     ]
   },
-  "watch8": {
+  "watch2": {
     "scenarios": [
-      "features/record-command.feature:record writes an interaction log for the captured program",
-      "features/record-command.feature:a written plan replays the interaction it recorded",
-      "features/record-command.feature:a plan that fails its own replay is not written",
-      "features/record-command.feature:record writes to a default file when no path is given",
-      "features/record-command.feature:record refuses to overwrite an existing log",
-      "features/inspect-command.feature:inspect lists the roles and names on the current screen",
-      "features/inspect-command.feature:inspect emits the model as JSON when asked",
-      "features/inspect-command.feature:inspect reports a program that draws nothing",
-      "features/test-command.feature:a passing plan exits successfully",
-      "features/test-command.feature:a failing plan exits with a failure status",
-      "features/test-command.feature:the failure report names the step and shows the screen",
-      "features/flow-orchestration.feature:a flow runs its steps in the order written",
-      "features/flow-orchestration.feature:a failing run step stops the flow",
-      "features/flow-orchestration.feature:a run step sees the workspace the previous step wrote",
-      "features/replay.feature:a plan captured at one terminal width replays at another",
-      "features/replay.feature:a status line stays bound when the terminal widens",
-      "features/replay.feature:replaying a recorded flow reproduces the interaction",
-      "features/replay.feature:a failed expectation names the step that failed",
-      "features/replay.feature:a failure report shows the screen the step saw",
-      "features/replay.feature:replay performs no inference"
+      "@logic"
     ]
   },
-  "watch9": {
+  "watch3": {
     "scenarios": [
       "@sandbox"
     ]
   },
-  "watch10": {
+  "watch4": {
     "scenarios": [
       "@inference"
     ]

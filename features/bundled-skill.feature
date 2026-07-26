@@ -16,10 +16,11 @@ Feature: bundled skill
     When Tinman loads its bundled skill
     Then the loaded skill body is identical to the file's body
 
-  Scenario: the acronym context is the skill's name and description
+  Scenario: the acronym context instructs the model before naming the skill
     Given the bundled skill at "assets/skill/SKILL.md"
     When the acronym context is built
-    Then the context is the skill's "name" and "description" fields
+    Then the context begins with the body of the asset at "assets/help/acronym-prompt.txt"
+    And the context carries the skill's "name" and "description" fields
 
   Scenario: the assistant answers from the whole bundled skill
     Given the bundled skill at "assets/skill/SKILL.md"

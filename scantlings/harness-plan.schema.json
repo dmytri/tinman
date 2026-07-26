@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "harness-plan",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/harness-plan.schema.json",
   "title": "Tinman harness plan",
   "description": "The canonical YAML representation of a recorded or authored flow. A plan is either the full form, carrying a flow of run and tui entries, or the shorthand form, carrying one command and its steps. Both normalize to the same parsed plan. Referenced by features/harness-plan.feature and features/plan-shorthand.feature.",
   "type": "object",
@@ -48,7 +48,17 @@
               "required": ["command"],
               "properties": {
                 "command": { "type": "string", "minLength": 1 },
-                "cwd": { "type": "string", "minLength": 1 }
+                "cwd": { "type": "string", "minLength": 1 },
+                "status": {
+                  "description": "The exit status this command is expected to leave. Omitted means 0. A command-line program's failure is often the behaviour under test, so an expected non-zero status passes the step and any other status fails it.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "stdin": {
+                  "description": "Text fed to the command's standard input, which is closed afterwards. Omitted means standard input is empty and closed immediately.",
+                  "type": "string"
+                }
               }
             }
           ]
@@ -133,7 +143,11 @@
       "properties": {
         "role": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
-        "within": { "type": "string", "minLength": 1 }
+        "within": { "type": "string", "minLength": 1 },
+        "binding": {
+          "description": "How this locator was arrived at when the plan was recorded. An inferred name that bound on its own reads `exact`; one that needed its parent region to disambiguate reads `scoped`; one the deterministic pass could not confirm reads `ordinal`, and the locator addresses a position within its role rather than a name. A hand-authored locator omits the key. Recording the rung keeps a weak locator legible: a plan whose locators are mostly `ordinal` reports that inference did badly on that screen, and a green run never will.",
+          "enum": ["exact", "scoped", "ordinal"]
+        }
       }
     }
   }

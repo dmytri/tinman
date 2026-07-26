@@ -5,9 +5,13 @@ Feature: terminal object model inference
 
   Rule: inference enriches the terminal object model at capture time only. The deterministic model is the spine; the inference engine is a second producer of the same shape, so a plan authored by hand needs no model at all.
 
-  Rule: an inferred name is a claim until the deterministic pass confirms it. Inference selects among names the screen already carries and never invents one, because replay rebuilds the model with no model invocation and can only find a name the screen still yields. Every inferred locator is round-tripped before it reaches a plan: the model is rebuilt deterministically from the same screen, and the locator must bind, bind to exactly one region, and bind to the region inference named. A locator failing the round trip descends a fallback ladder rather than being written as it stands.
+  Rule: replay rebuilds the model with no model invocation, so it can only find a name the screen still yields. That asymmetry is why an inferred name cannot be taken on the engine's word: a name the model invented reads exactly like a name the screen carries, right up until something tries to bind it, and by then the operator is gone.
 
-  Rule: the fallback ladder serves action steps alone. An expectation resolves its locator exactly or the recording fails. A mis-bound action announces itself on the next step, so a fallback that goes wrong there is caught; an assertion is the thing that would have caught it. An assertion rebinding to a region it did not name passes while asserting nothing, and an absence assertion that rebinds fails while the product is correct.
+  Rule: a mis-bound action announces itself on the next step, so forgiveness there is recoverable. An assertion is the thing that would have caught it, so the same forgiveness destroys it silently: an assertion that rebinds to a region it did not name passes while asserting nothing, and an absence assertion that rebinds fails while the product is correct.
+
+  Rule: resolving a locator and confirming one are two operations, not one. Resolution answers what a locator matches in the model as it stands, and reports ambiguity as ambiguity, which is what a replaying test needs. Confirmation runs at capture time only: it takes a proposed locator, and where resolution reports ambiguity it narrows by scope or ordinal until exactly one region binds, recording which of `exact`, `scoped` or `ordinal` it needed. Collapsing them would make an ambiguous locator look bindable to the test that must later resolve it alone.
+
+  Rule: inference proposes names, never roles. Every role in the model schema is derived deterministically, because a plan may address any of them and replay rebuilds the model with no model invocation. What the deterministic pass cannot supply is a name for a region carrying no title, and a name it does propose must still be text the screen actually shows.
 
   Scenario: an expectation whose locator needs a fallback is refused
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
@@ -52,10 +56,10 @@ Feature: terminal object model inference
     Then the region named "Files" has the role "list"
 
   Scenario: inference names a region the deterministic pass left unnamed
-    Given a virtual screen whose top line reads "  Files   Settings   Quit  "
-    And an engine that labels that line a "menu"
+    Given a virtual screen showing an unbordered pane whose first line reads "Recent files"
+    And an engine that names that region "Recent files"
     When the terminal object model is inferred
-    Then the model contains a region with the role "menu"
+    Then the model contains a region named "Recent files"
 
   Scenario: an engine result that violates the model schema is discarded
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"

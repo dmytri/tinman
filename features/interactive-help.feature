@@ -10,6 +10,19 @@ Feature: interactive help
     When the operator runs "tinman --help" in an interactive terminal
     Then the help output ends with the body of the asset at "assets/help/assistant-prompt.txt"
 
+  Scenario: a question typed at the prompt is answered
+    Given inference is available
+    And the assistant answers "Replay runs a recorded plan with no model."
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "what does replay do" at the assistant prompt
+    Then the output displays the answer "Replay runs a recorded plan with no model."
+
+  Scenario: the assistant session ends when the operator ends the input
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator ends the input
+    Then the command exits with status 0
+
   Scenario: a proposed command is displayed before it runs
     Given the assistant infers the command "tinman record opencode"
     When the operator asks "record the opencode agent"

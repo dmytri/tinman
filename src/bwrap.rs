@@ -4,6 +4,10 @@
 
 use crate::process::PreparedProcess;
 use crate::sandbox::{CommandSpec, Network, SandboxSpec};
+use std::path::Path;
+
+/// Where the sandboxed program's home directory sits inside the sandbox.
+const SANDBOX_HOME: &str = "/sandbox";
 
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
 /// availability check can be exercised against a name that is off PATH.
@@ -44,6 +48,20 @@ impl BubblewrapBackend {
     /// @planks("a Bubblewrap-prepared process that prints its home directory and the value of {string}")
     /// @planks("a Bubblewrap-prepared process that probes for a network route")
     pub fn generate_args(&self, spec: &SandboxSpec, command: &CommandSpec) -> Vec<String> {
+        self.args_with_home(spec, command, None)
+    }
+
+    /// The same argument vector, with `home` bound writable at the sandbox home
+    /// when the caller provides one, so a session that keeps state writes into a
+    /// real directory the caller owns and reclaims.
+    ///
+    /// @planks("the Tinman driver has a session running {string}")
+    fn args_with_home(
+        &self,
+        spec: &SandboxSpec,
+        command: &CommandSpec,
+        home: Option<&Path>,
+    ) -> Vec<String> {
         let mut args = vec![
             "--unshare-all".to_string(),
             "--clearenv".to_string(),
@@ -66,9 +84,14 @@ impl BubblewrapBackend {
             args.push(system_path.to_string());
         }
         // A temporary HOME, never the operator's real home.
+        if let Some(home) = home {
+            args.push("--bind".to_string());
+            args.push(home.display().to_string());
+            args.push(SANDBOX_HOME.to_string());
+        }
         args.push("--setenv".to_string());
         args.push("HOME".to_string());
-        args.push("/sandbox".to_string());
+        args.push(SANDBOX_HOME.to_string());
         // The command to run inside the sandbox.
         args.push(command.program.clone());
         args.extend(command.args.iter().cloned());
@@ -86,10 +109,25 @@ impl BubblewrapBackend {
         spec: &SandboxSpec,
         command: &CommandSpec,
     ) -> Result<PreparedProcess, String> {
+        self.prepare_with_home(spec, command, None)
+    }
+
+    /// Prepare a process the same way, giving the sandbox the host directory
+    /// `home` as its home. The caller created that directory and reclaims it, so
+    /// the sandbox writes somewhere real and leaves nothing behind.
+    ///
+    /// @planks("the Tinman driver has a session running {string}")
+    /// @planks("the session's temporary sandbox directories no longer exist")
+    pub fn prepare_with_home(
+        &self,
+        spec: &SandboxSpec,
+        command: &CommandSpec,
+        home: Option<&Path>,
+    ) -> Result<PreparedProcess, String> {
         if !executable_available(&self.executable) {
             return Err("Bubblewrap is unavailable".to_string());
         }
-        let args = self.generate_args(spec, command);
+        let args = self.args_with_home(spec, command, home);
         Ok(PreparedProcess {
             program: self.executable.clone(),
             args,

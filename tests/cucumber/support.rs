@@ -248,6 +248,124 @@ impl Drop for ScratchDir {
     }
 }
 
+/// The fixture terminal program the suite drives: a real full-screen program,
+/// not a stand-in. It draws a bordered pane and a status bar with real ANSI
+/// positioning, waits for the operator, and redraws when driven, so a plan can
+/// address it by role and name through the same terminal object model any other
+/// program reaches.
+const FIXTURE_TUI: &str = "\
+#!/bin/sh
+printf '\\033[2J'
+printf '\\033[1;1H  Files   Settings   Quit  '
+printf '\\033[3;1H\u{250c}Files\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
+printf '\\033[4;1H\u{2502}src            \u{2502}'
+printf '\\033[5;1H\u{2502}tests          \u{2502}'
+printf '\\033[6;1H\u{2502}README         \u{2502}'
+printf '\\033[7;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}'
+printf '\\033[9;1HUsername: ________'
+cols=`stty size 2>/dev/null | cut -d' ' -f2`
+printf '\\033[23;1HWIDTH:%s' \"${cols:-80}\"
+printf '\\033[24;1HREADY'
+read -r _key
+printf '\\033[24;1H\\033[KSaved'
+read -r _key
+";
+
+/// A fixture terminal program that draws a different pane title on each draw,
+/// so a plan recorded against it cannot replay itself. Real instability, not a
+/// simulated failure: the program genuinely renames its pane between draws.
+const FIXTURE_TUI_UNSTABLE: &str = "\
+#!/bin/sh
+printf '\\033[2J'
+printf '\\033[3;1H\u{250c}Files\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
+printf '\\033[4;1H\u{2502}src            \u{2502}'
+printf '\\033[5;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}'
+printf '\\033[24;1HREADY'
+read -r _key
+printf '\\033[2J'
+printf '\\033[3;1H\u{250c}Folders\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
+printf '\\033[4;1H\u{2502}src            \u{2502}'
+printf '\\033[5;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}'
+printf '\\033[24;1HREADY'
+read -r _key
+";
+
+/// Where the shared fixture programs for this run live, provisioned once.
+static FIXTURE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The path of the fixture terminal program, provisioned once per run and
+/// shared by every scenario that drives it. The program is ambient state no
+/// scenario asserts on, so it is built once rather than per scenario. Leftover
+/// fixture directories from earlier runs are reclaimed here, at first use,
+/// because a killed run cannot be trusted to have torn down after itself.
+pub fn fixture_terminal_program() -> std::path::PathBuf {
+    let dir = FIXTURE_DIR.get_or_init(|| {
+        reclaim_stale_fixture_dirs();
+        let path = std::env::temp_dir().join(format!("tinman-fixtures-{}", std::process::id()));
+        std::fs::create_dir_all(&path)
+            .unwrap_or_else(|e| panic!("fixture directory {} not created: {e}", path.display()));
+        path
+    });
+    let program = dir.join("fixture-tui");
+    if !program.exists() {
+        std::fs::write(&program, FIXTURE_TUI)
+            .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
+        set_executable(&program);
+    }
+    program
+}
+
+/// The path of the fixture terminal program whose pane titles change between
+/// draws, provisioned once per run and shared, like the stable fixture.
+pub fn unstable_fixture_terminal_program() -> std::path::PathBuf {
+    let stable = fixture_terminal_program();
+    let dir = stable.parent().expect("the fixture directory");
+    let program = dir.join("fixture-tui-unstable");
+    if !program.exists() {
+        std::fs::write(&program, FIXTURE_TUI_UNSTABLE)
+            .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
+        set_executable(&program);
+    }
+    program
+}
+
+/// Remove fixture directories an earlier run left behind, so a crashed run does
+/// not leak them. A directory belonging to a process still alive is left alone.
+fn reclaim_stale_fixture_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(pid) = name.strip_prefix("tinman-fixtures-") else {
+            continue;
+        };
+        if pid == std::process::id().to_string() {
+            continue;
+        }
+        if std::path::Path::new("/proc").join(pid).exists() {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
+}
+
+/// Give `path` the owner execute bit, so the shell can launch it as a program.
+fn set_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)
+        .unwrap_or_else(|e| panic!("fixture program {} unreadable: {e}", path.display()))
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).unwrap_or_else(|e| {
+        panic!(
+            "fixture program {} not made executable: {e}",
+            path.display()
+        )
+    });
+}
+
 /// What the local provider answers a chat-completions request with.
 #[derive(Debug, Clone)]
 pub enum ProviderReply {
@@ -617,6 +735,37 @@ pub fn bordered_pane_screen(
     tinman::screen::VirtualScreen::from_text(&out)
 }
 
+/// Draw a screen showing two bordered panes side by side, titled `Left` and
+/// `Right`, each listing one line carrying `item`, so one name matches in two
+/// regions and a locator naming it alone is ambiguous.
+pub fn two_bordered_panes_screen(item: &str) -> tinman::screen::VirtualScreen {
+    let width = 18;
+    let pad = " ".repeat(width - item.chars().count());
+    let rule = "\u{2500}".repeat(width);
+    let mut out = String::new();
+    for (row, (title, gap)) in [("Left", 1), ("Right", 24)].iter().enumerate() {
+        let _ = row;
+        let title_rule = "\u{2500}".repeat(width - title.chars().count());
+        out.push_str(&format!("\x1b[1;{gap}H\u{250c}{title}{title_rule}\u{2510}"));
+        out.push_str(&format!("\x1b[2;{gap}H\u{2502}{item}{pad}\u{2502}"));
+        out.push_str(&format!("\x1b[3;{gap}H\u{2514}{rule}\u{2518}"));
+    }
+    tinman::screen::VirtualScreen::from_text(&out)
+}
+
+/// Draw a pane carrying no border, whose first line reads `first_line` and whose
+/// remaining lines are entries beneath it. The deterministic pass has no title to
+/// read, so the region it builds carries no name and only inference can supply
+/// one.
+pub fn unbordered_pane_screen(first_line: &str) -> tinman::screen::VirtualScreen {
+    let mut out = String::new();
+    for line in [first_line, "report.txt", "notes.txt"] {
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    tinman::screen::VirtualScreen::from_text(&out)
+}
+
 /// Draw a screen split by a vertical rule at `column`, zero-based, so the model
 /// reads two sibling regions either side of it.
 pub fn vertical_split_screen(cols: u16, column: u16) -> tinman::screen::VirtualScreen {
@@ -641,56 +790,267 @@ pub fn top_line_screen(text: &str) -> tinman::screen::VirtualScreen {
     tinman::screen::VirtualScreen::from_text(&format!("\x1b[1;1H{text}"))
 }
 
-/// Run the real `tinman` binary on a real pseudo-terminal, so the run sees a
-/// terminal rather than a pipe, with `dir` as its working directory and only
-/// the `TINMAN_*` configuration named in `env`. Everything the program wrote is
-/// returned together with its exit status. The terminal is opened large enough
-/// to hold the whole help output, so no line the scenario asserts on scrolls
-/// away before the program exits.
+/// Draw a screen carrying `text` at the 1-based `row` and `col`, addressed with
+/// real ANSI cursor positioning so the text lands where the scenario places it
+/// and the rest of the grid stays blank.
+pub fn text_at_screen(text: &str, row: u16, col: u16) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_text(&format!("\x1b[{row};{col}H{text}"))
+}
+
+/// Run the real `tinman` binary to completion on a real pseudo-terminal, so the
+/// run sees a terminal rather than a pipe, with `dir` as its working directory
+/// and only the `TINMAN_*` configuration named in `env`. Everything the program
+/// wrote is returned together with its exit status. The terminal is opened large
+/// enough to hold the whole help output, so no line the scenario asserts on
+/// scrolls away before the program exits.
+///
+/// The operator's run ends where this call does, so the input is ended straight
+/// away: a program that waits for a question sees the input end and completes,
+/// and the wait for it is bounded rather than a read that could never return.
 pub fn run_tinman_on_a_terminal(
     dir: &std::path::Path,
     args: &[&str],
     env: &[(String, String)],
 ) -> Result<RunOutcome, String> {
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-    use std::io::Read;
+    let mut session = TerminalSession::start(dir, args, env)?;
+    session.end_input();
+    Ok(session.finish(std::time::Duration::from_secs(30)))
+}
 
-    let pair = native_pty_system()
-        .openpty(PtySize {
-            rows: 60,
-            cols: 120,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())?;
+/// A live `tinman` run on a real pseudo-terminal, kept open so a scenario can
+/// type at its prompt and end its input exactly as an operator does. Everything
+/// the program writes is drained on a reader thread into a shared buffer, so
+/// every wait here ends on observed output rather than on a clock. The child is
+/// killed on drop, so a scenario failing mid-session leaks no process.
+pub struct TerminalSession {
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    writer: Box<dyn std::io::Write + Send>,
+    output: std::sync::Arc<std::sync::Mutex<String>>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    mark: usize,
+}
 
-    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_tinman"));
-    for arg in args {
-        command.arg(arg);
+impl std::fmt::Debug for TerminalSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TerminalSession").finish_non_exhaustive()
     }
-    command.cwd(dir);
-    for (key, value) in std::env::vars() {
-        if !key.starts_with("TINMAN_") {
+}
+
+impl TerminalSession {
+    /// Start `tinman` on a real terminal in `dir`, with only the `TINMAN_*`
+    /// configuration named in `env`, and leave it running.
+    pub fn start(
+        dir: &std::path::Path,
+        args: &[&str],
+        env: &[(String, String)],
+    ) -> Result<TerminalSession, String> {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::Read;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 60,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| e.to_string())?;
+
+        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_tinman"));
+        for arg in args {
+            command.arg(arg);
+        }
+        command.cwd(dir);
+        for (key, value) in std::env::vars() {
+            if !key.starts_with("TINMAN_") {
+                command.env(key, value);
+            }
+        }
+        for (key, value) in env {
             command.env(key, value);
         }
-    }
-    for (key, value) in env {
-        command.env(key, value);
+
+        let child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|e| e.to_string())?;
+        drop(pair.slave);
+        let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+        let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+
+        let output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = std::sync::Arc::clone(&output);
+        let drain = std::thread::spawn(move || {
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        let text = String::from_utf8_lossy(&buffer[..read]).replace('\r', "");
+                        sink.lock()
+                            .expect("the terminal output buffer is not poisoned")
+                            .push_str(&text);
+                    }
+                }
+            }
+        });
+
+        Ok(TerminalSession {
+            _master: pair.master,
+            child,
+            writer,
+            output,
+            reader: Some(drain),
+            mark: 0,
+        })
     }
 
-    let mut child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|e| e.to_string())?;
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    drop(pair.slave);
-    let mut output = Vec::new();
-    reader.read_to_end(&mut output).map_err(|e| e.to_string())?;
-    let status = child.wait().map_err(|e| e.to_string())?;
-    Ok(RunOutcome {
-        stdout: String::from_utf8_lossy(&output).replace('\r', ""),
-        status: status.exit_code() as i32,
-    })
+    /// Everything the program has written to the terminal so far.
+    pub fn output(&self) -> String {
+        self.output
+            .lock()
+            .expect("the terminal output buffer is not poisoned")
+            .clone()
+    }
+
+    /// Wait until `needle` is on the terminal, bounded by `budget`.
+    pub fn await_output(&self, needle: &str, budget: std::time::Duration) {
+        self.await_from(0, needle, budget, "the terminal never showed");
+    }
+
+    /// Wait until `needle` appears in what the terminal showed after the last
+    /// line the operator typed, bounded by `budget`. Reading past the mark is
+    /// what keeps the assertion honest: the same text may already stand higher
+    /// up the screen, and finding that copy would prove nothing about the reply.
+    pub fn await_output_after_mark(&self, needle: &str, budget: std::time::Duration) {
+        self.await_from(
+            self.mark,
+            needle,
+            budget,
+            "the terminal showed nothing carrying",
+        );
+    }
+
+    fn await_from(&self, from: usize, needle: &str, budget: std::time::Duration, what: &str) {
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            let seen = self.output();
+            if seen.len() >= from && seen[from..].contains(needle) {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("{what} {needle:?}; terminal output:\n{seen}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Type `text` at the prompt and press Enter, as an operator does. The mark
+    /// moves to the end of what the terminal has already shown, so everything
+    /// asserted from here on is a reply to this line.
+    ///
+    /// A write that fails because the program has already exited is left to the
+    /// assertion that follows, which reports the whole terminal output and so
+    /// names the real fault rather than a broken pipe.
+    pub fn type_line(&mut self, text: &str) {
+        use std::io::Write;
+        self.mark = self.output().len();
+        let _ = write!(self.writer, "{text}\r");
+        let _ = self.writer.flush();
+    }
+
+    /// Press one key, as an operator does: the key's own bytes reach the
+    /// program with no line ending, so a program reading keys sees exactly the
+    /// key pressed. Enter is sent as a terminal sends it, a carriage return.
+    pub fn press(&mut self, key: &str) {
+        use std::io::Write;
+        self.mark = self.output().len();
+        let bytes = if key == "Enter" { "\r" } else { key };
+        let _ = write!(self.writer, "{bytes}");
+        let _ = self.writer.flush();
+    }
+
+    /// End the input, as an operator pressing Ctrl-D does: the terminal's own
+    /// end-of-transmission character is how a program reading a terminal sees
+    /// the input end.
+    pub fn end_input(&mut self) {
+        use std::io::Write;
+        let _ = self.writer.write_all(&[0x04]);
+        let _ = self.writer.flush();
+    }
+
+    /// Wait for the program to exit and report its status, bounded by `budget`.
+    pub fn wait(&mut self, budget: std::time::Duration) -> i32 {
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return status.exit_code() as i32,
+                Ok(None) => {}
+                Err(e) => panic!("waiting for the terminal session failed: {e}"),
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "the program did not exit within {budget:?}; terminal output:\n{}",
+                    self.output()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Wait for the program to exit, then for the terminal to close, and report
+    /// everything it wrote together with its exit status. Joining the drain is
+    /// what makes the output complete: the child's exit is observed before the
+    /// last bytes it wrote have necessarily been read.
+    pub fn finish(&mut self, budget: std::time::Duration) -> RunOutcome {
+        let status = self.wait(budget);
+        if let Some(drain) = self.reader.take() {
+            let _ = drain.join();
+        }
+        RunOutcome {
+            stdout: self.output(),
+            status,
+        }
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(drain) = self.reader.take() {
+            let _ = drain.join();
+        }
+    }
+}
+
+/// The options a help asset advertises: every `-x` and `--name` token listed in
+/// its `Options:` section, in the order the asset lists them. The section runs
+/// from the `Options:` heading to the first line that is not one of its indented
+/// entries.
+pub fn advertised_options(asset: &str) -> Vec<String> {
+    let mut options = Vec::new();
+    let mut in_section = false;
+    for line in asset.lines() {
+        if line.trim_end() == "Options:" {
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        for token in line.split_whitespace() {
+            let token = token.trim_end_matches(',');
+            if token.starts_with('-') {
+                options.push(token.to_string());
+            }
+        }
+    }
+    options
 }
 
 /// The index of the line the tagline occupies in the help asset, found by the

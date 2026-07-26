@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tom",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/tom.schema.json",
   "title": "Tinman terminal object model",
   "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names and text. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
   "type": "object",
@@ -51,25 +51,19 @@
       "required": ["role", "rect", "children"],
       "properties": {
         "role": {
-          "description": "The semantic role the region plays on screen.",
+          "description": "The semantic role the region plays on screen, drawn from the WAI-ARIA role taxonomy at https://www.w3.org/TR/wai-aria-1.2/#role_definitions. Tinman coins no roles of its own: a role assistive technology already understands is one a test author already understands, and the taxonomy carries containment expectations Tinman would otherwise invent, such as a listitem belonging to a list and a menuitem to a menu. The root region is `application`, ARIA's role for a widget region whose keystrokes the program interprets rather than the terminal. This set holds the roles a scenario exercises today; a role is added when a scenario needs it, not in anticipation.",
           "enum": [
-            "screen",
+            "application",
             "region",
             "menu",
             "menuitem",
             "list",
             "listitem",
-            "table",
-            "row",
-            "column",
-            "dialog",
             "button",
             "textbox",
-            "statusbar",
-            "message-pane",
-            "message",
-            "tree",
-            "treeitem"
+            "status",
+            "log",
+            "article"
           ]
         },
         "name": {
