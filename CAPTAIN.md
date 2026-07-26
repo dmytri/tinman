@@ -6,9 +6,24 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**The deck is not yours. QM has it.** Voyage 4 and 4a are closed, committed at `9444fad` and pushed; `02c5d8b` carried the notes. Voyage 5 is authored and unstarted: `watchbill.json` carries 5 watches and 13 targets, ordered cheapest tier first. The next role is QM in cleared context. Captain's authored artifacts ride uncommitted as work in flight; Boatswain commits them with the voyage's custody.
+**The deck is not yours. QM has it.** Voyage 5 is closed and committed at `ee121b8`, one commit ahead of `origin/main` and unpushed. Voyage 6 is authored and unstarted: `watchbill.json` carries 3 watches and 7 targets. The next role is QM in cleared context. Captain's authored artifacts ride uncommitted as work in flight; Boatswain commits them with the voyage's custody.
 
 Run the Opening retrieval anyway and believe it over this paragraph.
+
+## Voyage 6, authored 2026-07-26. Live for QM; not a pending Captain item.
+
+**Strike `replay`, and hand dispatch completeness to rustc.** User ruling: `tinman replay` was declared in the parser, advertised in the help asset, accepted by `parse_command_line`, proposed by the interactive assistant, and swallowed by `_ => {}` in `src/main.rs:72`, exiting 0 having done nothing. All six `replay.feature` scenarios were green throughout, because they drive the library seam and never the subcommand. `test` already does the job, so the command goes.
+
+The durable half is `scantlings/command-dispatch-completeness.json`: a proof contract forbidding `_ =>` in `src/main.rs`. With no wildcard the match must be exhaustive, so **the compiler refuses to build a future command that has no handler**. No bespoke checker, nothing to rot. The forbidden token is the arrow rather than a whole arm, so any body is caught.
+
+**Two facts a command answered that guesswork would have got wrong.**
+
+1. **clap generates its own `help` subcommand.** `accepted_commands()` derives from `Cli::command().build()`, so the accepted set is five, not four: `record`, `test`, `inspect`, `driver` and `help`. A named list of four would have reddened for a reason Crew had no legal fix for. Confirmed by running `./target/debug/tinman help`.
+2. **`tinman help` prints our planks to the operator.** That same run shows clap rendering the `Cli` doc comment as its long about text, `@planks("each is passed to the command parser")` included. `--help` is fine because it renders the asset; the subcommand bypasses it. The Planking agreement requires planks be `///` doc comments and clap consumes `///` as help text, so the two rules collide on this one type. Fixed at the behaviour level: a new scenario asserts the `help` subcommand renders the same bundled asset as the flag, which removes the leak as a consequence rather than by policing comments. It reuses two existing steps, so no new step definitions.
+
+**Adding a proof contract moved two counted attestations, updated in the same pass** per the standing corollary: proof contracts three to four, and published `$id` URIs thirteen to fourteen. Verified by command before editing: 3 proof contracts, 9 dialect-declaring, 12 `$id`-bearing scantlings plus one example plan.
+
+**Next harbour, Shipwright, new.** `AGENTS.md` is stale in two places this voyage created, and it is Shipwright's to refit: it says the rule set "carries three rules" when it now carries four, and it documents the weather record and worker counts without mentioning that three tiers now declare a budget ceiling. Boatswain found both.
 
 ## Voyage 5, authored 2026-07-26. Live for QM; not a pending Captain item.
 

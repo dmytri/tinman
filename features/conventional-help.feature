@@ -10,6 +10,13 @@ Feature: conventional help
     When the operator runs "tinman --help" with stdout redirected to a file
     Then the help output is the asset at "assets/help/tinman.txt" with the tagline line removed
 
+  Rule: the help subcommand and the help flag are one behaviour reached two ways, so both render the bundled asset. A parser that generates its own help for the subcommand renders the doc comments attached to the command types instead, and those doc comments are where the trace annotations live, so an operator asking for help is shown the project's own planks.
+
+  Scenario: the help subcommand renders the bundled help text
+    Given inference is available
+    When the operator runs "tinman help" with stdout redirected to a file
+    Then the help output is the asset at "assets/help/tinman.txt" with the tagline line removed
+
   Scenario: every command the parser accepts appears in the help text
     Given the commands the parser accepts
     When each is looked for in the asset at "assets/help/tinman.txt"

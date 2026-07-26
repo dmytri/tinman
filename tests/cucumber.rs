@@ -91,6 +91,7 @@ struct TinmanWorld {
     // help and command line
     asset_text: Option<String>,
     accepted_commands: Option<Vec<String>>,
+    read_command_set: Option<Vec<String>>,
     advertised_options: Option<Vec<String>>,
     option_rejections: Option<Vec<String>>,
     placeholder_count: Option<usize>,
@@ -1128,6 +1129,51 @@ async fn help_output_is_asset_without_tagline(world: &mut TinmanWorld, path: Str
 #[given("the commands the parser accepts")]
 async fn the_commands_the_parser_accepts(world: &mut TinmanWorld) {
     world.accepted_commands = Some(tinman::cli::accepted_commands());
+}
+
+#[when("the accepted command set is read")]
+async fn the_accepted_command_set_is_read(world: &mut TinmanWorld) {
+    let mut commands = world
+        .accepted_commands
+        .as_ref()
+        .expect("the parser reported its commands")
+        .clone();
+    commands.sort();
+    commands.dedup();
+    world.read_command_set = Some(commands);
+}
+
+#[then(expr = "it is exactly {string}, {string}, {string}, {string} and {string}")]
+async fn the_command_set_is_exactly(
+    world: &mut TinmanWorld,
+    first: String,
+    second: String,
+    third: String,
+    fourth: String,
+    fifth: String,
+) {
+    let read = world
+        .read_command_set
+        .as_ref()
+        .expect("the accepted command set was read");
+    let mut expected = vec![first, second, third, fourth, fifth];
+    expected.sort();
+    assert_eq!(
+        read, &expected,
+        "the parser accepts {read:?}, the scenario names {expected:?}"
+    );
+}
+
+#[given("the command dispatch source")]
+async fn the_command_dispatch_source(_world: &mut TinmanWorld) {
+    // The completeness contract names the module path; nothing to stage here.
+}
+
+#[when("the verifier checks the command dispatch completeness")]
+async fn the_verifier_checks_command_dispatch_completeness(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_boundary(
+        "scantlings/command-dispatch-completeness.json",
+    ));
 }
 
 #[when(expr = "each is looked for in the asset at {string}")]
@@ -5082,8 +5128,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all thirteen name that version")]
-async fn all_thirteen_name_that_version(world: &mut TinmanWorld) {
+#[then("all fourteen name that version")]
+async fn all_fourteen_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -5094,8 +5140,8 @@ async fn all_thirteen_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        13,
-        "thirteen schema URIs are published, found {}: {}",
+        14,
+        "fourteen schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -5120,7 +5166,7 @@ async fn all_thirteen_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the three scantlings that declare no JSON Schema dialect")]
+#[given("the four scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -5146,16 +5192,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all three validate")]
-async fn all_three_validate(world: &mut TinmanWorld) {
+#[then("all four validate")]
+async fn all_four_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        3,
-        "three scantlings declare no dialect, found {}: {}",
+        4,
+        "four scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

@@ -9,7 +9,6 @@ Usage:
 
 Commands:
   record     Capture a live session into an editable plan
-  replay     Replay a recorded plan exactly, with no inference
   test       Run a plan and report whether it passed
   inspect    Print the terminal object model of a running program
   driver     Speak the JSON driver protocol on stdin and stdout

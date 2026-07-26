@@ -2,12 +2,19 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 
-/// The Tinman command line. The help flag renders the bundled help asset, so
-/// the parser's own help output is disabled. The version flag is clap's own.
+/// The Tinman command line. The help flag and the help subcommand both render
+/// the bundled help asset, so the parser's own help output is disabled for
+/// both. The version flag is clap's own.
 ///
 /// @planks("each is passed to the command parser")
+/// @planks("the operator runs {string} with stdout redirected to a file")
 #[derive(Debug, Parser)]
-#[command(name = "tinman", version, disable_help_flag = true)]
+#[command(
+    name = "tinman",
+    version,
+    disable_help_flag = true,
+    disable_help_subcommand = true
+)]
 pub struct Cli {
     /// Show this help
     #[arg(short = 'h', long = "help")]
@@ -20,6 +27,7 @@ pub struct Cli {
 ///
 /// @planks("the operator records the command {string}")
 /// @planks("the operator records the command {string} with {string}")
+/// @planks("the operator runs {string} with stdout redirected to a file")
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Capture a live session into an editable plan
@@ -31,8 +39,6 @@ pub enum Command {
         #[arg(required = true)]
         command: Vec<String>,
     },
-    /// Replay a recorded plan exactly, with no inference
-    Replay,
     /// Run a plan and report whether it passed
     Test {
         /// The plan file to run
@@ -48,6 +54,8 @@ pub enum Command {
     },
     /// Speak the JSON driver protocol on stdin and stdout
     Driver,
+    /// Show this help
+    Help,
 }
 
 /// The arguments Tinman's parser takes from a command line: every token after

@@ -4,8 +4,9 @@ use clap::Parser;
 use std::io::IsTerminal;
 use tinman::cli::{Cli, Command};
 
-/// Parse the command line and run the command it names. The help flag renders
-/// the help: an operator on a terminal sees the tagline line filled; anything
+/// Parse the command line and run the command it names. The help flag and the
+/// help subcommand render the help, one behaviour reached two ways: an operator
+/// on a terminal sees the tagline line filled; anything
 /// else sees the conventional help, which needs no model, credential or network.
 /// A plan whose step fails names the step and leaves a failure status.
 ///
@@ -23,7 +24,7 @@ use tinman::cli::{Cli, Command};
 /// @planks("the Tinman driver is running")
 fn main() {
     let cli = Cli::parse();
-    if cli.help {
+    if cli.help || matches!(cli.command, Some(Command::Help)) {
         if std::io::stdout().is_terminal() {
             let settings = tinman::inference::Settings::from_process();
             println!("{}", tinman::help::interactive(&settings));
@@ -69,6 +70,6 @@ fn main() {
             }
         }
         Some(Command::Driver) => tinman::driver::serve(),
-        _ => {}
+        Some(Command::Help) | None => {}
     }
 }
