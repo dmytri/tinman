@@ -51,6 +51,13 @@ struct TinmanWorld {
     // methodology conformance
     conformance_scope: Option<String>,
     conformance_matches: Option<Vec<support::ConformanceMatch>>,
+    // published scantling contracts: the dialect-declaring scantlings, what the
+    // meta-schema said of each, the packaged version, and the URIs consumers
+    // fetch
+    dialect_scantlings: Option<Vec<(String, serde_json::Value)>>,
+    meta_schema_results: Option<Vec<(String, Option<String>)>>,
+    package_version: Option<String>,
+    published_uris: Option<Vec<(String, String)>>,
     // bundled skill
     skill_path: Option<String>,
     loaded_skill: Option<tinman::skill::Skill>,
@@ -1808,6 +1815,13 @@ async fn the_driver_has_a_session_running_the_fixture(world: &mut TinmanWorld) {
 
 /// Start the driver and launch `command`, keeping the session it opened, so
 /// every step that needs a running session opens it the one way.
+///
+/// A launch reply says the program started, not that it has drawn. Every
+/// program launched this way draws `READY` last, after the menu line closes its
+/// reverse-video run, so the session is gated on that observed signal before
+/// any step reads the screen. Without the gate a step can read a half-drawn
+/// line whose reverse video has not been reset yet, which reads back as a menu
+/// with every item selected.
 async fn launch_driver_session(world: &mut TinmanWorld, command: &str) {
     world.driver = Some(support::DriverProcess::start());
     let id = next_id(world);
@@ -1821,6 +1835,17 @@ async fn launch_driver_session(world: &mut TinmanWorld, command: &str) {
         .as_str()
         .unwrap_or_else(|| panic!("the launch reply carries no session identifier: {reply}"))
         .to_string();
+    let gate_id = next_id(world);
+    let drawn = driver(world).request(rpc(
+        gate_id,
+        "expect",
+        serde_json::json!({"session": identifier, "text": "READY"}),
+    ));
+    assert_eq!(
+        result(&drawn)["ok"],
+        serde_json::Value::Bool(true),
+        "the launched program never drew READY: {drawn}"
+    );
     world.session_id = Some(identifier);
     world.reply = Some(reply);
 }
@@ -4421,6 +4446,107 @@ async fn rule_reports_no_match(world: &mut TinmanWorld, rule_id: String) {
         "the {rule_id} rule reported {} match(es):\n{}",
         reported.len(),
         reported.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// published scantling contracts: dialect conformance and version agreement
+// ---------------------------------------------------------------------------
+
+#[given("the scantlings that declare a JSON Schema dialect")]
+async fn scantlings_declaring_a_dialect(world: &mut TinmanWorld) {
+    world.dialect_scantlings = Some(support::dialect_scantlings());
+}
+
+#[when("each is checked against the JSON Schema 2020-12 meta-schema")]
+async fn checked_against_the_meta_schema(world: &mut TinmanWorld) {
+    let scantlings = world
+        .dialect_scantlings
+        .as_ref()
+        .expect("the dialect-declaring scantlings were read");
+    world.meta_schema_results = Some(
+        scantlings
+            .iter()
+            .map(|(path, document)| {
+                let failure = jsonschema::draft202012::meta::validate(document)
+                    .err()
+                    .map(|e| format!("{e} at {}", e.instance_path()));
+                (path.clone(), failure)
+            })
+            .collect(),
+    );
+}
+
+#[then("all eight validate")]
+async fn all_eight_validate(world: &mut TinmanWorld) {
+    let results = world
+        .meta_schema_results
+        .as_ref()
+        .expect("each scantling was checked");
+    assert_eq!(
+        results.len(),
+        8,
+        "eight scantlings declare a dialect, found {}: {}",
+        results.len(),
+        results
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let failures: Vec<String> = results
+        .iter()
+        .filter_map(|(path, failure)| failure.as_ref().map(|f| format!("{path}: {f}")))
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} scantling(s) do not satisfy the dialect they declare:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[given(expr = "the package version in {string}")]
+async fn the_package_version_in(world: &mut TinmanWorld, manifest: String) {
+    world.package_version = Some(support::package_version(&manifest));
+}
+
+#[when("the schema URIs in the scantlings and the example plans are read")]
+async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
+    world.published_uris = Some(support::published_schema_uris());
+}
+
+#[then("all thirteen name that version")]
+async fn all_thirteen_name_that_version(world: &mut TinmanWorld) {
+    let version = world
+        .package_version
+        .as_ref()
+        .expect("the package version was read");
+    let uris = world
+        .published_uris
+        .as_ref()
+        .expect("the published schema URIs were read");
+    assert_eq!(
+        uris.len(),
+        13,
+        "thirteen schema URIs are published, found {}: {}",
+        uris.len(),
+        uris.iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let tag = format!("@v{version}/");
+    let stale: Vec<String> = uris
+        .iter()
+        .filter(|(_, uri)| !uri.contains(&tag))
+        .map(|(path, uri)| format!("{path}: {uri}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "{} schema URI(s) do not name the packaged version {version}:\n{}",
+        stale.len(),
+        stale.join("\n")
     );
 }
 

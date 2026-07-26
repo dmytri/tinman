@@ -215,9 +215,23 @@ Fixed by hoisting the `Background:` above the first `Rule:`, which makes it feat
 
 All three tiers green at custody, rerun fresh by Boatswain rather than inherited: `@logic` 123 of 123 in 24.3s, `@sandbox` 31 of 31 in 26.4s, both inside the 120s budget. 336 planks, 174 distinct, zero stale or malformed, zero provisional. Conformance, `fmt` and `clippy` clean. No perturbation stands. Watchbill struck.
 
-**Still open, and only this:**
+**Voyage 3 opened on the three open questions. Operator directed all three, 2026-07-26.**
 
-**The `@inference` sweep, optional and it costs money.** Boatswain labelled one claim unverified: it judged by reading that the rebuilt fixture's opening frame is byte-identical at `sel=0`, so the two `@inference` scenarios in `tom-inference.feature` are unaffected. The check that would answer it is a `broad-inference` sweep. No watch named it, so billing one is the operator's call rather than Captain's to spend on.
+The `@inference` sweep is watch2, a tier tag, so QM runs the tier unfiltered. It settles the one claim Boatswain judged by reading rather than by running: that the rebuilt fixture's opening frame is byte-identical at `sel=0`, leaving the two `@inference` scenarios in `tom-inference.feature` unaffected. It bills a real provider, which the operator has now authorized.
+
+The other two became watch1, both `@conformance` in `features/methodology-conformance.feature`. They sit under their own `Rule:`, and that feature carries no `Background:`, so adding a rule was safe here; the `driver-session` lesson was checked before writing rather than after.
+
+**Boatswain's framing of the asset gap needed correcting, and the correction narrowed the check.** It reported `scantlings/**` and `assets/examples/**` reached by no gate. The examples are reached: `harness-plan.feature:the example flow conforms to the harness schema` validates `settings-flow.yaml` against the schema, and `plan-shorthand.feature:the shorthand form and the full form parse to the same plan` parses both. Every scantling is likewise loaded by some scenario, so malformed JSON already reddens. The residual is narrower and worse: a scantling can be valid JSON and an invalid schema. A mistyped keyword such as `"type": "strng"` yields a schema that validates everything, so its attestation passes while asserting nothing. That is this project's recurring false green in a new place, and it is what watch1 pins. Eight scantlings declare a dialect; the three boundary contracts carry none, because they are proof contracts discharged by their own checkers.
+
+**Both checks are proven by planted red, and Captain planted them. 2026-07-26.** QM raised this as its one blocker and deferred it to harbour, correctly for its own scope: both checks read Captain-custodied `scantlings/` and `assets/examples/`, and the custody hook denied QM's write with `Shipshape custody: qm MUST NOT write scantlings`. But those are Captain's files, and an unproven check is precisely the false green this voyage has spent itself finding, so carrying it to harbour was the worse of the two costs. Three plants, each reverted with `git checkout` so restoration is byte-identical rather than retyped:
+
+1. `"type": "integer"` to `"intger"` in `tom.schema.json`. Red, naming the file and the pointer `/properties/rows/type`. Green on revert.
+2. `@v0.1.2` to `@v0.1.1` in that file's `$id`. Red, naming the URI and the packaged version it failed to match.
+3. The `$schema` header deleted from `settings-flow-shorthand.yaml`, taking the URI count from thirteen to twelve. Red, naming the plan that carries no `$schema`.
+
+Plant 3 is the one worth having done. It proves the count guard is load-bearing rather than decorative, which was the argument for writing it; a check that only compares the URIs it happens to find would have passed that plant while a pin went missing.
+
+**Both new scenarios name their count, deliberately.** `all eight` and `all thirteen` are the null control in the form this domain allows: a glob that reads nothing would otherwise satisfy "each one validates" exactly as a full read does. The counts are load-bearing rather than decorative, since a scantling added without a pin is precisely the drift watch1 exists to catch, and the count is what reddens.
 
 **Carried to harbour, none blocking:**
 
@@ -227,9 +241,8 @@ All three tiers green at custody, rerun fresh by Boatswain rather than inherited
 - `focused` cannot compose the tag exclusions the Rigging read contract asks of every verification command; cucumber-rs answers `error: the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`. The value is correct as written and a role obeying the contract literally gets a hard error. Wants a note in `RIGGING.md`, which is Shipwright's file.
 - `cwd` documented in `prepared-process.schema.json` and absent from `PreparedProcess`.
 - Two unplanked seams in `src/skill.rs`.
-- Unexplained nondeterminism seen once in `activation fails when the selection cannot reach the item`, across two sweeps on an unchanged tree. It did not recur after the background fix. Re-observe; if harness, QM engineers it out.
-- No derived check joins a scantling enum to the production enum it constrains. That is how the 17-role `Role` drift against the 11-role `tom.schema.json` went unseen. A plausible `@conformance` candidate.
-- Neither `scantlings/**` nor `assets/examples/**` is reached by any gate: every lint slot in `RIGGING.md` reads Rust only, so a malformed schema or example plan reddens nothing. Boatswain named it at the 0.1.2 custody. Choosing the checker is Captain's, installing it Shipwright's.
+- ~~Unexplained nondeterminism in `activation fails when the selection cannot reach the item`.~~ **Closed 2026-07-26, root-caused rather than re-observed.** QM found a missing readiness gate at `launch_driver_session`: the driver's launch reply says the program started, not that it drew, so a step could read the menu line mid-write with reverse video not yet reset and see every item as selected. Gated on the driver's own `expect` for `READY`, which each fixture draws last. `@sandbox` went 30 of 31 to 31 of 31. It was harness, as suspected, and QM engineered it out.
+- No derived check joins a scantling enum to the production enum it constrains. That is how the 17-role `Role` drift against the 11-role `tom.schema.json` went unseen. A plausible `@conformance` candidate, and the last of this shape left standing.
 
 ## The release taught two things, and the first was my error. 2026-07-26.
 

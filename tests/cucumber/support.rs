@@ -1427,6 +1427,94 @@ pub fn run_conformance_scan(scope: &str) -> Vec<ConformanceMatch> {
     })
 }
 
+/// Every scantling that declares a JSON Schema dialect, as `(path, document)`
+/// pairs. A scantling carrying no `$schema` declares no dialect: it is a proof
+/// contract discharged by its own checker rather than a schema, so it is not a
+/// candidate for meta-schema validation.
+pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
+        let path = entry.expect("a scantlings directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let display = path.display().to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
+        let document: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
+        if document.get("$schema").is_some() {
+            found.push((display, document));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
+}
+
+/// Every published schema URI the repository serves to consumers, as
+/// `(source path, uri)` pairs. A scantling publishes its own URI as `$id`; an
+/// example plan publishes the one its language server reads from the
+/// `$schema=` token in its leading comment. Both are fetched over the network
+/// by consumers who never run this suite.
+pub fn published_schema_uris() -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
+        let path = entry.expect("a scantlings directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let display = path.display().to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
+        let document: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
+        let id = document
+            .get("$id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("scantling {display} publishes no $id"));
+        found.push((display, id.to_string()));
+    }
+    for entry in
+        std::fs::read_dir("assets/examples").expect("the example plan directory is readable")
+    {
+        let path = entry.expect("an example plan directory entry").path();
+        let display = path.display().to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("example plan {display} unreadable: {e}"));
+        let uri = text
+            .lines()
+            .find_map(|line| line.split_once("$schema="))
+            .map(|(_, uri)| uri.trim().to_string())
+            .unwrap_or_else(|| panic!("example plan {display} names no $schema"));
+        found.push((display, uri));
+    }
+    found.sort();
+    found
+}
+
+/// The version the package declares under `[package]` in its manifest.
+pub fn package_version(manifest_path: &str) -> String {
+    let text = std::fs::read_to_string(manifest_path)
+        .unwrap_or_else(|e| panic!("manifest {manifest_path} unreadable: {e}"));
+    let mut in_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("version")
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+        {
+            return value.trim().trim_matches('"').to_string();
+        }
+    }
+    panic!("manifest {manifest_path} declares no package version");
+}
+
 /// Check the source a boundary policy governs against that policy. Returns
 /// counterexamples; an empty list means the module carries no forbidden
 /// reference and every required reference.

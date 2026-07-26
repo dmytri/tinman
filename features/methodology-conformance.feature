@@ -22,3 +22,17 @@ Feature: methodology conformance
     Given the verification support sources
     When the verification-conformance rule set is run
     Then the "forbidden-doubles" rule reports no match
+
+  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; three scantlings carry no dialect because they are proof contracts discharged by their own checkers.
+
+  @conformance
+  Scenario: every scantling declaring a dialect satisfies it
+    Given the scantlings that declare a JSON Schema dialect
+    When each is checked against the JSON Schema 2020-12 meta-schema
+    Then all eight validate
+
+  @conformance
+  Scenario: every published schema URI names the packaged version
+    Given the package version in "Cargo.toml"
+    When the schema URIs in the scantlings and the example plans are read
+    Then all thirteen name that version
