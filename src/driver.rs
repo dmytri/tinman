@@ -17,6 +17,12 @@ use std::time::{Duration, Instant};
 /// The reserved JSON-RPC code for a method the driver does not answer.
 const METHOD_NOT_FOUND: i64 = -32601;
 
+/// The reserved JSON-RPC code for a call whose parameters the driver rejects.
+const INVALID_PARAMS: i64 = -32602;
+
+/// The scopes a capture collects under, per `scantlings/driver-protocol.schema.json`.
+const CAPTURE_SCOPES: [&str; 2] = ["visible", "all"];
+
 /// How long a driven program is given to draw the text an expectation names, so
 /// an expectation resolves the moment the text appears.
 const EXPECT_DEADLINE: Duration = Duration::from_secs(5);
@@ -48,6 +54,13 @@ const RESPONSE_DEADLINE: Duration = Duration::from_secs(2);
 /// The sandbox backend every session launches under.
 const SANDBOX_BACKEND: &str = "bubblewrap";
 
+/// How a session's terminal is told to keep the keys the driver sends off the
+/// screen. A terminal echoes what is typed on it, so a key the driver sends
+/// lands on the very screen the driver reads back, where a call waiting for the
+/// program to answer reads the driver's own key press as that answer. The
+/// program's own drawing is the only thing the driver reads.
+const SILENCE_ECHO: &str = "stty -echo";
+
 /// One live session: the program running on its PTY, the temporary directory
 /// the sandbox uses as its home, which closing the session reclaims, the
 /// region an activation last moved the selection onto, and the values filled
@@ -76,7 +89,8 @@ struct Sessions {
 /// @planks("the Tinman driver is running")
 /// @planks("the test runner sends the request:")
 /// @planks("every exchanged message conforms to the {string} schema in {string}")
-/// @planks-provisional("features/driver-protocol.feature:the driver exits when its stdin closes")
+/// @planks("the test runner closes the driver's stdin")
+/// @planks("the driver process exits with a success status")
 pub fn serve() {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -154,6 +168,7 @@ fn addressed<'a>(params: &Value, sessions: &'a mut Sessions) -> &'a mut Session 
 /// @planks("the driver replies to request {int} with a session identifier")
 /// @planks("the driver replies to request {int} with a failed result")
 /// @planks("the failure names the program it could not start")
+/// @planks("the failure reports the selection did not reach the {string} named {string}")
 fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     let command = params["command"]
         .as_str()
@@ -177,9 +192,10 @@ fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
             &SandboxSpec::default_for_record(),
             &CommandSpec {
                 program: "/bin/sh".to_string(),
-                args: vec!["-c".to_string(), command.to_string()],
+                args: vec!["-c".to_string(), format!("{SILENCE_ECHO}; {command}")],
             },
             Some(&home),
+            None,
         )
         .unwrap_or_else(|e| panic!("the session's process was not prepared: {e}"));
     let capture = capture_interactive(&prepared)
@@ -266,7 +282,10 @@ fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 /// order and an item already collected is collected once, so a message the
 /// pane repeats at two scroll positions appears once. A pane that keeps showing
 /// new items past the scroll limit is a failed result, because the call
-/// succeeded and the pane never reached an end.
+/// succeeded and the pane never reached an end. A missing or unknown `scope` is
+/// a protocol fault carrying the reserved invalid-params code and the parameter
+/// it concerned, answered before the call reaches its session, so the session
+/// the client already holds stays usable.
 ///
 /// @planks("the test runner captures every {string} in the {string} as {string}")
 /// @planks("the test runner captures the visible {string} items in the {string} as {string}")
@@ -274,8 +293,8 @@ fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 /// @planks("the first item of the capture named {string} is {string}")
 /// @planks("the last item of the capture named {string} is {string}")
 /// @planks("the failure reports the capture reached its scroll limit")
-/// @planks-provisional("features/driver-protocol.feature:a call missing a required parameter is answered with an invalid-params error")
-/// @planks-provisional("features/driver-protocol.feature:a capture naming an unknown scope is answered with an invalid-params error")
+/// @planks("the error data names the missing parameter {string}")
+/// @planks("the error data names the rejected scope {string}")
 fn capture(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     let role = params["role"]
         .as_str()
@@ -285,10 +304,31 @@ fn capture(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
         .as_str()
         .unwrap_or_else(|| panic!("the capture call names no pane: {params}"))
         .to_string();
-    let scope = params["scope"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the capture call names no scope: {params}"))
-        .to_string();
+    let scope = match params["scope"].as_str() {
+        None => {
+            return json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": INVALID_PARAMS,
+                    "message": "the capture call names no scope",
+                    "data": "scope",
+                },
+            });
+        }
+        Some(named) if !CAPTURE_SCOPES.contains(&named) => {
+            return json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": INVALID_PARAMS,
+                    "message": "the capture call names no such scope",
+                    "data": named,
+                },
+            });
+        }
+        Some(named) => named.to_string(),
+    };
     let session = addressed(params, sessions);
     let mut items = Vec::new();
     gather(session, &within, &role, &mut items);

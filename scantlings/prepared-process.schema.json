@@ -5,7 +5,7 @@
   "description": "Everything the PTY runner needs to launch a process, with no backend knowledge. Referenced by features/prepared-process.feature.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["program", "args", "env", "cleanup"],
+  "required": ["program", "args", "env", "cwd", "cleanup"],
   "properties": {
     "program": {
       "description": "Absolute path to the program the PTY runner launches.",

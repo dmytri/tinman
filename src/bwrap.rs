@@ -48,19 +48,23 @@ impl BubblewrapBackend {
     /// @planks("a Bubblewrap-prepared process that prints its home directory and the value of {string}")
     /// @planks("a Bubblewrap-prepared process that probes for a network route")
     pub fn generate_args(&self, spec: &SandboxSpec, command: &CommandSpec) -> Vec<String> {
-        self.args_with_home(spec, command, None)
+        self.args_with_home(spec, command, None, None)
     }
 
     /// The same argument vector, with `home` bound writable at the sandbox home
     /// when the caller provides one, so a session that keeps state writes into a
-    /// real directory the caller owns and reclaims.
+    /// real directory the caller owns and reclaims. The program starts in `cwd`
+    /// under that home when the caller names one, so a command writing a
+    /// relative path lands in the directory the plan named.
     ///
     /// @planks("the Tinman driver has a session running {string}")
+    /// @planks("a flow whose only step runs {string} in the directory {string}")
     fn args_with_home(
         &self,
         spec: &SandboxSpec,
         command: &CommandSpec,
         home: Option<&Path>,
+        cwd: Option<&str>,
     ) -> Vec<String> {
         let mut args = vec![
             "--unshare-all".to_string(),
@@ -92,7 +96,10 @@ impl BubblewrapBackend {
             args.push(home.display().to_string());
             args.push(SANDBOX_HOME.to_string());
             args.push("--chdir".to_string());
-            args.push(SANDBOX_HOME.to_string());
+            args.push(match cwd {
+                Some(cwd) => format!("{SANDBOX_HOME}/{cwd}"),
+                None => SANDBOX_HOME.to_string(),
+            });
         }
         args.push("--setenv".to_string());
         args.push("HOME".to_string());
@@ -152,31 +159,35 @@ impl BubblewrapBackend {
         spec: &SandboxSpec,
         command: &CommandSpec,
     ) -> Result<PreparedProcess, String> {
-        self.prepare_with_home(spec, command, None)
+        self.prepare_with_home(spec, command, None, None)
     }
 
     /// Prepare a process the same way, giving the sandbox the host directory
-    /// `home` as its home. The caller created that directory and reclaims it, so
-    /// the sandbox writes somewhere real and leaves nothing behind.
+    /// `home` as its home, and starting the program in `cwd` under that home
+    /// when the caller names one. The caller created that directory and reclaims
+    /// it, so the sandbox writes somewhere real and leaves nothing behind.
     ///
     /// @planks("the Tinman driver has a session running {string}")
     /// @planks("the session's temporary sandbox directories no longer exist")
     /// @planks("the fixture program reports a home directory other than the operator's home")
     /// @planks("the step reports a home directory other than the operator's home")
+    /// @planks("a flow whose only step runs {string} in the directory {string}")
     pub fn prepare_with_home(
         &self,
         spec: &SandboxSpec,
         command: &CommandSpec,
         home: Option<&Path>,
+        cwd: Option<&str>,
     ) -> Result<PreparedProcess, String> {
         if !executable_available(&self.executable) {
             return Err("Bubblewrap is unavailable".to_string());
         }
-        let args = self.args_with_home(spec, command, home);
+        let args = self.args_with_home(spec, command, home, cwd);
         Ok(PreparedProcess {
             program: self.executable.clone(),
             args,
             env: Vec::new(),
+            cwd: None,
             cleanup: Vec::new(),
         })
     }

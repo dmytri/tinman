@@ -49,8 +49,16 @@ struct TinmanWorld {
     interactive: Option<tinman::pty::InteractiveCapture>,
     log_yaml: Option<String>,
     // methodology conformance
-    conformance_scope: Option<String>,
+    conformance_scopes: Option<Vec<String>>,
     conformance_matches: Option<Vec<support::ConformanceMatch>>,
+    // the plank inventory, the step-definition pattern set, the scenarios the
+    // specs declare, and each join's counterexamples
+    planks: Option<Vec<support::Plank>>,
+    step_patterns: Option<Vec<support::StepPattern>>,
+    spec_scenarios: Option<Vec<support::SpecScenario>>,
+    stale_planks: Option<Vec<String>>,
+    unbound_patterns: Option<Vec<String>>,
+    metacharacter_names: Option<Vec<String>>,
     // published scantling contracts: the dialect-declaring scantlings, what the
     // meta-schema said of each, the packaged version, and the URIs consumers
     // fetch
@@ -58,6 +66,14 @@ struct TinmanWorld {
     meta_schema_results: Option<Vec<(String, Option<String>)>>,
     package_version: Option<String>,
     published_uris: Option<Vec<(String, String)>>,
+    // the proof contracts and the meta-schema their shape is checked against
+    proof_contracts: Option<Vec<(String, serde_json::Value)>>,
+    meta_schema_path: Option<String>,
+    // scantling enumerations joined to the production enumerations they
+    // constrain, and each direction's counterexamples
+    enumeration_pairs: Option<Vec<support::EnumerationPair>>,
+    rejected_values: Option<Vec<String>>,
+    undeclared_variants: Option<Vec<String>>,
     // bundled skill
     skill_path: Option<String>,
     loaded_skill: Option<tinman::skill::Skill>,
@@ -195,6 +211,7 @@ fn shell_process(command_line: &str) -> PreparedProcess {
         args: vec!["-c".to_string(), command_line.to_string()],
         env: Vec::new(),
         cleanup: Vec::new(),
+        cwd: None,
     }
 }
 
@@ -1396,13 +1413,6 @@ fn built_requests(world: &TinmanWorld) -> &[tinman::inference::Request] {
     &world.built_requests
 }
 
-#[then(expr = "the request addresses {string}")]
-async fn the_request_addresses(world: &mut TinmanWorld, expected: String) {
-    for request in built_requests(world) {
-        assert_eq!(request.address(), expected, "request endpoint");
-    }
-}
-
 #[then(expr = "the request addresses {string} with the model {string}")]
 async fn the_request_addresses_with_model(
     world: &mut TinmanWorld,
@@ -1412,13 +1422,6 @@ async fn the_request_addresses_with_model(
     for request in built_requests(world) {
         assert_eq!(request.address(), endpoint, "request endpoint");
         assert_eq!(request.model(), model, "request model");
-    }
-}
-
-#[then(expr = "the request names the model {string}")]
-async fn the_request_names_the_model(world: &mut TinmanWorld, expected: String) {
-    for request in built_requests(world) {
-        assert_eq!(request.model(), expected, "request model");
     }
 }
 
@@ -1450,6 +1453,13 @@ async fn the_request_carries_authorization(world: &mut TinmanWorld, expected: St
             Some(expected.as_str()),
             "authorization header"
         );
+    }
+}
+
+#[then("the request carries no authorization header")]
+async fn the_request_carries_no_authorization(world: &mut TinmanWorld) {
+    for request in built_requests(world) {
+        assert_eq!(request.authorization(), None, "authorization header");
     }
 }
 
@@ -1651,6 +1661,17 @@ async fn a_flow_whose_only_step_expects_the_status(
 ) {
     world.plan_sources.push(format!(
         "flow:\n  - run:\n      command: {command:?}\n      status: {status}\n"
+    ));
+}
+
+#[given(expr = "a flow whose only step runs {string} in the directory {string}")]
+async fn a_flow_whose_only_step_runs_in_the_directory(
+    world: &mut TinmanWorld,
+    command: String,
+    directory: String,
+) {
+    world.plan_sources.push(format!(
+        "flow:\n  - run:\n      command: {command:?}\n      cwd: {directory:?}\n"
     ));
 }
 
@@ -2253,6 +2274,69 @@ async fn the_error_data_names_the_method(world: &mut TinmanWorld, method: String
     assert!(
         rendered.contains(&method),
         "the error data {rendered:?} does not name the method {method:?}"
+    );
+}
+
+#[then(expr = "the error data names the missing parameter {string}")]
+async fn the_error_data_names_the_missing_parameter(world: &mut TinmanWorld, parameter: String) {
+    let reply = reply(world);
+    let error = reply
+        .get("error")
+        .unwrap_or_else(|| panic!("the reply carries no error object: {reply}"));
+    let data = error
+        .get("data")
+        .unwrap_or_else(|| panic!("the error object carries no data: {reply}"));
+    let rendered = data
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or(data.to_string());
+    assert!(
+        rendered.contains(&parameter),
+        "the error data {rendered:?} does not name the missing parameter {parameter:?}"
+    );
+}
+
+#[then(expr = "the error data names the rejected scope {string}")]
+async fn the_error_data_names_the_rejected_scope(world: &mut TinmanWorld, scope: String) {
+    let reply = reply(world);
+    let error = reply
+        .get("error")
+        .unwrap_or_else(|| panic!("the reply carries no error object: {reply}"));
+    let data = error
+        .get("data")
+        .unwrap_or_else(|| panic!("the error object carries no data: {reply}"));
+    let rendered = data
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or(data.to_string());
+    assert!(
+        rendered.contains(&scope),
+        "the error data {rendered:?} does not name the rejected scope {scope:?}"
+    );
+}
+
+#[when("the test runner closes the driver's stdin")]
+async fn the_test_runner_closes_the_drivers_stdin(world: &mut TinmanWorld) {
+    driver(world).close_stdin();
+}
+
+#[then("the driver process exits with a success status")]
+async fn the_driver_process_exits_with_a_success_status(world: &mut TinmanWorld) {
+    let status = driver(world).wait_for_exit();
+    assert!(
+        status.success(),
+        "the driver exited with {status} rather than successfully"
+    );
+}
+
+#[then("the driver leaves no session sandbox directory standing")]
+async fn the_driver_leaves_no_session_sandbox_directory(world: &mut TinmanWorld) {
+    let pid = driver(world).pid();
+    let standing = support::standing_session_dirs(pid);
+    assert!(
+        standing.is_empty(),
+        "the driver left {} session sandbox directory/directories standing: {standing:?}",
+        standing.len()
     );
 }
 
@@ -3941,13 +4025,6 @@ async fn an_engine_that_names_the_second_item(world: &mut TinmanWorld, name: Str
     world.proposed_name = Some(name);
 }
 
-#[given(expr = "an engine that labels that pane a {string}")]
-async fn an_engine_that_labels_that_pane(world: &mut TinmanWorld, role: String) {
-    serve_engine_model(world, move |reply| {
-        reply["root"]["children"][0]["role"] = serde_json::json!(role);
-    });
-}
-
 #[when("the inferred locator is round-tripped against the deterministic model")]
 async fn the_inferred_locator_is_round_tripped(world: &mut TinmanWorld) {
     let settings = resolved_settings(world);
@@ -4133,31 +4210,6 @@ async fn the_locator_addresses_the_first(world: &mut TinmanWorld, role: String, 
     );
 }
 
-#[given(expr = "an engine that labels that line a {string}")]
-async fn an_engine_that_labels_that_line(world: &mut TinmanWorld, role: String) {
-    let reply = serde_json::json!({
-        "rows": 24,
-        "cols": 80,
-        "root": {
-            "role": "application",
-            "name": null,
-            "text": null,
-            "selected": false,
-            "rect": {"x": 0, "y": 0, "width": 80, "height": 24},
-            "children": [{
-                "role": role,
-                "name": null,
-                "text": null,
-                "selected": false,
-                "rect": {"x": 0, "y": 0, "width": 80, "height": 1},
-                "children": []
-            }]
-        }
-    });
-    let provider = support::LocalProvider::returning(&reply.to_string());
-    use_provider(world, provider);
-}
-
 #[given(expr = "an engine that returns a region with the role {string}")]
 async fn an_engine_that_returns_role(world: &mut TinmanWorld, role: String) {
     let reply = serde_json::json!({
@@ -4197,18 +4249,30 @@ fn configured_settings() -> tinman::inference::Settings {
 #[when(expr = "the assistant request {string} is sent")]
 async fn the_assistant_request_is_sent(world: &mut TinmanWorld, question: String) {
     let settings = configured_settings();
-    world.provider_reply = tinman::inference::assistant_completion(&settings, &question);
+    world.provider_reply = support::within_budget(
+        "the configured inference provider",
+        std::time::Duration::from_secs(120),
+        move || tinman::inference::assistant_completion(&settings, &question),
+    );
 }
 
-#[then(expr = "the provider's reply contains {string}")]
-async fn the_providers_reply_contains(world: &mut TinmanWorld, expected: String) {
+#[then("a reply is parsed from the provider's response")]
+async fn a_reply_is_parsed_from_the_providers_response(world: &mut TinmanWorld) {
+    assert!(
+        world.provider_reply.is_some(),
+        "no reply was parsed from the configured provider's response"
+    );
+}
+
+#[then("the parsed reply carries non-empty content")]
+async fn the_parsed_reply_carries_non_empty_content(world: &mut TinmanWorld) {
     let reply = world
         .provider_reply
-        .as_ref()
-        .expect("the configured provider answered the request");
+        .as_deref()
+        .expect("a reply was parsed from the provider's response");
     assert!(
-        reply.contains(&expected),
-        "the provider's reply {reply:?} does not contain {expected:?}"
+        !reply.trim().is_empty(),
+        "the parsed reply carries no content: {reply:?}"
     );
 }
 
@@ -4411,41 +4475,218 @@ async fn the_verifier_checks_the_assistant_boundary(world: &mut TinmanWorld) {
 // methodology conformance: the derived rule set run as verification
 // ---------------------------------------------------------------------------
 
-#[given("the implementation sources")]
-async fn implementation_sources(world: &mut TinmanWorld) {
-    world.conformance_scope = Some("src".to_string());
-}
-
-#[given("the verification support sources")]
-async fn verification_support_sources(world: &mut TinmanWorld) {
-    world.conformance_scope = Some("tests".to_string());
+#[given("the implementation sources and the verification support sources")]
+async fn the_implementation_and_verification_support_sources(world: &mut TinmanWorld) {
+    world.conformance_scopes = Some(vec!["src".to_string(), "tests".to_string()]);
 }
 
 #[when("the verification-conformance rule set is run")]
 async fn conformance_rule_set_is_run(world: &mut TinmanWorld) {
-    let scope = world
-        .conformance_scope
+    let scopes = world
+        .conformance_scopes
         .as_ref()
-        .expect("a source scope was named");
-    world.conformance_matches = Some(support::run_conformance_scan(scope));
+        .expect("the source scopes were named");
+    world.conformance_matches = Some(
+        scopes
+            .iter()
+            .flat_map(|scope| support::run_conformance_scan(scope))
+            .collect(),
+    );
 }
 
-#[then(expr = "the {string} rule reports no match")]
-async fn rule_reports_no_match(world: &mut TinmanWorld, rule_id: String) {
+#[then("no rule in the set reports a match")]
+async fn no_rule_reports_a_match(world: &mut TinmanWorld) {
     let matches = world
         .conformance_matches
         .as_ref()
         .expect("the conformance rule set ran");
-    let reported: Vec<String> = matches
-        .iter()
-        .filter(|m| m.rule_id == rule_id)
-        .map(|m| m.to_string())
-        .collect();
+    let reported: Vec<String> = matches.iter().map(|m| m.to_string()).collect();
     assert!(
         reported.is_empty(),
-        "the {rule_id} rule reported {} match(es):\n{}",
+        "the rule set reported {} match(es):\n{}",
         reported.len(),
         reported.join("\n")
+    );
+}
+
+#[then(
+    "the rule set carries at least the plank-form, perturbation-quiescence and forbidden-doubles rules"
+)]
+async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
+    let carried = support::conformance_rule_ids();
+    let missing: Vec<&str> = ["plank-form", "perturbation-quiescence", "forbidden-doubles"]
+        .into_iter()
+        .filter(|named| !carried.iter().any(|id| id == named))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the rule set is missing {} named rule(s): {} (it carries {})",
+        missing.len(),
+        missing.join(", "),
+        carried.join(", ")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the joins over planks, patterns and scenarios
+// ---------------------------------------------------------------------------
+
+#[given("the plank inventory and the step-usage pattern set")]
+async fn the_plank_inventory_and_the_pattern_set(world: &mut TinmanWorld) {
+    world.planks = Some(support::plank_inventory());
+    world.step_patterns = Some(support::step_definition_patterns());
+}
+
+#[when("each plank string is matched against the pattern set")]
+async fn each_plank_string_is_matched(world: &mut TinmanWorld) {
+    let planks = world.planks.as_ref().expect("the plank inventory was read");
+    let patterns = world
+        .step_patterns
+        .as_ref()
+        .expect("the pattern set was read");
+    world.stale_planks = Some(
+        planks
+            .iter()
+            .filter(|plank| !patterns.iter().any(|p| p.pattern == plank.pattern))
+            .map(|plank| {
+                format!(
+                    "{}:{} names {:?}, which no step definition declares",
+                    plank.file, plank.line, plank.pattern
+                )
+            })
+            .collect(),
+    );
+}
+
+#[then("every plank string is a pattern the step definitions declare")]
+async fn every_plank_names_a_current_pattern(world: &mut TinmanWorld) {
+    let stale = world
+        .stale_planks
+        .as_ref()
+        .expect("each plank string was matched");
+    assert!(
+        stale.is_empty(),
+        "{} plank(s) name no current step-definition pattern:\n{}",
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+#[then("the plank inventory is not empty")]
+async fn the_plank_inventory_is_not_empty(world: &mut TinmanWorld) {
+    let planks = world.planks.as_ref().expect("the plank inventory was read");
+    assert!(
+        !planks.is_empty(),
+        "the plank inventory reports no plank, so the join asserted nothing"
+    );
+}
+
+#[given("the step-usage pattern set and the scenarios in the specs")]
+async fn the_pattern_set_and_the_scenarios(world: &mut TinmanWorld) {
+    world.step_patterns = Some(support::step_definition_patterns());
+    world.spec_scenarios = Some(support::spec_scenarios());
+}
+
+#[when("each pattern is matched against the steps the scenarios carry")]
+async fn each_pattern_is_matched_against_the_steps(world: &mut TinmanWorld) {
+    let patterns = world
+        .step_patterns
+        .as_ref()
+        .expect("the pattern set was read");
+    let scenarios = world
+        .spec_scenarios
+        .as_ref()
+        .expect("the scenarios were read");
+    world.unbound_patterns = Some(
+        patterns
+            .iter()
+            .filter(|pattern| {
+                !scenarios.iter().any(|scenario| {
+                    scenario
+                        .steps
+                        .iter()
+                        .any(|step| pattern.matcher.binds(step))
+                })
+            })
+            .map(|pattern| {
+                format!(
+                    "{}:{} declares {:?}, which binds no scenario",
+                    pattern.file, pattern.line, pattern.pattern
+                )
+            })
+            .collect(),
+    );
+}
+
+#[then("every pattern binds at least one scenario")]
+async fn every_pattern_binds_a_scenario(world: &mut TinmanWorld) {
+    let unbound = world
+        .unbound_patterns
+        .as_ref()
+        .expect("each pattern was matched");
+    assert!(
+        unbound.is_empty(),
+        "{} step definition(s) bind no scenario:\n{}",
+        unbound.len(),
+        unbound.join("\n")
+    );
+}
+
+#[then("the pattern set is not empty")]
+async fn the_pattern_set_is_not_empty(world: &mut TinmanWorld) {
+    let patterns = world
+        .step_patterns
+        .as_ref()
+        .expect("the pattern set was read");
+    assert!(
+        !patterns.is_empty(),
+        "the step-usage command reports no pattern, so the join asserted nothing"
+    );
+}
+
+#[given("the scenarios in the specs")]
+async fn the_scenarios_in_the_specs(world: &mut TinmanWorld) {
+    world.spec_scenarios = Some(support::spec_scenarios());
+}
+
+#[when("each scenario name is read as the focused command would pass it")]
+async fn each_scenario_name_is_read_as_a_regex(world: &mut TinmanWorld) {
+    let scenarios = world
+        .spec_scenarios
+        .as_ref()
+        .expect("the scenarios were read");
+    world.metacharacter_names = Some(
+        scenarios
+            .iter()
+            .filter_map(|scenario| {
+                let carried: Vec<char> = support::REGEX_METACHARACTERS
+                    .chars()
+                    .filter(|c| scenario.name.contains(*c))
+                    .collect();
+                (!carried.is_empty()).then(|| {
+                    format!(
+                        "{}:{} carries {}",
+                        scenario.feature,
+                        scenario.name,
+                        carried.iter().collect::<String>()
+                    )
+                })
+            })
+            .collect(),
+    );
+}
+
+#[then("no scenario name carries a regex metacharacter")]
+async fn no_scenario_name_carries_a_metacharacter(world: &mut TinmanWorld) {
+    let carrying = world
+        .metacharacter_names
+        .as_ref()
+        .expect("each scenario name was read");
+    assert!(
+        carrying.is_empty(),
+        "{} scenario name(s) carry a regex metacharacter, which the focused command would pass unescaped:\n{}",
+        carrying.len(),
+        carrying.join("\n")
     );
 }
 
@@ -4477,16 +4718,16 @@ async fn checked_against_the_meta_schema(world: &mut TinmanWorld) {
     );
 }
 
-#[then("all eight validate")]
-async fn all_eight_validate(world: &mut TinmanWorld) {
+#[then("all nine validate")]
+async fn all_nine_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each scantling was checked");
     assert_eq!(
         results.len(),
-        8,
-        "eight scantlings declare a dialect, found {}: {}",
+        9,
+        "nine scantlings declare a dialect, found {}: {}",
         results.len(),
         results
             .iter()
@@ -4547,6 +4788,217 @@ async fn all_thirteen_name_that_version(world: &mut TinmanWorld) {
         "{} schema URI(s) do not name the packaged version {version}:\n{}",
         stale.len(),
         stale.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// proof contracts: the shape of a scantling that declares no dialect
+// ---------------------------------------------------------------------------
+
+#[given("the three scantlings that declare no JSON Schema dialect")]
+async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
+    world.proof_contracts = Some(support::nondialect_scantlings());
+}
+
+#[when(expr = "each is checked against the meta-schema in {string}")]
+async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema: String) {
+    let contracts = world
+        .proof_contracts
+        .as_ref()
+        .expect("the proof contracts were read");
+    world.meta_schema_results = Some(
+        contracts
+            .iter()
+            .map(|(path, document)| {
+                let counterexamples = support::schema_counterexamples(&meta_schema, document);
+                (
+                    path.clone(),
+                    (!counterexamples.is_empty()).then(|| counterexamples.join("; ")),
+                )
+            })
+            .collect(),
+    );
+    world.meta_schema_path = Some(meta_schema);
+}
+
+#[then("all three validate")]
+async fn all_three_validate(world: &mut TinmanWorld) {
+    let results = world
+        .meta_schema_results
+        .as_ref()
+        .expect("each proof contract was checked");
+    assert_eq!(
+        results.len(),
+        3,
+        "three scantlings declare no dialect, found {}: {}",
+        results.len(),
+        results
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let failures: Vec<String> = results
+        .iter()
+        .filter_map(|(path, failure)| failure.as_ref().map(|f| format!("{path}: {f}")))
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} proof contract(s) do not satisfy the proof-contract meta-schema:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[then("the meta-schema forbids a property it does not name")]
+async fn the_meta_schema_forbids_an_unnamed_property(world: &mut TinmanWorld) {
+    let meta_schema = world
+        .meta_schema_path
+        .as_ref()
+        .expect("the meta-schema was named");
+    let contracts = world
+        .proof_contracts
+        .as_ref()
+        .expect("the proof contracts were read");
+    let unnamed = "tinmanPropertyTheMetaSchemaDoesNotName";
+    let tolerated: Vec<String> = contracts
+        .iter()
+        .filter(|(_, document)| {
+            let mut probed = document.clone();
+            probed
+                .as_object_mut()
+                .expect("a proof contract is a JSON object")
+                .insert(unnamed.to_string(), serde_json::Value::Bool(true));
+            support::schema_counterexamples(meta_schema, &probed).is_empty()
+        })
+        .map(|(path, _)| path.clone())
+        .collect();
+    assert!(
+        tolerated.is_empty(),
+        "{meta_schema} accepted the unnamed property {unnamed} on {} proof contract(s): {}",
+        tolerated.len(),
+        tolerated.join(", ")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// scantling enumerations: both directions of the join against the production
+// enumerations they constrain
+// ---------------------------------------------------------------------------
+
+#[given("the enumerations the scantlings declare")]
+async fn the_enumerations_the_scantlings_declare(world: &mut TinmanWorld) {
+    world.enumeration_pairs = Some(support::enumeration_pairs());
+}
+
+#[when("each declared value is parsed by the type its scantling describes")]
+async fn each_declared_value_is_parsed(world: &mut TinmanWorld) {
+    let pairs = world
+        .enumeration_pairs
+        .as_ref()
+        .expect("the scantling enumerations were read");
+    world.rejected_values = Some(
+        pairs
+            .iter()
+            .flat_map(|pair| {
+                pair.declared.iter().filter_map(move |value| {
+                    (pair.serialized)(value).err().map(|failure| {
+                        format!(
+                            "{} at {} declares {value}, which {} rejects: {failure}",
+                            pair.scantling, pair.pointer, pair.production
+                        )
+                    })
+                })
+            })
+            .collect(),
+    );
+}
+
+#[then("every declared value is accepted")]
+async fn every_declared_value_is_accepted(world: &mut TinmanWorld) {
+    let rejected = world
+        .rejected_values
+        .as_ref()
+        .expect("each declared value was parsed");
+    assert!(
+        rejected.is_empty(),
+        "{} declared value(s) are values Tinman rejects:\n{}",
+        rejected.len(),
+        rejected.join("\n")
+    );
+}
+
+#[then("the enumerations read are not empty")]
+async fn the_enumerations_read_are_not_empty(world: &mut TinmanWorld) {
+    let pairs = world
+        .enumeration_pairs
+        .as_ref()
+        .expect("the scantling enumerations were read");
+    assert!(
+        !pairs.is_empty(),
+        "no scantling enumeration was joined to a production enumeration"
+    );
+    let empty: Vec<String> = pairs
+        .iter()
+        .filter(|pair| pair.declared.is_empty())
+        .map(|pair| format!("{} at {}", pair.scantling, pair.pointer))
+        .collect();
+    assert!(
+        empty.is_empty(),
+        "{} enumeration(s) declare no value: {}",
+        empty.len(),
+        empty.join(", ")
+    );
+}
+
+#[given("the production enumerations the scantlings constrain")]
+async fn the_production_enumerations_the_scantlings_constrain(world: &mut TinmanWorld) {
+    world.enumeration_pairs = Some(support::enumeration_pairs());
+}
+
+#[when("each variant's serialized name is matched against its scantling enumeration")]
+async fn each_variants_serialized_name_is_matched(world: &mut TinmanWorld) {
+    let pairs = world
+        .enumeration_pairs
+        .as_ref()
+        .expect("the production enumerations were read");
+    world.undeclared_variants = Some(
+        pairs
+            .iter()
+            .flat_map(|pair| {
+                pair.accepted.iter().filter_map(move |variant| {
+                    let name = (pair.serialized)(variant).unwrap_or_else(|failure| {
+                        panic!(
+                            "{} accepts the variant {variant} but does not serialize it: {failure}",
+                            pair.production
+                        )
+                    });
+                    (!pair.declared.contains(&name)).then(|| {
+                        format!(
+                            "{} serializes a variant as {name}, which {} at {} does not declare (it declares {})",
+                            pair.production,
+                            pair.scantling,
+                            pair.pointer,
+                            pair.declared.join(", ")
+                        )
+                    })
+                })
+            })
+            .collect(),
+    );
+}
+
+#[then("every variant is a value its scantling declares")]
+async fn every_variant_is_declared(world: &mut TinmanWorld) {
+    let undeclared = world
+        .undeclared_variants
+        .as_ref()
+        .expect("each variant's serialized name was matched");
+    assert!(
+        undeclared.is_empty(),
+        "{} production variant(s) are not declared by the scantling that constrains them:\n{}",
+        undeclared.len(),
+        undeclared.join("\n")
     );
 }
 

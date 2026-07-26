@@ -197,6 +197,7 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
             program: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), command_line(command)],
             env: Vec::new(),
+            cwd: None,
             cleanup: Vec::new(),
         },
         None,

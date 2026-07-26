@@ -874,7 +874,7 @@ pub fn run_tinman(
 /// the whole conversation against the protocol scantling.
 pub struct DriverProcess {
     child: std::process::Child,
-    stdin: std::process::ChildStdin,
+    stdin: Option<std::process::ChildStdin>,
     replies: std::sync::mpsc::Receiver<String>,
     exchanged: Vec<serde_json::Value>,
 }
@@ -911,9 +911,42 @@ impl DriverProcess {
         });
         DriverProcess {
             child,
-            stdin,
+            stdin: Some(stdin),
             replies,
             exchanged: Vec::new(),
+        }
+    }
+
+    /// The process identifier the driver runs under. Its session sandbox
+    /// directories are named after it, so this identifies what it owns.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Close the driver's stdin, as a test runner dropping its end of the pipe
+    /// does. Dropping the handle is what the driver observes as end of input.
+    pub fn close_stdin(&mut self) {
+        self.stdin = None;
+    }
+
+    /// Wait for the driver to exit and report the status it left, retrying in
+    /// short intervals toward a deadline because a process exit is observable
+    /// only by asking. A driver that never exits fails here with a budget rather
+    /// than hanging the run.
+    pub fn wait_for_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match self
+                .child
+                .try_wait()
+                .expect("the driver's exit status is readable")
+            {
+                Some(status) => return status,
+                None if std::time::Instant::now() >= deadline => {
+                    panic!("the driver was still running 30s after its stdin closed")
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
         }
     }
 
@@ -925,8 +958,12 @@ impl DriverProcess {
         let request: serde_json::Value = serde_json::from_str(line)
             .unwrap_or_else(|e| panic!("the request line is not JSON: {e}\n{line}"));
         self.exchanged.push(request);
-        writeln!(self.stdin, "{line}").expect("the request reaches the driver");
-        self.stdin.flush().expect("the request is flushed");
+        let stdin = self
+            .stdin
+            .as_mut()
+            .expect("the driver's stdin is still open");
+        writeln!(stdin, "{line}").expect("the request reaches the driver");
+        stdin.flush().expect("the request is flushed");
         let reply = self
             .replies
             .recv_timeout(std::time::Duration::from_secs(30))
@@ -997,6 +1034,25 @@ pub fn session_sandbox_dirs(session: &str) -> Vec<std::path::PathBuf> {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.contains(session))
+        })
+        .collect()
+}
+
+/// The temporary sandbox directories a driver still owns, found by the process
+/// identifier their names carry. Scoped to one driver, so a concurrent
+/// scenario's own session directories are none of this driver's business.
+pub fn standing_session_dirs(driver_pid: u32) -> Vec<std::path::PathBuf> {
+    let prefix = format!("tinman-sess-{driver_pid}-");
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix))
         })
         .collect()
 }
@@ -1427,11 +1483,9 @@ pub fn run_conformance_scan(scope: &str) -> Vec<ConformanceMatch> {
     })
 }
 
-/// Every scantling that declares a JSON Schema dialect, as `(path, document)`
-/// pairs. A scantling carrying no `$schema` declares no dialect: it is a proof
-/// contract discharged by its own checker rather than a schema, so it is not a
-/// candidate for meta-schema validation.
-pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
+/// Every scantling in the scantlings directory, as `(path, document)` pairs,
+/// ordered by path.
+fn scantling_documents() -> Vec<(String, serde_json::Value)> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
         let path = entry.expect("a scantlings directory entry").path();
@@ -1443,12 +1497,32 @@ pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
             .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
         let document: serde_json::Value = serde_json::from_str(&text)
             .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
-        if document.get("$schema").is_some() {
-            found.push((display, document));
-        }
+        found.push((display, document));
     }
     found.sort_by(|a, b| a.0.cmp(&b.0));
     found
+}
+
+/// Every scantling that declares a JSON Schema dialect, as `(path, document)`
+/// pairs. A scantling carrying no `$schema` declares no dialect: it is a proof
+/// contract discharged by its own checker rather than a schema, so it is not a
+/// candidate for meta-schema validation.
+pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
+    scantling_documents()
+        .into_iter()
+        .filter(|(_, document)| document.get("$schema").is_some())
+        .collect()
+}
+
+/// Every scantling that declares no JSON Schema dialect, as `(path, document)`
+/// pairs. These are the proof contracts: each is discharged by a checker in
+/// this support module, so its own shape is checked against the proof-contract
+/// meta-schema rather than by a dialect it declares.
+pub fn nondialect_scantlings() -> Vec<(String, serde_json::Value)> {
+    scantling_documents()
+        .into_iter()
+        .filter(|(_, document)| document.get("$schema").is_none())
+        .collect()
 }
 
 /// Every published schema URI the repository serves to consumers, as
@@ -1456,6 +1530,12 @@ pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
 /// example plan publishes the one its language server reads from the
 /// `$schema=` token in its leading comment. Both are fetched over the network
 /// by consumers who never run this suite.
+///
+/// A scantling carrying no `$id` publishes no URI, so it contributes none: the
+/// proof-contract meta-schema is read from a repository path by the checkers in
+/// this module and is never fetched by URI. The named count in the scenario is
+/// what pins the set, so a scantling that loses its `$id` drops the count and
+/// fails there rather than being waved through here.
 pub fn published_schema_uris() -> Vec<(String, String)> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
@@ -1468,10 +1548,9 @@ pub fn published_schema_uris() -> Vec<(String, String)> {
             .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
         let document: serde_json::Value = serde_json::from_str(&text)
             .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
-        let id = document
-            .get("$id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_else(|| panic!("scantling {display} publishes no $id"));
+        let Some(id) = document.get("$id").and_then(|v| v.as_str()) else {
+            continue;
+        };
         found.push((display, id.to_string()));
     }
     for entry in
@@ -1515,6 +1594,32 @@ pub fn package_version(manifest_path: &str) -> String {
     panic!("manifest {manifest_path} declares no package version");
 }
 
+/// Run one blocking real-service call on its own thread and return what it
+/// produced, bounded by `budget`. A real-service step carries an explicit
+/// failure ceiling, so a provider that accepts the connection and then never
+/// answers fails loudly here, naming its budget, rather than hanging until the
+/// whole run is killed. A hung call reports nothing and still bills for the
+/// request, so the ceiling is what makes a paid tier honest. The waiting thread
+/// is abandoned on expiry because the blocking client offers no cancellation;
+/// it ends with the process at run end.
+pub fn within_budget<T: Send + 'static>(
+    what: &str,
+    budget: std::time::Duration,
+    call: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(call());
+    });
+    receiver.recv_timeout(budget).unwrap_or_else(|_| {
+        panic!(
+            "{what} did not answer within its {}s budget, so the step failed on \
+             the budget rather than hanging the run",
+            budget.as_secs()
+        )
+    })
+}
+
 /// Check the source a boundary policy governs against that policy. Returns
 /// counterexamples; an empty list means the module carries no forbidden
 /// reference and every required reference.
@@ -1544,4 +1649,528 @@ pub fn check_boundary(policy_path: &str) -> Vec<String> {
         }
     }
     bad
+}
+
+/// One match an `ast-grep` scan reports, in the shape the derived
+/// `plank-inventory` and `step-usage` commands emit.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanMatch {
+    pub text: String,
+    pub file: String,
+    pub range: MatchRange,
+    #[serde(default)]
+    pub meta_variables: Option<MetaVariables>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetaVariables {
+    pub single: std::collections::BTreeMap<String, MetaVariable>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetaVariable {
+    pub text: String,
+}
+
+/// The inline rule the `plank-inventory` command in RIGGING.md carries.
+const PLANK_INVENTORY_RULE: &str =
+    r#"{id: planks, language: rust, rule: {kind: line_comment, regex: "@planks"}}"#;
+
+/// The inline rule the `step-usage` command in RIGGING.md carries.
+const STEP_USAGE_RULE: &str = r##"{id: step-usage, language: rust, rule: {any: [{pattern: "#[given(expr = $P)]"}, {pattern: "#[when(expr = $P)]"}, {pattern: "#[then(expr = $P)]"}, {pattern: "#[given($P)]"}, {pattern: "#[when($P)]"}, {pattern: "#[then($P)]"}]}}"##;
+
+/// Run an `ast-grep` scan with an inline rule over `scope` and return every
+/// match it reports. A scanner that failed to run at all is caught by the parse.
+fn run_inline_scan(rule: &str, scope: &str) -> Vec<ScanMatch> {
+    let output = std::process::Command::new("ast-grep")
+        .args(["scan", "--inline-rules", rule, "--json=compact", scope])
+        .output()
+        .unwrap_or_else(|e| panic!("the inline scan over {scope} could not be run: {e}"));
+    let stdout = String::from_utf8(output.stdout).expect("the scanner emits UTF-8");
+    serde_json::from_str(&stdout).unwrap_or_else(|e| {
+        panic!(
+            "the inline scan over {scope} emitted no parseable report: {e}\nstdout: {stdout}\nstderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// Read a Rust string literal, quotes and escapes included, as the text it
+/// carries.
+fn read_string_literal(literal: &str) -> Option<String> {
+    let body = literal.strip_prefix('"')?.strip_suffix('"')?;
+    let mut text = String::new();
+    let mut characters = body.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            text.push(character);
+            continue;
+        }
+        match characters.next()? {
+            'n' => text.push('\n'),
+            't' => text.push('\t'),
+            escaped => text.push(escaped),
+        }
+    }
+    Some(text)
+}
+
+/// One plank the inventory reports: the seam it sits on, and the step
+/// definition pattern it names.
+#[derive(Debug, Clone)]
+pub struct Plank {
+    pub file: String,
+    pub line: usize,
+    pub pattern: String,
+}
+
+/// Every `@planks` annotation in the implementation, read through the
+/// `plank-inventory` command in RIGGING.md. A `@planks-provisional` annotation
+/// names a scenario rather than a pattern, so it is no member of this join. An
+/// annotation carrying the token in neither form is malformed and fails here.
+pub fn plank_inventory() -> Vec<Plank> {
+    let mut planks = Vec::new();
+    for reported in run_inline_scan(PLANK_INVENTORY_RULE, "src") {
+        let text = reported.text.trim().to_string();
+        let line = reported.range.start.line + 1;
+        if text.contains("@planks-provisional(") {
+            continue;
+        }
+        let literal = text
+            .split_once("@planks(")
+            .and_then(|(_, rest)| rest.strip_suffix(')'))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}:{line} carries a malformed plank annotation: {text}",
+                    reported.file
+                )
+            });
+        let pattern = read_string_literal(literal).unwrap_or_else(|| {
+            panic!("{}:{line} names no readable pattern: {text}", reported.file)
+        });
+        planks.push(Plank {
+            file: reported.file,
+            line,
+            pattern,
+        });
+    }
+    planks
+}
+
+/// How a step definition matches a step, exactly as the runner matches it: a
+/// cucumber expression through the expression crate the runner's own macros
+/// use, a bare literal by equality.
+#[derive(Debug)]
+pub enum Matcher {
+    Literal(String),
+    Expression(cucumber::codegen::Regex),
+}
+
+impl Matcher {
+    /// Whether this step definition binds the step text.
+    pub fn binds(&self, step: &str) -> bool {
+        match self {
+            Matcher::Literal(literal) => literal == step,
+            Matcher::Expression(regex) => regex.is_match(step),
+        }
+    }
+}
+
+/// One step definition the step-usage command reports: the pattern literal it
+/// declares, and how that pattern matches a step.
+#[derive(Debug)]
+pub struct StepPattern {
+    pub file: String,
+    pub line: usize,
+    pub pattern: String,
+    pub matcher: Matcher,
+}
+
+/// Every step definition pattern the verification support declares, read
+/// through the `step-usage` command in RIGGING.md. The pattern is carried
+/// verbatim, so the plank join over it is exact string membership.
+pub fn step_definition_patterns() -> Vec<StepPattern> {
+    let mut patterns = Vec::new();
+    for reported in run_inline_scan(STEP_USAGE_RULE, "tests") {
+        let line = reported.range.start.line + 1;
+        let literal = reported
+            .meta_variables
+            .as_ref()
+            .and_then(|variables| variables.single.get("P"))
+            .map(|variable| variable.text.clone())
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}:{line} reports no pattern literal: {}",
+                    reported.file, reported.text
+                )
+            });
+        let pattern = read_string_literal(&literal).unwrap_or_else(|| {
+            panic!(
+                "{}:{line} declares an unreadable pattern literal: {literal}",
+                reported.file
+            )
+        });
+        let matcher = if reported.text.contains("expr =") {
+            Matcher::Expression(
+                cucumber::codegen::Expression::regex(pattern.as_str()).unwrap_or_else(|e| {
+                    panic!(
+                        "{}:{line} declares the cucumber expression {pattern}, which does not expand: {e}",
+                        reported.file
+                    )
+                }),
+            )
+        } else {
+            Matcher::Literal(pattern.clone())
+        };
+        patterns.push(StepPattern {
+            file: reported.file,
+            line,
+            pattern,
+            matcher,
+        });
+    }
+    patterns
+}
+
+/// One scenario a spec declares: the feature carrying it, its name, and every
+/// step text it carries, background steps included.
+#[derive(Debug, Clone)]
+pub struct SpecScenario {
+    pub feature: String,
+    pub name: String,
+    pub steps: Vec<String>,
+}
+
+/// Every scenario the specs declare, read with the Gherkin parser the runner
+/// itself parses the specs with, so the set is the runner's own and not a
+/// second reading of the same files.
+pub fn spec_scenarios() -> Vec<SpecScenario> {
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir("features")
+        .expect("the specs directory is readable")
+        .map(|entry| entry.expect("a specs directory entry").path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("feature"))
+        .collect();
+    paths.sort();
+
+    let mut found = Vec::new();
+    for path in paths {
+        let display = path.display().to_string();
+        let feature =
+            cucumber::gherkin::Feature::parse_path(&path, cucumber::gherkin::GherkinEnv::default())
+                .unwrap_or_else(|e| panic!("spec {display} did not parse: {e}"));
+        let feature_background: Vec<String> = feature
+            .background
+            .iter()
+            .flat_map(|background| background.steps.iter().map(|step| step.value.clone()))
+            .collect();
+        let mut collect = |scenario: &cucumber::gherkin::Scenario, ambient: &[String]| {
+            let mut steps = ambient.to_vec();
+            steps.extend(scenario.steps.iter().map(|step| step.value.clone()));
+            found.push(SpecScenario {
+                feature: display.clone(),
+                name: scenario.name.clone(),
+                steps,
+            });
+        };
+        for scenario in &feature.scenarios {
+            collect(scenario, &feature_background);
+        }
+        for rule in &feature.rules {
+            let mut ambient = feature_background.clone();
+            ambient.extend(
+                rule.background
+                    .iter()
+                    .flat_map(|background| background.steps.iter().map(|step| step.value.clone())),
+            );
+            for scenario in &rule.scenarios {
+                collect(scenario, &ambient);
+            }
+        }
+    }
+    found
+}
+
+/// The `ast-grep` project configuration, read for the rule directories the
+/// derived verification-conformance rule set lives in.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScannerConfig {
+    rule_dirs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScannerRule {
+    id: String,
+}
+
+/// The rule ids the derived verification-conformance rule set carries, read from
+/// the rule directories `sgconfig.yml` names, exactly as the scanner reads them.
+pub fn conformance_rule_ids() -> Vec<String> {
+    let config: ScannerConfig = read_policy("sgconfig.yml");
+    let mut ids = Vec::new();
+    for directory in &config.rule_dirs {
+        let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(directory)
+            .unwrap_or_else(|e| panic!("rule directory {directory} is unreadable: {e}"))
+            .map(|entry| entry.expect("a rule directory entry").path())
+            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("yml"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            let display = path.display().to_string();
+            let rule: ScannerRule = read_policy(&display);
+            ids.push(rule.id);
+        }
+    }
+    ids.sort();
+    ids
+}
+
+/// The characters a scenario name may not carry, because the focused command
+/// passes the name to the runner as a regex. This is the set the runner's own
+/// expression crate escapes when it builds a regex from a literal.
+pub const REGEX_METACHARACTERS: &str = "^$[]()\\{}.|?*+";
+
+/// One enumeration a scantling declares: the scantling declaring it, the JSON
+/// pointer it sits at, and the values it names.
+#[derive(Debug, Clone)]
+pub struct ScantlingEnumeration {
+    pub scantling: String,
+    pub pointer: String,
+    pub values: Vec<serde_json::Value>,
+}
+
+/// Every `enum` a scantling declares, found by walking each document rather
+/// than by a hand-kept list, so an enumeration added to a scantling is read
+/// without an edit here.
+pub fn scantling_enumerations() -> Vec<ScantlingEnumeration> {
+    fn walk(
+        scantling: &str,
+        node: &serde_json::Value,
+        pointer: &str,
+        found: &mut Vec<ScantlingEnumeration>,
+    ) {
+        match node {
+            serde_json::Value::Object(members) => {
+                if let Some(serde_json::Value::Array(values)) = members.get("enum") {
+                    found.push(ScantlingEnumeration {
+                        scantling: scantling.to_string(),
+                        pointer: pointer.to_string(),
+                        values: values.clone(),
+                    });
+                }
+                for (key, value) in members {
+                    walk(scantling, value, &format!("{pointer}/{key}"), found);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    walk(scantling, item, &format!("{pointer}/{index}"), found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut found = Vec::new();
+    for (path, document) in scantling_documents() {
+        walk(&path, &document, "", &mut found);
+    }
+    found.sort_by(|a, b| (&a.scantling, &a.pointer).cmp(&(&b.scantling, &b.pointer)));
+    found
+}
+
+/// A scantling enumeration joined to the production enumeration it constrains:
+/// the values the scantling declares, the variant names the production type
+/// accepts, and the round trip that parses a name and reports how the type
+/// serializes it.
+pub struct EnumerationPair {
+    pub scantling: String,
+    pub pointer: String,
+    pub production: &'static str,
+    pub declared: Vec<String>,
+    pub accepted: Vec<String>,
+    pub serialized: fn(&str) -> Result<String, String>,
+}
+
+impl std::fmt::Debug for EnumerationPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnumerationPair")
+            .field("scantling", &self.scantling)
+            .field("pointer", &self.pointer)
+            .field("production", &self.production)
+            .field("declared", &self.declared)
+            .field("accepted", &self.accepted)
+            .finish()
+    }
+}
+
+/// A value no production enumeration can name, used to make a type report the
+/// variant names it accepts.
+const VARIANT_PROBE: &str = "tinman-variant-probe";
+
+/// The variant names a type accepts, read from the type itself: an unknown
+/// variant makes the deserializer name every variant it knows, so the set comes
+/// from the production enumeration rather than from a list kept here that could
+/// fall behind it.
+fn accepted_variants<T: for<'de> Deserialize<'de>>() -> Vec<String> {
+    let probe = serde_json::Value::String(VARIANT_PROBE.to_string());
+    let report = match serde_json::from_value::<T>(probe) {
+        Ok(_) => panic!("the probe value {VARIANT_PROBE} was accepted as a variant name"),
+        Err(e) => e.to_string(),
+    };
+    let mut names = Vec::new();
+    let mut rest = report.as_str();
+    while let Some((_, after)) = rest.split_once('`') {
+        let Some((name, tail)) = after.split_once('`') else {
+            break;
+        };
+        names.push(name.to_string());
+        rest = tail;
+    }
+    names.retain(|name| name != VARIANT_PROBE);
+    assert!(
+        !names.is_empty(),
+        "no variant names were read from the deserializer's report: {report}"
+    );
+    names
+}
+
+/// Parse a name into the production enumeration and report how that
+/// enumeration serializes what it parsed.
+fn serialized_variant<T>(name: &str) -> Result<String, String>
+where
+    T: for<'de> Deserialize<'de> + serde::Serialize,
+{
+    let parsed = serde_json::from_value::<T>(serde_json::Value::String(name.to_string()))
+        .map_err(|e| e.to_string())?;
+    let serialized = serde_json::to_value(&parsed).map_err(|e| e.to_string())?;
+    serialized
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("serialized to {serialized} rather than to a name"))
+}
+
+/// Scantling enumerations that constrain no production enumeration, each with
+/// the reason it is out of the join's reach. A scantling enumeration named
+/// neither here nor in the join below is unclassified, and reading the pairs
+/// fails rather than passing over it.
+const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 6] = [
+    (
+        "scantlings/inference-request.schema.json",
+        "/properties/messages/items/properties/role",
+        "the wire message carries the role as a string, so no production enumeration carries the set",
+    ),
+    (
+        "scantlings/driver-protocol.schema.json",
+        "/$defs/request/properties/method",
+        "the driver dispatches on the method string, so no production enumeration carries the set",
+    ),
+    (
+        "scantlings/driver-protocol.schema.json",
+        "/$defs/params/properties/scope",
+        "the driver reads the scope as a string, so no production enumeration carries the set",
+    ),
+    (
+        "scantlings/driver-protocol.schema.json",
+        "/$defs/error/properties/code",
+        "the codes are integers the driver writes directly, not an enumeration's names",
+    ),
+    (
+        "scantlings/harness-plan.schema.json",
+        "/$defs/step/properties/capture/properties/scope",
+        "the plan carries the capture scope as a string, so no production enumeration carries the set",
+    ),
+    (
+        "scantlings/harness-plan.schema.json",
+        "/$defs/locator/properties/binding",
+        "the plan carries the binding as a string; tinman::tom::Binding names it through as_str rather than through serialization",
+    ),
+];
+
+/// What the join knows of a production enumeration: its path, the variant names
+/// it accepts, and its serialization round trip.
+type ProductionEnumeration = (
+    &'static str,
+    Vec<String>,
+    fn(&str) -> Result<String, String>,
+);
+
+/// Every scantling enumeration joined to the production enumeration it
+/// constrains. An enumeration this join does not recognize fails here, so a new
+/// scantling enumeration is classified rather than silently uncovered.
+pub fn enumeration_pairs() -> Vec<EnumerationPair> {
+    let mut pairs = Vec::new();
+    for enumeration in scantling_enumerations() {
+        let scantling = enumeration.scantling.as_str();
+        let pointer = enumeration.pointer.as_str();
+        if UNJOINED_ENUMERATIONS
+            .iter()
+            .any(|(s, p, _)| *s == scantling && *p == pointer)
+        {
+            continue;
+        }
+        let (production, accepted, serialized): ProductionEnumeration = match (scantling, pointer) {
+            ("scantlings/sandbox-spec.schema.json", "/properties/backend") => (
+                "tinman::sandbox::Backend",
+                accepted_variants::<tinman::sandbox::Backend>(),
+                serialized_variant::<tinman::sandbox::Backend>,
+            ),
+            ("scantlings/sandbox-spec.schema.json", "/properties/home") => (
+                "tinman::sandbox::Home",
+                accepted_variants::<tinman::sandbox::Home>(),
+                serialized_variant::<tinman::sandbox::Home>,
+            ),
+            ("scantlings/sandbox-spec.schema.json", "/properties/network") => (
+                "tinman::sandbox::Network",
+                accepted_variants::<tinman::sandbox::Network>(),
+                serialized_variant::<tinman::sandbox::Network>,
+            ),
+            ("scantlings/sandbox-spec.schema.json", "/properties/mounts/items/properties/mode") => {
+                (
+                    "tinman::sandbox::MountMode",
+                    accepted_variants::<tinman::sandbox::MountMode>(),
+                    serialized_variant::<tinman::sandbox::MountMode>,
+                )
+            }
+            (
+                "scantlings/sandbox-spec.schema.json",
+                "/properties/env/additionalProperties/oneOf/1/properties/from",
+            ) => (
+                "tinman::sandbox::EnvOrigin",
+                accepted_variants::<tinman::sandbox::EnvOrigin>(),
+                serialized_variant::<tinman::sandbox::EnvOrigin>,
+            ),
+            ("scantlings/tom.schema.json", "/$defs/region/properties/role") => (
+                "tinman::tom::Role",
+                accepted_variants::<tinman::tom::Role>(),
+                serialized_variant::<tinman::tom::Role>,
+            ),
+            _ => panic!(
+                "the enumeration at {pointer} in {scantling} names neither a production \
+                 enumeration this join carries nor a reason it carries none"
+            ),
+        };
+        let declared = enumeration
+            .values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        panic!("the enumeration at {pointer} in {scantling} declares the non-string value {value}")
+                    })
+                    .to_string()
+            })
+            .collect();
+        pairs.push(EnumerationPair {
+            scantling: enumeration.scantling.clone(),
+            pointer: enumeration.pointer.clone(),
+            production,
+            declared,
+            accepted,
+            serialized,
+        });
+    }
+    pairs
 }

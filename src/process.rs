@@ -11,5 +11,6 @@ pub struct PreparedProcess {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub cwd: Option<String>,
     pub cleanup: Vec<String>,
 }

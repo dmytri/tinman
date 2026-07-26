@@ -28,27 +28,32 @@ pub enum FlowStep {
     Tui(TuiProcess),
 }
 
-/// A command and how the plan expects it to run: the exit status the command
-/// must leave, and the text fed to its standard input.
+/// A command and how the plan expects it to run: the directory it runs in, the
+/// exit status the command must leave, and the text fed to its standard input.
 ///
 /// @planks("the flow passes")
 /// @planks("execution fails and reports the status {int}")
 /// @planks("the step's standard output is {string}")
+/// @planks("a flow whose only step runs {string} in the directory {string}")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "RunForm")]
 pub struct RunProcess {
     pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub status: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stdin: Option<String>,
 }
 
 /// The written forms of a run entry: a bare command, or a command carrying the
-/// status and the standard input the plan expects. A bare command YAML reads as
-/// a boolean, such as the shell's `false`, is that command's name.
+/// directory, the status, and the standard input the plan expects. A bare
+/// command YAML reads as a boolean, such as the shell's `false`, is that
+/// command's name.
 ///
 /// @planks("the flow passes")
 /// @planks("execution fails and reports the step that failed")
+/// @planks("a flow whose only step runs {string} in the directory {string}")
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum RunForm {
@@ -57,6 +62,8 @@ enum RunForm {
     Full {
         command: String,
         #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
         status: i32,
         #[serde(default)]
         stdin: Option<String>,
@@ -64,29 +71,34 @@ enum RunForm {
 }
 
 impl From<RunForm> for RunProcess {
-    /// Normalize a written run entry: a bare command expects the status 0 and
-    /// carries no input.
+    /// Normalize a written run entry: a bare command runs in the workspace
+    /// itself, expects the status 0, and carries no input.
     ///
     /// @planks("the flow passes")
     /// @planks("the step's standard output is {string}")
+    /// @planks("a flow whose only step runs {string} in the directory {string}")
     fn from(form: RunForm) -> RunProcess {
         match form {
             RunForm::Command(command) => RunProcess {
                 command,
+                cwd: None,
                 status: 0,
                 stdin: None,
             },
             RunForm::Boolean(flag) => RunProcess {
                 command: flag.to_string(),
+                cwd: None,
                 status: 0,
                 stdin: None,
             },
             RunForm::Full {
                 command,
+                cwd,
                 status,
                 stdin,
             } => RunProcess {
                 command,
+                cwd,
                 status,
                 stdin,
             },

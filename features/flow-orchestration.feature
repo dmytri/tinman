@@ -31,6 +31,11 @@ Feature: flow orchestration
     When the flow is executed
     Then the second step's output is "hello"
 
+  Scenario: a run step executes its command in the directory the plan names
+    Given a flow whose only step runs "printf landed > written.txt" in the directory "nested"
+    When the flow is executed
+    Then the file "nested/written.txt" contains "landed"
+
   Rule: a run step and a tui step observe their process differently because a pseudo-terminal merges the two output streams into one and cannot separate them again. A run step reads pipes, so a command-line program's streams and exit status stay distinguishable. A tui step reads a pseudo-terminal, which is what a full-screen program needs to draw at all. The same program often wants both: a coding agent answering one prompt is a command-line program, and the same binary run interactively is a full-screen one.
 
   Scenario: a run step keeps standard error apart from standard output

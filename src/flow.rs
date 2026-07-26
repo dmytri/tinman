@@ -32,10 +32,11 @@ pub struct FlowOutcome {
 }
 
 /// Execute a plan's flow in the order written, every step in the one workspace
-/// directory, stopping at the first step that fails. Terminal size is a
-/// property of the run rather than of the plan, so the caller states the width
-/// every driven program is given, and an unstated width leaves the run on the
-/// operator's own terminal size.
+/// directory, stopping at the first step that fails. A step naming its own
+/// directory runs in that directory under the workspace, which is created before
+/// the step runs. Terminal size is a property of the run rather than of the
+/// plan, so the caller states the width every driven program is given, and an
+/// unstated width leaves the run on the operator's own terminal size.
 ///
 /// @planks("the flow is executed")
 /// @planks("the flow passes")
@@ -47,12 +48,16 @@ pub struct FlowOutcome {
 /// @planks("that plan is replayed at {int} columns")
 /// @planks("the fixture program reports a home directory other than the operator's home")
 /// @planks("the step reports a home directory other than the operator's home")
+/// @planks("a flow whose only step runs {string} in the directory {string}")
 pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<FlowOutcome, String> {
     let backend = BubblewrapBackend::new();
     let mut steps = Vec::new();
     for step in &plan.flow {
         match step {
             FlowStep::Run(run) => {
+                if let Some(cwd) = &run.cwd {
+                    std::fs::create_dir_all(workspace.join(cwd)).map_err(|e| e.to_string())?;
+                }
                 let prepared = backend.prepare_with_home(
                     &plan.sandbox,
                     &CommandSpec {
@@ -60,6 +65,7 @@ pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<Fl
                         args: vec!["-c".to_string(), run.command.clone()],
                     },
                     Some(workspace),
+                    run.cwd.as_deref(),
                 )?;
                 let mut child = Command::new(&prepared.program)
                     .args(&prepared.args)
@@ -92,6 +98,7 @@ pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<Fl
                         args: vec!["-c".to_string(), tui.command.clone()],
                     },
                     Some(workspace),
+                    None,
                 )?;
                 let mut session = capture_interactive_at(&prepared, columns)?;
                 for action in &tui.steps {

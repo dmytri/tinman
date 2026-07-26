@@ -115,7 +115,7 @@ pub struct Request {
 impl Request {
     /// The provider endpoint this request addresses.
     ///
-    /// @planks("the request addresses {string}")
+    /// @planks("the request addresses {string} with the model {string}")
     pub fn address(&self) -> &str {
         &self.base_url
     }
@@ -127,7 +127,7 @@ impl Request {
 
     /// The model this request names.
     ///
-    /// @planks("the request names the model {string}")
+    /// @planks("the request addresses {string} with the model {string}")
     /// @planks("both requests name the model {string}")
     pub fn model(&self) -> &str {
         &self.model
@@ -207,8 +207,8 @@ pub fn assistant_request(settings: &Settings, question: &str) -> Request {
 /// Build a request against the configured settings. The credential becomes a
 /// bearer token, absent when no credential is configured.
 ///
-/// @planks-provisional("features/inference-provider.feature:a built request carries the configured credential as a bearer token")
-/// @planks-provisional("features/inference-provider.feature:a request built without a credential carries no authorization header")
+/// @planks("the request carries the authorization header {string}")
+/// @planks("the request carries no authorization header")
 fn request(settings: &Settings, temperature: f64, prompt: String) -> Request {
     Request {
         base_url: settings.base_url.clone(),

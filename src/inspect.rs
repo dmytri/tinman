@@ -21,6 +21,7 @@ pub fn model(command: &str) -> Result<Model, String> {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), command.to_string()],
         env: Vec::new(),
+        cwd: None,
         cleanup: Vec::new(),
     })?;
     let deadline = Instant::now() + DRAW_DEADLINE;
