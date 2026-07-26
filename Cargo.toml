@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/dmytri/tinman"
 keywords = ["testing", "tui", "cli", "pty", "sandbox"]
 categories = ["development-tools::testing", "command-line-utilities"]
-exclude = ["idea.md", "isolation.md", "help.md", "CAPTAIN.md", ".claude"]
+exclude = ["intent", "CAPTAIN.md", ".claude"]
 
 [dependencies]
 alacritty_terminal = "0.26.0"

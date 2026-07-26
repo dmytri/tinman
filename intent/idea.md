@@ -1,3 +1,9 @@
+> **Historical.** A dated intent source from Tinman's design, kept for provenance
+> because scantlings cite it as where an invariant came from. It is not a
+> requirement, and it does not describe current behaviour: parts of it name
+> commands, options and fields that no longer exist. Binding behaviour lives in
+> `features/`, mechanical shape in `scantlings/`, tooling values in `RIGGING.md`.
+
 Here you go:
 
 # Build Clanker
