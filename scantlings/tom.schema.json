@@ -5,7 +5,11 @@
   "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names and text. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["rows", "cols", "root"],
+  "required": [
+    "rows",
+    "cols",
+    "root"
+  ],
   "properties": {
     "rows": {
       "description": "Height of the screen the model was built from.",
@@ -17,38 +21,49 @@
       "type": "integer",
       "minimum": 1
     },
-    "root": { "$ref": "#/$defs/region" }
+    "root": {
+      "$ref": "#/$defs/region"
+    }
   },
   "$defs": {
-    "stretch": {
-      "description": "Which edges of the region's rectangle are elastic. An anchored edge holds its cell offset when the terminal is a different size; an elastic edge moves with the viewport. A region recorded at one width must still bind at another, and a rectangle anchored on all four sides cannot. A bordered pane is anchored on every edge, a status line is anchored bottom and left while elastic right, and a list inside a pane is anchored top and left while elastic right and bottom.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["top", "bottom", "left", "right"],
-      "properties": {
-        "top": { "type": "boolean" },
-        "bottom": { "type": "boolean" },
-        "left": { "type": "boolean" },
-        "right": { "type": "boolean" }
-      }
-    },
     "rect": {
       "description": "A Ratatui-shaped rectangle in screen cells.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y", "width", "height"],
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
       "properties": {
-        "x": { "type": "integer", "minimum": 0 },
-        "y": { "type": "integer", "minimum": 0 },
-        "width": { "type": "integer", "minimum": 0 },
-        "height": { "type": "integer", "minimum": 0 }
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "region": {
       "description": "One node of the model. A region owns a rectangle of the screen and may split into child regions.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "rect", "children"],
+      "required": [
+        "role",
+        "rect",
+        "children"
+      ],
       "properties": {
         "role": {
           "description": "The semantic role the region plays on screen, drawn from the WAI-ARIA role taxonomy at https://www.w3.org/TR/wai-aria-1.2/#role_definitions. Tinman coins no roles of its own: a role assistive technology already understands is one a test author already understands, and the taxonomy carries containment expectations Tinman would otherwise invent, such as a listitem belonging to a list and a menuitem to a menu. The root region is `application`, ARIA's role for a widget region whose keystrokes the program interprets rather than the terminal. This set holds the roles a scenario exercises today; a role is added when a scenario needs it, not in anticipation.",
@@ -68,21 +83,30 @@
         },
         "name": {
           "description": "The accessible name a locator matches, such as a pane title or an item's label.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "text": {
           "description": "The region's rendered text, with trailing blanks removed.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "selected": {
           "description": "Whether the region is the currently selected or highlighted one among its siblings.",
           "type": "boolean"
         },
-        "rect": { "$ref": "#/$defs/rect" },
-        "stretch": { "$ref": "#/$defs/stretch" },
+        "rect": {
+          "$ref": "#/$defs/rect"
+        },
         "children": {
           "type": "array",
-          "items": { "$ref": "#/$defs/region" }
+          "items": {
+            "$ref": "#/$defs/region"
+          }
         }
       }
     }

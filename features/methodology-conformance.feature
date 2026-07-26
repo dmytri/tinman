@@ -20,13 +20,13 @@ Feature: methodology conformance
   Scenario: every scantling declaring a dialect satisfies it
     Given the scantlings that declare a JSON Schema dialect
     When each is checked against the JSON Schema 2020-12 meta-schema
-    Then all nine validate
+    Then all ten validate
 
   @conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all fourteen name that version
+    Then all fifteen name that version
 
   Rule: the plank joins below need two sources joined, the plank inventory and the step-usage pattern set, so their logic lives in step definitions rather than in an ast-grep rule. The pattern set comes from the derived step-usage command, which reports each step-definition pattern literal untruncated; the join is exact string membership, with no normalization on either side.
 

@@ -12,10 +12,11 @@ use crate::inference::Settings;
 use crate::screen::VirtualScreen;
 use serde::{Deserialize, Serialize};
 
-/// The characters a bordered pane is drawn with.
-const TOP_LEFT: &str = "\u{250c}";
-const TOP_RIGHT: &str = "\u{2510}";
-const BOTTOM_LEFT: &str = "\u{2514}";
+/// The characters a bordered pane is drawn with. A corner is drawn square or
+/// rounded, and a pane is the same region to a reader either way.
+const TOP_LEFT: [&str; 2] = ["\u{250c}", "\u{256d}"];
+const TOP_RIGHT: [&str; 2] = ["\u{2510}", "\u{256e}"];
+const BOTTOM_LEFT: [&str; 2] = ["\u{2514}", "\u{2570}"];
 const HORIZONTAL: &str = "\u{2500}";
 const VERTICAL: &str = "\u{2502}";
 
@@ -332,17 +333,22 @@ pub fn infer(screen: &VirtualScreen, settings: &Settings) -> Model {
 /// The bordered panes `grid` draws, each read as a list of the lines it shows.
 ///
 /// @planks("the terminal object model is built")
+/// @planks("the region titled {string} has the corner glyph {string}")
 fn panes(grid: &[Vec<String>], screen: &VirtualScreen) -> Vec<Region> {
     let mut regions = Vec::new();
     for y in 0..grid.len() {
         for x in 0..grid[y].len() {
-            if grid[y][x] != TOP_LEFT {
+            if !TOP_LEFT.contains(&grid[y][x].as_str()) {
                 continue;
             }
-            let Some(right) = (x + 1..grid[y].len()).find(|&col| grid[y][col] == TOP_RIGHT) else {
+            let Some(right) =
+                (x + 1..grid[y].len()).find(|&col| TOP_RIGHT.contains(&grid[y][col].as_str()))
+            else {
                 continue;
             };
-            let Some(bottom) = (y + 1..grid.len()).find(|&row| grid[row][x] == BOTTOM_LEFT) else {
+            let Some(bottom) =
+                (y + 1..grid.len()).find(|&row| BOTTOM_LEFT.contains(&grid[row][x].as_str()))
+            else {
                 continue;
             };
             regions.push(pane_region(grid, screen, x, y, right, bottom));
@@ -354,10 +360,12 @@ fn panes(grid: &[Vec<String>], screen: &VirtualScreen) -> Vec<Region> {
 /// One bordered pane read as a list: its title is its name and each line it
 /// shows is an item, the reversed line being the selected one. A pane whose
 /// lines are separated into several runs by blank lines is a log instead, each
-/// run of lines an article.
+/// run of lines an article. A pane holding the cursor is where typing goes, so
+/// it is a textbox carrying the lines it holds as its text.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the region named {string} has the role {string}")
+/// @planks("the terminal object model is inferred")
 fn pane_region(
     grid: &[Vec<String>],
     screen: &VirtualScreen,
@@ -377,6 +385,33 @@ fn pane_region(
         .take_while(|cell| cell.as_str() != HORIZONTAL)
         .cloned()
         .collect();
+    // The cursor is the signal that tells a field being edited from a panel
+    // being displayed. It is reported on the 1-based grid the terminal
+    // addresses and the rectangle is 0-based, so the reported cell is converted
+    // before it is placed in the pane. A textbox holds text rather than lines,
+    // and the blank line an empty field shows is part of that text, so the text
+    // is taken from every row inside the border.
+    let (cursor_row, cursor_col) = screen.cursor();
+    let (cursor_row, cursor_col) = (cursor_row - 1, cursor_col - 1);
+    if cursor_row >= rect.y
+        && cursor_row < rect.y + rect.height
+        && cursor_col >= rect.x
+        && cursor_col < rect.x + rect.width
+    {
+        let text = (y + 1..bottom)
+            .map(|row| line_of(grid, row, x, right))
+            .collect::<Vec<String>>()
+            .join("\n");
+        return Region {
+            role: Role::Textbox,
+            name: Some(title),
+            text: Some(text),
+            selected: false,
+            rect,
+            children: Vec::new(),
+            cells: cells_of(grid, rect),
+        };
+    }
     let mut runs: Vec<Vec<usize>> = Vec::new();
     let mut run: Vec<usize> = Vec::new();
     for row in y + 1..bottom {

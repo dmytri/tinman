@@ -8,6 +8,8 @@ use tinman::cli::{Cli, Command};
 /// help subcommand render the help, one behaviour reached two ways: an operator
 /// on a terminal sees the tagline line filled; anything
 /// else sees the conventional help, which needs no model, credential or network.
+/// A configured credential opens the assistant beneath the help, so a provider
+/// that withholds its answer still gets a prompt rather than a bare screen.
 /// A plan whose step fails names the step and leaves a failure status.
 ///
 /// @planks("the operator runs {string} with stdout redirected to a file")
@@ -27,9 +29,9 @@ fn main() {
     if cli.help || matches!(cli.command, Some(Command::Help)) {
         if std::io::stdout().is_terminal() {
             let settings = tinman::inference::Settings::from_process();
-            let expansion = tinman::inference::expansion(&settings);
+            let expansion = tinman::inference::tagline_expansion(&settings);
             println!("{}", tinman::help::interactive(expansion.as_deref()));
-            if expansion.is_some() {
+            if settings.api_key.is_some() {
                 tinman::assistant::converse(&settings);
             }
         } else {

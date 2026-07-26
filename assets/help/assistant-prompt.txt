@@ -1,2 +1,3 @@
 Ask Tinman
 enter to send | esc to leave
+enter to send | esc to cancel

@@ -70,8 +70,9 @@ impl Dimensions for ScreenSize {
 }
 
 /// A parsed terminal screen: rows of cell contents, with the reversed video a
-/// program highlights a line with and the columns a wide character continues
-/// into. Row and column addressing is 1-based, matching ANSI cursor addressing.
+/// program highlights a line with, the columns a wide character continues into,
+/// and the cell the cursor rests on. Row and column addressing is 1-based,
+/// matching ANSI cursor addressing.
 ///
 /// @planks("a virtual screen that shows {string}")
 /// @planks("the process is captured through a PTY")
@@ -79,11 +80,13 @@ impl Dimensions for ScreenSize {
 /// @planks("the virtual screen row {int} reads {string}")
 /// @planks("the virtual screen cell at row {int} column {int} continues the character at column {int}")
 /// @planks("every cell of row {int} from column {int} through column {int} is rendered with reversed video")
+/// @planks("the terminal object model is inferred")
 #[derive(Debug, Clone)]
 pub struct VirtualScreen {
     rows: Vec<Vec<String>>,
     reversed: Vec<Vec<bool>>,
     continuations: Vec<Vec<bool>>,
+    cursor: (u16, u16),
 }
 
 impl VirtualScreen {
@@ -139,6 +142,15 @@ impl VirtualScreen {
         }
         processor.advance(&mut term, &bytes[fed..]);
         let grid = term.grid();
+        // Where the cursor rests is the cell the next character the program
+        // writes will land in. It is reported on the emulator's own 0-based
+        // grid, and a program that scrolled its output reports a row above the
+        // first, so the row is taken from the top of the screen.
+        let point = grid.cursor.point;
+        let cursor = (
+            u16::try_from(point.line.0.max(0)).expect("the cursor row fits a terminal") + 1,
+            u16::try_from(point.column.0).expect("the cursor column fits a terminal") + 1,
+        );
         let mut rows = Vec::with_capacity(ROWS as usize);
         let mut reversed = Vec::with_capacity(ROWS as usize);
         let mut continuations = Vec::with_capacity(ROWS as usize);
@@ -174,7 +186,15 @@ impl VirtualScreen {
             rows,
             reversed,
             continuations,
+            cursor,
         }
+    }
+
+    /// The 1-based row and column the cursor rests on.
+    ///
+    /// @planks("the terminal object model is inferred")
+    pub fn cursor(&self) -> (u16, u16) {
+        self.cursor
     }
 
     /// The 1-based column of the wide character that the cell at the given

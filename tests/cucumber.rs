@@ -105,12 +105,20 @@ struct TinmanWorld {
     provider: Option<support::LocalProvider>,
     run_stdout: Option<String>,
     run_status: Option<i32>,
+    // how long the command the operator ran took to complete, so a ceiling a
+    // scenario puts on it is read off the wall clock rather than assumed
+    run_elapsed: Option<std::time::Duration>,
     // what the run wrote to the terminal, control sequences intact, so a screen
     // assertion reads the bytes the terminal received
     run_raw: Option<Vec<u8>>,
     // the width of the terminal the run drew on, so a screen assertion parses
     // the bytes on the grid the program addressed
     run_columns: Option<u16>,
+    // the moment the question was sent, and the elapsed seconds the pending
+    // call last reported, so a report of how long it has been waiting is read
+    // against the wall clock and against its own earlier reading
+    question_sent_at: Option<std::time::Instant>,
+    reported_elapsed: Option<u64>,
     // flow orchestration
     flow_outcome: Option<tinman::flow::FlowOutcome>,
     flow_error: Option<String>,
@@ -1144,8 +1152,10 @@ async fn operator_runs_redirected(world: &mut TinmanWorld, line: String) {
     let args = tinman_args(&line);
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let env = configured_env(world);
+    let started = std::time::Instant::now();
     let outcome = support::run_tinman(&dir, &argv, &env, Some(&out))
         .unwrap_or_else(|e| panic!("running {line:?} failed: {e}"));
+    world.run_elapsed = Some(started.elapsed());
     world.run_stdout = Some(outcome.stdout);
     world.run_status = Some(outcome.status);
 }
@@ -1156,8 +1166,10 @@ async fn operator_executes(world: &mut TinmanWorld, line: String) {
     let args = tinman_args(&line);
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let env = configured_env(world);
+    let started = std::time::Instant::now();
     let outcome = support::run_tinman(&dir, &argv, &env, None)
         .unwrap_or_else(|e| panic!("running {line:?} failed: {e}"));
+    world.run_elapsed = Some(started.elapsed());
     world.run_stdout = Some(outcome.stdout);
     world.run_status = Some(outcome.status);
 }
@@ -1175,6 +1187,19 @@ async fn help_output_is_asset_without_tagline(world: &mut TinmanWorld, path: Str
         actual.trim_end(),
         expected.join("\n").trim_end(),
         "the help output is not the asset with its tagline line removed"
+    );
+}
+
+#[then(expr = "the command completed within {int} seconds")]
+async fn the_command_completed_within_seconds(world: &mut TinmanWorld, seconds: u64) {
+    let elapsed = world
+        .run_elapsed
+        .expect("the operator's command was run and timed");
+    let ceiling = std::time::Duration::from_secs(seconds);
+    assert!(
+        elapsed <= ceiling,
+        "the command took {:.1}s, longer than the {seconds} seconds allowed",
+        elapsed.as_secs_f64()
     );
 }
 
@@ -1698,15 +1723,6 @@ fn run_region(world: &TinmanWorld, title: &str) -> tinman::tom::Region {
         })
 }
 
-#[then(expr = "the region titled {string} is {int} columns wide")]
-async fn the_region_titled_is_columns_wide(world: &mut TinmanWorld, title: String, expected: u16) {
-    let region = run_region(world, &title);
-    assert_eq!(
-        region.rect.width, expected,
-        "the width of the region titled {title:?}"
-    );
-}
-
 #[then(expr = "the region titled {string} is at most {int} columns wide")]
 async fn the_region_titled_is_at_most_columns_wide(
     world: &mut TinmanWorld,
@@ -1718,6 +1734,43 @@ async fn the_region_titled_is_at_most_columns_wide(
         region.rect.width <= limit,
         "the region titled {title:?} is {} columns wide, wider than the {limit} columns allowed",
         region.rect.width
+    );
+}
+
+#[then(expr = "the region titled {string} has the corner glyph {string}")]
+async fn the_region_titled_has_the_corner_glyph(
+    world: &mut TinmanWorld,
+    title: String,
+    glyph: String,
+) {
+    let region = run_region(world, &title);
+    // The region reports its own cells on its own 1-based grid, so the top-left
+    // corner of the border is the cell at its row 1 column 1.
+    assert_eq!(
+        region.cell(1, 1),
+        glyph,
+        "the top-left corner glyph of the region titled {title:?}"
+    );
+}
+
+#[then(
+    expr = "the terminal object model of the screen conforms to the {string} schema in {string}"
+)]
+async fn the_tom_of_the_screen_conforms(world: &mut TinmanWorld, schema: String, path: String) {
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    let screen = support::terminal_screen_at(raw, run_columns(world));
+    let model = tinman::tom::build(&screen);
+    let instance =
+        serde_json::to_value(&model).expect("the terminal object model serializes to JSON");
+    let bad = support::schema_counterexamples(&path, &instance);
+    assert!(
+        bad.is_empty(),
+        "the terminal object model of the screen violates the {schema:?} schema:\n{}\nscreen:\n{}",
+        bad.join("\n"),
+        screen.contents()
     );
 }
 
@@ -1762,6 +1815,17 @@ async fn no_cell_is_drawn_in_colour(world: &mut TinmanWorld) {
     );
 }
 
+/// The title the assistant box carries. The asset's first line is the box's
+/// title, which is the name the model reads it by, so a step that must find the
+/// box takes the name from the asset that draws it rather than restating it.
+fn assistant_box_title() -> String {
+    asset_body("assets/help/assistant-prompt.txt")
+        .lines()
+        .next()
+        .expect("the assistant prompt asset carries a title")
+        .to_string()
+}
+
 #[given(expr = "the operator runs {string} in an interactive terminal")]
 async fn given_operator_runs_interactive(world: &mut TinmanWorld, line: String) {
     let dir = working_dir(world);
@@ -1771,24 +1835,161 @@ async fn given_operator_runs_interactive(world: &mut TinmanWorld, line: String) 
     let session = support::TerminalSession::start(&dir, &argv, &env)
         .unwrap_or_else(|e| panic!("starting {line:?} on a terminal failed: {e}"));
     // The session is up once the box inviting a question stands on the
-    // terminal, so nothing is typed before the program can read it. The asset's
-    // first line is the box's title, which is the name the model reads it by.
-    let prompt = asset_body("assets/help/assistant-prompt.txt");
-    let title = prompt
-        .lines()
-        .next()
-        .expect("the assistant prompt asset carries a title");
-    session.await_region(title, std::time::Duration::from_secs(10));
+    // terminal, so nothing is typed before the program can read it.
+    session.await_region(&assistant_box_title(), std::time::Duration::from_secs(10));
     world.terminal_session = Some(session);
 }
 
-#[when(expr = "the operator types {string} at the assistant prompt")]
-async fn the_operator_types_at_the_assistant_prompt(world: &mut TinmanWorld, question: String) {
+/// Send `question` at the prompt and note the moment it went, so a step reading
+/// how long a call has been pending reads it against the wall clock.
+///
+/// The same action is starting state for a scenario about a second exchange and
+/// the action under test for a scenario about the first, so it binds in both
+/// phases.
+async fn send_question_at_the_assistant_prompt(world: &mut TinmanWorld, question: String) {
     world
         .terminal_session
         .as_mut()
         .expect("an interactive terminal session")
         .type_line(&question);
+    world.question_sent_at = Some(std::time::Instant::now());
+}
+
+#[when(expr = "the operator types {string} at the assistant prompt")]
+async fn the_operator_types_at_the_assistant_prompt(world: &mut TinmanWorld, question: String) {
+    send_question_at_the_assistant_prompt(world, question).await;
+}
+
+#[given(expr = "the operator types {string} at the assistant prompt")]
+async fn given_the_operator_types_at_the_assistant_prompt(
+    world: &mut TinmanWorld,
+    question: String,
+) {
+    send_question_at_the_assistant_prompt(world, question).await;
+}
+
+#[when(expr = "the operator types {string} at the assistant prompt without sending")]
+async fn the_operator_types_without_sending(world: &mut TinmanWorld, text: String) {
+    let session = world
+        .terminal_session
+        .as_mut()
+        .expect("an interactive terminal session");
+    session.type_text(&text);
+    // The typed characters reach the box only when the program redraws it, so
+    // what follows reads a settled screen: the gate ends on the box carrying
+    // the text rather than on a clock, and the cursor is then read where the
+    // program left it.
+    let title = assistant_box_title();
+    await_region_showing(session, &title, &text, std::time::Duration::from_secs(10));
+}
+
+/// Wait until the region titled `title` shows `expected` on the session's
+/// terminal, bounded by `budget`, failing with the screen last observed.
+fn await_region_showing(
+    session: &support::TerminalSession,
+    title: &str,
+    expected: &str,
+    budget: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        let screen = support::terminal_screen(&session.raw_output());
+        if let Some(region) = tinman::tom::build(&screen).find_named(title)
+            && region_shows_line(region, expected)
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the region titled {title:?} never showed {expected:?}; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// The region titled `title` on the session's terminal, read on the grid the
+/// program addressed.
+fn session_region(world: &TinmanWorld, title: &str) -> (Vec<u8>, tinman::tom::Region) {
+    let raw = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session")
+        .raw_output();
+    let screen = support::terminal_screen(&raw);
+    let region = tinman::tom::build(&screen)
+        .find_named(title)
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "the terminal object model reads no region titled {title:?}; screen:\n{}",
+                screen.contents()
+            )
+        });
+    (raw, region)
+}
+
+#[then(expr = "the cursor is inside the region titled {string}")]
+async fn the_cursor_is_inside_the_region_titled(world: &mut TinmanWorld, title: String) {
+    let (raw, region) = session_region(world, &title);
+    let rect = region.rect;
+    // The cursor is reported on the 1-based grid the terminal addresses and the
+    // model's rectangle is 0-based, so the reported cell is converted before it
+    // is placed in the box.
+    let (row, col) = support::cursor_cell(&raw, support::TERMINAL_COLS);
+    let (row, col) = (row - 1, col - 1);
+    assert!(
+        row >= rect.y && row < rect.y + rect.height && col >= rect.x && col < rect.x + rect.width,
+        "the cursor sits at row {} column {} of the terminal, outside the region titled {title:?} \
+         at rows {}..{} columns {}..{}",
+        row + 1,
+        col + 1,
+        rect.y,
+        rect.y + rect.height,
+        rect.x,
+        rect.x + rect.width
+    );
+}
+
+#[then(expr = "the cursor is one column past the {string} it shows")]
+async fn the_cursor_is_one_column_past(world: &mut TinmanWorld, text: String) {
+    let raw = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session")
+        .raw_output();
+    let screen = support::terminal_screen(&raw);
+    let (cursor_row, cursor_col) = support::cursor_cell(&raw, support::TERMINAL_COLS);
+    // The text is looked for on the cursor's own row, so a cursor left on
+    // another row fails here rather than matching text it does not follow.
+    let cells = screen
+        .rows()
+        .get((cursor_row - 1) as usize)
+        .unwrap_or_else(|| {
+            panic!(
+                "the cursor sits at row {cursor_row}, which the screen does not have; screen:\n{}",
+                screen.contents()
+            )
+        });
+    let wanted: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+    let starts_at = cells
+        .windows(wanted.len())
+        .position(|window| window == wanted.as_slice())
+        .unwrap_or_else(|| {
+            panic!(
+                "row {cursor_row}, the row the cursor sits on, does not show {text:?}; screen:\n{}",
+                screen.contents()
+            )
+        });
+    let expected = starts_at as u16 + wanted.len() as u16 + 1;
+    assert_eq!(
+        cursor_col,
+        expected,
+        "the cursor sits at column {cursor_col}, not one column past the {text:?} the box shows, \
+         which ends at column {}",
+        expected - 1
+    );
 }
 
 #[when("the operator ends the input")]
@@ -1954,6 +2155,283 @@ async fn the_region_titled_shows(world: &mut TinmanWorld, title: String, expecte
             panic!(
                 "the region titled {title:?} never showed {expected:?}; screen:\n{}",
                 screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Every region of the model built from `screen`, the root included.
+fn all_regions(screen: &tinman::screen::VirtualScreen) -> Vec<tinman::tom::Region> {
+    fn gather(region: &tinman::tom::Region, found: &mut Vec<tinman::tom::Region>) {
+        found.push(region.clone());
+        for child in &region.children {
+            gather(child, found);
+        }
+    }
+    let mut found = Vec::new();
+    gather(&tinman::tom::build(screen).root, &mut found);
+    found
+}
+
+/// Whether any row of `screen` strictly above row `above` shows `text`.
+fn text_appears_above(screen: &tinman::screen::VirtualScreen, text: &str, above: u16) -> bool {
+    let wanted: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+    screen.rows().iter().take(above as usize).any(|cells| {
+        cells.len() >= wanted.len()
+            && cells
+                .windows(wanted.len())
+                .any(|window| window == wanted.as_slice())
+    })
+}
+
+#[then(expr = "{string} appears above the region titled {string}")]
+async fn text_appears_above_the_region_titled(
+    world: &mut TinmanWorld,
+    text: String,
+    title: String,
+) {
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    // The answer reaches the terminal only when the program has the model's
+    // reply, so the wait ends on the text standing above the box rather than on
+    // a clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let screen = support::terminal_screen(&session.raw_output());
+        if let Some(region) = tinman::tom::build(&screen).find_named(&title)
+            && text_appears_above(&screen, &text, region.rect.y)
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "no row above the region titled {title:?} shows {text:?}; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[then(expr = "the region titled {string} does not show {string}")]
+async fn the_region_titled_does_not_show(world: &mut TinmanWorld, title: String, unwanted: String) {
+    let (_, region) = session_region(world, &title);
+    let shown = region_contents(&region);
+    assert!(
+        !shown.contains(&unwanted),
+        "the region titled {title:?} shows {unwanted:?}; it shows:\n{shown}"
+    );
+}
+
+#[then(expr = "the region titled {string} is the lowest region on the screen")]
+async fn the_region_titled_is_the_lowest_region(world: &mut TinmanWorld, title: String) {
+    let raw = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session")
+        .raw_output();
+    let screen = support::terminal_screen(&raw);
+    let region = tinman::tom::build(&screen)
+        .find_named(&title)
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "the terminal object model reads no region titled {title:?}; screen:\n{}",
+                screen.contents()
+            )
+        });
+    // Nothing is drawn below the box: no region begins at or below the row the
+    // box ends on. A region containing the box begins above it and a region
+    // inside it begins within it, so both pass without being excused.
+    let bottom = region.rect.y + region.rect.height;
+    let below: Vec<String> = all_regions(&screen)
+        .into_iter()
+        .filter(|other| other.rect.y >= bottom)
+        .map(|other| {
+            format!(
+                "a {} named {:?} at row {}",
+                other.role(),
+                other.name,
+                other.rect.y
+            )
+        })
+        .collect();
+    assert!(
+        below.is_empty(),
+        "the region titled {title:?} ends at row {bottom}, and {} region(s) are drawn below it: {}; screen:\n{}",
+        below.len(),
+        below.join(", "),
+        screen.contents()
+    );
+}
+
+#[then(expr = "{string} is drawn in a different colour from {string}")]
+async fn text_is_drawn_in_a_different_colour_from(
+    world: &mut TinmanWorld,
+    one: String,
+    other: String,
+) {
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    // Both halves of the exchange must be on the terminal before their colours
+    // can be compared, and the answer arrives only when the model replies, so
+    // the wait ends on both being drawn.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let (first, second) = loop {
+        let raw = session.raw_output();
+        let first = support::text_foreground(&raw, support::TERMINAL_COLS, &one);
+        let second = support::text_foreground(&raw, support::TERMINAL_COLS, &other);
+        if let (Some(first), Some(second)) = (first, second) {
+            break (first, second);
+        }
+        if std::time::Instant::now() >= deadline {
+            let screen = support::terminal_screen(&raw);
+            panic!(
+                "the terminal never showed both {one:?} and {other:?}; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert_ne!(
+        first, second,
+        "{one:?} and {other:?} are both drawn in {first}"
+    );
+}
+
+#[then(expr = "the region titled {string} is drawn")]
+async fn the_region_titled_is_drawn(world: &mut TinmanWorld, title: String) {
+    let _ = session_region(world, &title);
+}
+
+#[then("the command has not exited")]
+async fn the_command_has_not_exited(world: &mut TinmanWorld) {
+    let session = world
+        .terminal_session
+        .as_mut()
+        .expect("an interactive terminal session");
+    assert!(
+        !session.has_exited(),
+        "the program has exited; terminal output:\n{}",
+        session.output()
+    );
+}
+
+/// The seconds a pending call reports it has been waiting: the number the box
+/// shows that reads as the time already spent. The number is matched against
+/// the wall clock rather than against a format, so the step asserts what the
+/// scenario says, the elapsed seconds, and fixes no way of printing them.
+fn reported_elapsed_seconds(region: &tinman::tom::Region, spent: u64) -> Option<u64> {
+    let shown = region_contents(region);
+    let mut digits = String::new();
+    let mut found = Vec::new();
+    for character in shown.chars().chain(std::iter::once(' ')) {
+        if character.is_ascii_digit() {
+            digits.push(character);
+        } else if !digits.is_empty() {
+            if let Ok(number) = digits.parse::<u64>() {
+                found.push(number);
+            }
+            digits.clear();
+        }
+    }
+    // A reading is the elapsed seconds when it is no further from the wall
+    // clock than the second it was read in, so a report one tick behind the
+    // step's own reading still counts.
+    found.into_iter().find(|number| number.abs_diff(spent) <= 1)
+}
+
+#[then(expr = "the region titled {string} shows the elapsed seconds of the pending call")]
+async fn the_region_shows_the_elapsed_seconds(world: &mut TinmanWorld, title: String) {
+    let sent = world
+        .question_sent_at
+        .expect("the question was sent at a known moment");
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    // The first report cannot appear before a second has passed, so the wait
+    // ends on the box carrying a reading rather than on a clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let reading = loop {
+        let screen = support::terminal_screen(&session.raw_output());
+        let spent = sent.elapsed().as_secs();
+        if let Some(region) = tinman::tom::build(&screen).find_named(&title)
+            && let Some(reading) = reported_elapsed_seconds(region, spent)
+        {
+            break reading;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the region titled {title:?} never showed the elapsed seconds of the pending call, \
+                 {spent} seconds after it was sent; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    world.reported_elapsed = Some(reading);
+}
+
+#[then("the reported elapsed seconds advance while the call is pending")]
+async fn the_reported_elapsed_seconds_advance(world: &mut TinmanWorld) {
+    let sent = world
+        .question_sent_at
+        .expect("the question was sent at a known moment");
+    let before = world
+        .reported_elapsed
+        .expect("the elapsed seconds were read once");
+    let title = assistant_box_title();
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let screen = support::terminal_screen(&session.raw_output());
+        let spent = sent.elapsed().as_secs();
+        if let Some(region) = tinman::tom::build(&screen).find_named(&title)
+            && let Some(reading) = reported_elapsed_seconds(region, spent)
+            && reading > before
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the region titled {title:?} still reports {before} seconds, {spent} seconds after \
+                 the question was sent; screen:\n{}",
+                screen.contents()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[then(expr = "the assistant prompt names {string} as the key that cancels")]
+async fn the_assistant_prompt_names_the_cancelling_key(world: &mut TinmanWorld, key: String) {
+    let session = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session");
+    // The hint changes when the call starts, so the wait ends on the prompt
+    // carrying the pending hint rather than on a clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let output = session.output();
+        if output
+            .lines()
+            .any(|line| line.contains(&key) && line.contains("cancel"))
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "no line of the terminal names {key:?} as the key that cancels; output:\n{output}"
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -4072,6 +4550,48 @@ async fn a_screen_with_a_pane_holding_separated_entries(
     world.pane = Some((title, lines));
 }
 
+#[given(
+    expr = "a virtual screen showing a bordered pane titled {string} whose first line reads {string}"
+)]
+async fn a_screen_with_a_pane_whose_first_line_reads(
+    world: &mut TinmanWorld,
+    title: String,
+    first_line: String,
+) {
+    let lines = vec![first_line];
+    world.screen = Some(support::bordered_pane_screen(&title, &lines, None));
+    world.pane = Some((title, lines));
+}
+
+#[given("the cursor rests inside that pane")]
+async fn the_cursor_rests_inside_that_pane(world: &mut TinmanWorld) {
+    let (title, items) = world
+        .pane
+        .as_ref()
+        .expect("a bordered pane was drawn")
+        .clone();
+    // The pane is drawn from row 1 column 1, so row 2 column 2 is its first cell
+    // inside the border: the line a character the operator types lands on.
+    world.screen = Some(support::bordered_pane_screen_with_cursor_at(
+        &title, &items, 2, 2,
+    ));
+}
+
+#[given("the cursor rests outside that pane")]
+async fn the_cursor_rests_outside_that_pane(world: &mut TinmanWorld) {
+    let (title, items) = world
+        .pane
+        .as_ref()
+        .expect("a bordered pane was drawn")
+        .clone();
+    // The pane occupies its top border, one row per item, and its bottom border,
+    // so the next row down is the first row clear of it.
+    let below = u16::try_from(items.len() + 3).expect("the pane fits a terminal");
+    world.screen = Some(support::bordered_pane_screen_with_cursor_at(
+        &title, &items, below, 1,
+    ));
+}
+
 #[given(expr = "the line {string} is rendered with reversed video")]
 async fn the_line_is_reversed(world: &mut TinmanWorld, line: String) {
     let (title, items) = world
@@ -5422,16 +5942,16 @@ async fn checked_against_the_meta_schema(world: &mut TinmanWorld) {
     );
 }
 
-#[then("all nine validate")]
-async fn all_nine_validate(world: &mut TinmanWorld) {
+#[then("all ten validate")]
+async fn all_ten_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each scantling was checked");
     assert_eq!(
         results.len(),
-        9,
-        "nine scantlings declare a dialect, found {}: {}",
+        10,
+        "ten scantlings declare a dialect, found {}: {}",
         results.len(),
         results
             .iter()
@@ -5461,8 +5981,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all fourteen name that version")]
-async fn all_fourteen_name_that_version(world: &mut TinmanWorld) {
+#[then("all fifteen name that version")]
+async fn all_fifteen_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -5473,8 +5993,8 @@ async fn all_fourteen_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        14,
-        "fourteen schema URIs are published, found {}: {}",
+        15,
+        "fifteen schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())

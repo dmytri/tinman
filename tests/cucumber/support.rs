@@ -1117,6 +1117,28 @@ pub fn bordered_pane_screen(
     items: &[String],
     reversed: Option<&str>,
 ) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_text(&bordered_pane_text(title, items, reversed))
+}
+
+/// Draw the same bordered pane and leave the terminal's cursor at the 1-based
+/// `row` and `col`, addressed with a real ANSI positioning sequence, so the
+/// bytes carry where the cursor rests as well as what was drawn. A pane with the
+/// cursor parked in it and one with the cursor left elsewhere hold the same
+/// characters, and only the cursor tells a field being typed into from a panel
+/// being displayed.
+pub fn bordered_pane_screen_with_cursor_at(
+    title: &str,
+    items: &[String],
+    row: u16,
+    col: u16,
+) -> tinman::screen::VirtualScreen {
+    let mut out = bordered_pane_text(title, items, None);
+    out.push_str(&format!("\x1b[{row};{col}H"));
+    tinman::screen::VirtualScreen::from_text(&out)
+}
+
+/// The bytes a bordered pane carrying `title` and listing `items` is drawn with.
+fn bordered_pane_text(title: &str, items: &[String], reversed: Option<&str>) -> String {
     let mut out = String::new();
     let title_width = title.chars().count();
     out.push('\u{250c}');
@@ -1143,7 +1165,7 @@ pub fn bordered_pane_screen(
     out.push_str(&"\u{2500}".repeat(PANE_WIDTH));
     out.push('\u{2518}');
     out.push_str("\r\n");
-    tinman::screen::VirtualScreen::from_text(&out)
+    out
 }
 
 /// Draw a screen showing two bordered panes side by side, titled `Left` and
@@ -1393,6 +1415,15 @@ impl TerminalSession {
         let _ = self.writer.flush();
     }
 
+    /// Type `text` at the prompt and leave it there, as an operator part way
+    /// through a question does. No line ending follows, so the program sees
+    /// exactly the characters typed and nothing that would send them.
+    pub fn type_text(&mut self, text: &str) {
+        use std::io::Write;
+        let _ = write!(self.writer, "{text}");
+        let _ = self.writer.flush();
+    }
+
     /// Press one key, as an operator does: the key's own bytes reach the
     /// program with no line ending, so a program reading keys sees exactly the
     /// key pressed. Enter is sent as a terminal sends it, a carriage return.
@@ -1420,6 +1451,16 @@ impl TerminalSession {
         use std::io::Write;
         let _ = self.writer.write_all(&[0x04]);
         let _ = self.writer.flush();
+    }
+
+    /// Whether the program has exited, asked of the child itself rather than of
+    /// what it drew, so a program still holding the terminal is told apart from
+    /// one that has left it.
+    pub fn has_exited(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(status) => status.is_some(),
+            Err(e) => panic!("asking whether the terminal session exited failed: {e}"),
+        }
     }
 
     /// Wait for the program to exit and report its status, bounded by `budget`.
@@ -1473,20 +1514,28 @@ pub fn terminal_screen_at(raw: &[u8], columns: u16) -> tinman::screen::VirtualSc
     tinman::screen::VirtualScreen::from_pty_output_at(raw, columns)
 }
 
-/// The 1-based row and column of every cell a program drew in a foreground
-/// colour other than the terminal's default, read from the bytes the terminal
-/// received through the same emulator the virtual screen is parsed by.
+/// What the terminal received, parsed by the same emulator the virtual screen
+/// is built by, kept whole so the cell attributes and the cursor position the
+/// virtual screen does not carry can be read off it. Reports the term and the
+/// number of rows the grid holds.
 ///
-/// Colour is an attribute the virtual screen does not carry, so it is read here
-/// from the real output rather than asserted against the rendered text: a box
-/// drawn in colour and a box drawn plain hold the same characters, and only the
-/// cell attributes tell them apart.
-pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
+/// The grid is as tall as Tinman's own virtual screen, taken from a parse of
+/// the same bytes rather than restated here. A run taller than the screen
+/// scrolls, and two emulations of different heights scroll it by different
+/// amounts, so a read on a grid of its own reports cells at rows the model
+/// never places a region at, and the join with a region rectangle is false
+/// however the program drew.
+fn emulated_terminal(
+    raw: &[u8],
+    columns: u16,
+) -> (
+    alacritty_terminal::term::Term<alacritty_terminal::event::VoidListener>,
+    usize,
+) {
     use alacritty_terminal::event::VoidListener;
     use alacritty_terminal::grid::Dimensions;
-    use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::term::{Config, Term};
-    use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, StdSyncHandler};
+    use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
     struct Size {
         columns: usize,
@@ -1507,12 +1556,6 @@ pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
         }
     }
 
-    // The grid is as tall as Tinman's own virtual screen, taken from a parse of
-    // the same bytes rather than restated here. A run taller than the screen
-    // scrolls, and two emulations of different heights scroll it by different
-    // amounts, so a colour read on a grid of its own reports cells at rows the
-    // model never places a region at, and the join with a region rectangle is
-    // false however the program drew.
     let rows = terminal_screen_at(raw, columns).rows().len();
     let size = Size {
         columns: columns as usize,
@@ -1525,6 +1568,66 @@ pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
     let mut term = Term::new(config, &size, VoidListener);
     let mut processor = Processor::<StdSyncHandler>::new();
     processor.advance(&mut term, raw);
+    (term, rows)
+}
+
+/// The 1-based row and column the terminal's cursor sits on, read from the
+/// bytes the terminal received through the same emulator the virtual screen is
+/// parsed by.
+///
+/// Cursor position is an attribute the virtual screen does not carry, and the
+/// terminal object model carries it no more than it carries colour, so it is
+/// read here from the real output. A box drawn with the cursor parked in it and
+/// one drawn with the cursor left at the bottom of the screen hold the same
+/// characters, and only the terminal's own cursor tells them apart.
+pub fn cursor_cell(raw: &[u8], columns: u16) -> (u16, u16) {
+    let (term, _) = emulated_terminal(raw, columns);
+    let point = term.grid().cursor.point;
+    let row = u16::try_from(point.line.0.max(0)).expect("the cursor row fits a terminal");
+    let col = u16::try_from(point.column.0).expect("the cursor column fits a terminal");
+    (row + 1, col + 1)
+}
+
+/// The foreground colour the run of cells reading `text` was drawn in, named as
+/// the emulator reports it, or `None` when no row of the screen shows `text`.
+///
+/// Colour is an attribute the virtual screen does not carry, so two pieces of
+/// text drawn in different colours hold the same characters and only the cell
+/// attributes tell them apart. The run's first cell carries the colour of the
+/// text: a piece of text drawn in one style is drawn in it whole.
+pub fn text_foreground(raw: &[u8], columns: u16, text: &str) -> Option<String> {
+    use alacritty_terminal::index::{Column, Line};
+
+    let (term, rows) = emulated_terminal(raw, columns);
+    let grid = term.grid();
+    let wanted: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+    for row in 0..rows {
+        let cells: Vec<String> = (0..columns as usize)
+            .map(|col| grid[Line(row as i32)][Column(col)].c.to_string())
+            .collect();
+        if let Some(at) = cells
+            .windows(wanted.len())
+            .position(|window| window == wanted.as_slice())
+        {
+            return Some(format!("{:?}", grid[Line(row as i32)][Column(at)].fg));
+        }
+    }
+    None
+}
+
+/// The 1-based row and column of every cell a program drew in a foreground
+/// colour other than the terminal's default, read from the bytes the terminal
+/// received through the same emulator the virtual screen is parsed by.
+///
+/// Colour is an attribute the virtual screen does not carry, so it is read here
+/// from the real output rather than asserted against the rendered text: a box
+/// drawn in colour and a box drawn plain hold the same characters, and only the
+/// cell attributes tell them apart.
+pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::vte::ansi::{Color, NamedColor};
+
+    let (term, rows) = emulated_terminal(raw, columns);
     let grid = term.grid();
     let mut found = Vec::new();
     for row in 0..rows {

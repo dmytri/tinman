@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/assistant-ui.schema.json",
+  "title": "Tinman assistant interface",
+  "description": "The terminal object model Tinman's own interactive assistant must produce. Tinman's user interface is specified in the model Tinman derives from every other program it drives, so the shape of its own screen is checked the way a test author checks theirs. This is a constraint on the model, not a recorded copy of it: it names the region that must exist and the bounds it must respect, and says nothing about the rest of the screen. Two things follow. A role verifying this interface validates one document against one schema rather than writing a bespoke assertion per property, so a change to the interface is an edit here rather than an edit to verification support. And a property this schema cannot express is a property the terminal object model cannot carry, which is a finding about the model rather than a gap to work around; colour and cursor position are the current examples, and they are asserted by their own scenarios. Referenced by features/interactive-help.feature.",
+  "type": "object",
+  "required": [
+    "rows",
+    "cols",
+    "root"
+  ],
+  "properties": {
+    "cols": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "root": {
+      "description": "The assistant's input box must appear somewhere in the tree beneath the root.",
+      "$ref": "#/$defs/carriesInputBox"
+    }
+  },
+  "$defs": {
+    "carriesInputBox": {
+      "description": "A region that either is the input box or has a descendant that is. Stated recursively so the contract does not fix the depth at which the box is nested, which is layout rather than interface.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/inputBox"
+        },
+        {
+          "type": "object",
+          "required": [
+            "children"
+          ],
+          "properties": {
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "contains": {
+                "$ref": "#/$defs/carriesInputBox"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "inputBox": {
+      "description": "The box the operator types into. It is a textbox because that is what it is to a reader who cannot see it, which is the same judgment Tinman makes about every program it drives.",
+      "type": "object",
+      "required": [
+        "role",
+        "name",
+        "rect"
+      ],
+      "properties": {
+        "role": {
+          "const": "textbox"
+        },
+        "name": {
+          "const": "Ask Tinman"
+        },
+        "rect": {
+          "description": "Bounded rather than stretched. Eighty columns is the cap on a wide terminal; a narrower terminal is honoured by the model's own cols, which the checker compares against.",
+          "type": "object",
+          "required": [
+            "width",
+            "height"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 3,
+              "maximum": 80
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 3
+            }
+          }
+        }
+      }
+    }
+  }
+}

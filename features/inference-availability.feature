@@ -34,6 +34,15 @@ Feature: inference availability
     When the operator runs "tinman --help" in an interactive terminal
     Then no bordered region titled "Ask Tinman" is drawn
 
+  Rule: the tagline is decoration, so it waits on nothing an operator can notice. It is the one inference call on the path of a command an operator runs to read documentation, and the help text is complete without it, so its ceiling is short and the line is simply dropped when the provider does not answer inside it. A ceiling sized for a generation call would hold the most-run command for tens of seconds to fill one cosmetic line.
+
+  Scenario: a slow provider does not delay the help text
+    Given the inference credential is configured
+    And the inference provider endpoint accepts the connection and never answers
+    When the operator runs "tinman --help" with stdout redirected to a file
+    Then the help output is the asset at "assets/help/tinman.txt" with the tagline line removed
+    And the command completed within 10 seconds
+
   Scenario: degraded help exits successfully
     Given inference is unavailable
     When the operator runs "tinman --help" in an interactive terminal
