@@ -231,6 +231,10 @@ The other two became watch1, both `@conformance` in `features/methodology-confor
 
 Plant 3 is the one worth having done. It proves the count guard is load-bearing rather than decorative, which was the argument for writing it; a check that only compares the URIs it happens to find would have passed that plant while a pin went missing.
 
+**Boatswain asked why a third target was advanced outside the watchbill. The answer is that it was never a QM target.** `activation fails when the selection cannot reach the item` appears in no watch, and Boatswain was right to flag rather than theorize. QM swept `@logic` and `@sandbox` because the support edit's blast radius reaches every tier, per the Planking agreement's support-edit rule, and the `@sandbox` sweep surfaced the intermittent failure this file had carried as "re-observe someday". A non-product failure is a harness defect, which the Verification agreement puts in QM's own scope and bars from being a Crew target. So no watchbill channel was owed and none was bypassed. The watchbill creates *QM targets*; it does not gate QM repairing its own harness.
+
+**Boatswain labelled the planted-red proof unverified, and it is correct to.** The plants ran in Captain's session and left no durable trace: the run record carries greens only, and a green looks identical proven or not. The Scantling agreement already concedes this, which is why it puts the obligation in the deferral rather than in the record. There is no deferral left here because the proof is done, so the residual is that no role but Captain can confirm it. Worth naming as a doctrine gap: an adoption proof that only its author can see is one context clear away from being unproven again.
+
 **Both new scenarios name their count, deliberately.** `all eight` and `all thirteen` are the null control in the form this domain allows: a glob that reads nothing would otherwise satisfy "each one validates" exactly as a full read does. The counts are load-bearing rather than decorative, since a scantling added without a pin is precisely the drift watch1 exists to catch, and the count is what reddens.
 
 **Carried to harbour, none blocking:**
