@@ -1223,7 +1223,19 @@ pub fn run_tinman_on_a_terminal(
     args: &[&str],
     env: &[(String, String)],
 ) -> Result<RunOutcome, String> {
-    let mut session = TerminalSession::start(dir, args, env)?;
+    run_tinman_on_a_terminal_at(dir, args, env, TERMINAL_COLS)
+}
+
+/// Run the real `tinman` binary to completion on a real pseudo-terminal
+/// `columns` cells wide, so a scenario reads what the program drew at the width
+/// it was given. Everything else matches `run_tinman_on_a_terminal`.
+pub fn run_tinman_on_a_terminal_at(
+    dir: &std::path::Path,
+    args: &[&str],
+    env: &[(String, String)],
+    columns: u16,
+) -> Result<RunOutcome, String> {
+    let mut session = TerminalSession::start_at(dir, args, env, columns)?;
     session.end_input();
     Ok(session.finish(std::time::Duration::from_secs(30)))
 }
@@ -1239,14 +1251,13 @@ pub struct TerminalSession {
     writer: Box<dyn std::io::Write + Send>,
     output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
     reader: Option<std::thread::JoinHandle<()>>,
-    mark: usize,
 }
 
 /// The size of the pseudo-terminal a session opens. The width is the width a
 /// screen assertion parses the run's bytes at, so the model reads the program's
 /// cursor addressing on the same grid the program drew on.
 const TERMINAL_ROWS: u16 = 60;
-const TERMINAL_COLS: u16 = 120;
+pub const TERMINAL_COLS: u16 = 120;
 
 impl std::fmt::Debug for TerminalSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1262,13 +1273,24 @@ impl TerminalSession {
         args: &[&str],
         env: &[(String, String)],
     ) -> Result<TerminalSession, String> {
+        Self::start_at(dir, args, env, TERMINAL_COLS)
+    }
+
+    /// Start `tinman` as `start` does, on a terminal `columns` cells wide, so a
+    /// scenario naming a width drives the program at that width.
+    pub fn start_at(
+        dir: &std::path::Path,
+        args: &[&str],
+        env: &[(String, String)],
+        columns: u16,
+    ) -> Result<TerminalSession, String> {
         use portable_pty::{CommandBuilder, PtySize, native_pty_system};
         use std::io::Read;
 
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: TERMINAL_ROWS,
-                cols: TERMINAL_COLS,
+                cols: columns,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -1318,7 +1340,6 @@ impl TerminalSession {
             writer,
             output,
             reader: Some(drain),
-            mark: 0,
         })
     }
 
@@ -1361,43 +1382,13 @@ impl TerminalSession {
         }
     }
 
-    /// Wait until `needle` appears in what the terminal showed after the last
-    /// line the operator typed, bounded by `budget`. Reading past the mark is
-    /// what keeps the assertion honest: the same text may already stand higher
-    /// up the screen, and finding that copy would prove nothing about the reply.
-    pub fn await_output_after_mark(&self, needle: &str, budget: std::time::Duration) {
-        self.await_from(
-            self.mark,
-            needle,
-            budget,
-            "the terminal showed nothing carrying",
-        );
-    }
-
-    fn await_from(&self, from: usize, needle: &str, budget: std::time::Duration, what: &str) {
-        let deadline = std::time::Instant::now() + budget;
-        loop {
-            let seen = self.output();
-            if seen.len() >= from && seen[from..].contains(needle) {
-                return;
-            }
-            if std::time::Instant::now() >= deadline {
-                panic!("{what} {needle:?}; terminal output:\n{seen}");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-    }
-
-    /// Type `text` at the prompt and press Enter, as an operator does. The mark
-    /// moves to the end of what the terminal has already shown, so everything
-    /// asserted from here on is a reply to this line.
+    /// Type `text` at the prompt and press Enter, as an operator does.
     ///
     /// A write that fails because the program has already exited is left to the
     /// assertion that follows, which reports the whole terminal output and so
     /// names the real fault rather than a broken pipe.
     pub fn type_line(&mut self, text: &str) {
         use std::io::Write;
-        self.mark = self.output().len();
         let _ = write!(self.writer, "{text}\r");
         let _ = self.writer.flush();
     }
@@ -1407,12 +1398,15 @@ impl TerminalSession {
     /// key pressed. Enter is sent as a terminal sends it, a carriage return.
     pub fn press(&mut self, key: &str) {
         use std::io::Write;
-        self.mark = self.output().len();
         let bytes = match key {
             "Enter" => "\r",
             // The escape key sends the escape character itself, which is what a
             // program reading keys sees when the operator presses it.
             "esc" | "Esc" => "\u{1b}",
+            // The backspace key sends the delete character, which is what a
+            // terminal in its normal configuration puts in the input queue when
+            // the operator presses it.
+            "backspace" | "Backspace" => "\u{7f}",
             other => other,
         };
         let _ = write!(self.writer, "{bytes}");
@@ -1469,7 +1463,79 @@ impl TerminalSession {
 /// assertion reads the program's drawing through the same emulation a captured
 /// program goes through.
 pub fn terminal_screen(raw: &[u8]) -> tinman::screen::VirtualScreen {
-    tinman::screen::VirtualScreen::from_pty_output_at(raw, TERMINAL_COLS)
+    terminal_screen_at(raw, TERMINAL_COLS)
+}
+
+/// Read what a program wrote to a terminal `columns` cells wide into Tinman's
+/// own virtual screen, so a run driven at a stated width is parsed on the grid
+/// the program addressed.
+pub fn terminal_screen_at(raw: &[u8], columns: u16) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_pty_output_at(raw, columns)
+}
+
+/// The 1-based row and column of every cell a program drew in a foreground
+/// colour other than the terminal's default, read from the bytes the terminal
+/// received through the same emulator the virtual screen is parsed by.
+///
+/// Colour is an attribute the virtual screen does not carry, so it is read here
+/// from the real output rather than asserted against the rendered text: a box
+/// drawn in colour and a box drawn plain hold the same characters, and only the
+/// cell attributes tell them apart.
+pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
+    use alacritty_terminal::event::VoidListener;
+    use alacritty_terminal::grid::Dimensions;
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::term::{Config, Term};
+    use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, StdSyncHandler};
+
+    struct Size {
+        columns: usize,
+        rows: usize,
+    }
+
+    impl Dimensions for Size {
+        fn total_lines(&self) -> usize {
+            self.rows
+        }
+
+        fn screen_lines(&self) -> usize {
+            self.rows
+        }
+
+        fn columns(&self) -> usize {
+            self.columns
+        }
+    }
+
+    // The grid is as tall as Tinman's own virtual screen, taken from a parse of
+    // the same bytes rather than restated here. A run taller than the screen
+    // scrolls, and two emulations of different heights scroll it by different
+    // amounts, so a colour read on a grid of its own reports cells at rows the
+    // model never places a region at, and the join with a region rectangle is
+    // false however the program drew.
+    let rows = terminal_screen_at(raw, columns).rows().len();
+    let size = Size {
+        columns: columns as usize,
+        rows,
+    };
+    let config = Config {
+        scrolling_history: 0,
+        ..Config::default()
+    };
+    let mut term = Term::new(config, &size, VoidListener);
+    let mut processor = Processor::<StdSyncHandler>::new();
+    processor.advance(&mut term, raw);
+    let grid = term.grid();
+    let mut found = Vec::new();
+    for row in 0..rows {
+        for col in 0..columns as usize {
+            let cell = &grid[Line(row as i32)][Column(col)];
+            if cell.fg != Color::Named(NamedColor::Foreground) {
+                found.push((row as u16 + 1, col as u16 + 1));
+            }
+        }
+    }
+    found
 }
 
 impl Drop for TerminalSession {

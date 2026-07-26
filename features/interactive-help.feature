@@ -19,12 +19,55 @@ Feature: interactive help
     When the operator types "how do I record a session" at the assistant prompt
     Then the region titled "Ask Tinman" shows "how do I record a session"
 
-  Scenario: a question typed at the prompt is answered
+  Rule: the answer appears inside the box that asked for it. An answer printed beneath the box separates the question from its reply by a border and leaves the operator reading two places at once, and it breaks the inline viewport by scrolling the box away from the text it produced. One region holds the exchange.
+
+  Scenario: a question typed at the prompt is answered inside the box
     Given inference is available
     And the assistant answers "Inspect prints the terminal object model of a running program."
     And the operator runs "tinman --help" in an interactive terminal
     When the operator types "what does inspect do" at the assistant prompt
-    Then the output displays the answer "Inspect prints the terminal object model of a running program."
+    Then the region titled "Ask Tinman" shows "Inspect prints the terminal object model of a running program."
+
+  Rule: the operator can correct what they typed. A prompt that only appends makes a typo unrecoverable, so an operator who mistypes must send the wrong question and ask again, which on this path costs a real model call. Text arrives as bytes and is shown as characters: a character outside ASCII is several bytes, and appending them one at a time renders one replacement mark per byte rather than the character the operator typed.
+
+  Scenario: a typed character can be erased
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "recrd" at the assistant prompt
+    And the operator presses "backspace" at the assistant prompt
+    Then the region titled "Ask Tinman" shows "recr"
+
+  Scenario: a character outside ASCII is shown as the operator typed it
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "café" at the assistant prompt
+    Then the region titled "Ask Tinman" shows "café"
+
+  Rule: the box is bounded rather than stretched. A prompt spanning a wide terminal puts the text the operator is reading and the cursor they are typing at opposite ends of the screen, and a border drawn edge to edge reads as a rule across the terminal rather than as a box. It is capped so a wide terminal gets a box, and it yields to a narrow one so the border never wraps. Both ends are asserted: a cap with no floor overflows the narrow case, and a floor with no cap is what stretching already looked like.
+
+  Scenario: the box is capped on a wide terminal
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal 120 columns wide
+    Then the region titled "Ask Tinman" is 80 columns wide
+
+  Scenario: the box yields to a narrow terminal
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal 40 columns wide
+    Then the region titled "Ask Tinman" is at most 40 columns wide
+
+  Rule: colour marks the box without carrying meaning, so an operator who cannot see it loses nothing. NO_COLOR is honoured because it is the convention every other terminal program already answers to, and a program that invents its own switch makes the operator configure it twice.
+
+  Scenario: the box is drawn in colour
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the region titled "Ask Tinman" is drawn in a colour other than the default foreground
+
+  Scenario: NO_COLOR draws the box without colour
+    Given inference is available
+    And the environment sets "NO_COLOR" to "1"
+    When the operator runs "tinman --help" in an interactive terminal
+    Then a bordered region titled "Ask Tinman" is drawn beneath it
+    And no cell is drawn in a colour other than the default foreground
 
   Rule: the prompt names the keys that work it, because an operator dropped into a prompt has no other way to learn them and a terminal offers no menu to discover. The keys are asserted by name here rather than only through the asset body, since a scenario comparing output to an asset passes just as well when the asset loses the line.
 

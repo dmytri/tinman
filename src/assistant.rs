@@ -94,6 +94,14 @@ const BOTTOM_RIGHT: &str = "\u{2518}";
 const HORIZONTAL: &str = "\u{2500}";
 const VERTICAL: &str = "\u{2502}";
 
+/// The widest the box is drawn, however wide the terminal is.
+const MAX_COLUMNS: usize = 80;
+
+/// The escapes that draw the box in a colour other than the terminal's default
+/// foreground, and put the default foreground back at the end of each line.
+const COLOUR: &str = "\u{1b}[36m";
+const DEFAULT_COLOUR: &str = "\u{1b}[39m";
+
 /// The bytes the terminal delivers when the operator ends the input. Ending the
 /// input before the program takes raw control leaves the line discipline's own
 /// end-of-file marker in the queue, which a raw read takes as the disabled
@@ -102,6 +110,9 @@ const END_OF_INPUT: [u8; 2] = [0x04, 0x00];
 
 /// The byte the escape key sends.
 const ESCAPE: u8 = 0x1b;
+
+/// The byte the backspace key puts in the terminal's input queue.
+const BACKSPACE: u8 = 0x7f;
 
 /// Put the operator's questions to the model in a box drawn beneath the help,
 /// until they end the input or press escape. The box claims only the rows
@@ -114,6 +125,10 @@ const ESCAPE: u8 = 0x1b;
 /// @planks("the region titled {string} shows {string}")
 /// @planks("the assistant prompt names {string} as the key that sends")
 /// @planks("the assistant prompt names {string} as the key that leaves")
+/// @planks("the region titled {string} is {int} columns wide")
+/// @planks("the region titled {string} is at most {int} columns wide")
+/// @planks("the region titled {string} is drawn in a colour other than the default foreground")
+/// @planks("no cell is drawn in a colour other than the default foreground")
 pub fn converse(settings: &Settings) {
     use std::io::{Read, Write};
     let mut prompt = PROMPT.trim().lines();
@@ -124,6 +139,8 @@ pub fn converse(settings: &Settings) {
         .next()
         .expect("the assistant prompt asset names the keys");
     let (columns, _) = crossterm::terminal::size().expect("the terminal reports its size");
+    let width = (columns as usize).min(MAX_COLUMNS);
+    let coloured = std::env::var_os("NO_COLOR").is_none();
     let mut out = std::io::stdout();
     let mut question = String::new();
     let mut answer = String::new();
@@ -131,11 +148,14 @@ pub fn converse(settings: &Settings) {
     crossterm::terminal::enable_raw_mode().expect("the terminal enters raw mode");
     draw(
         &mut out,
-        &box_lines(columns as usize, title, &[&question, &answer, keys]),
+        &box_lines(width, title, &[&question, &answer, keys], coloured),
         true,
     );
     let mut input = std::io::stdin();
     let mut byte = [0u8; 1];
+    // A character outside ASCII arrives as several bytes, so bytes are held here
+    // until they spell one, and the character is shown as the operator typed it.
+    let mut partial: Vec<u8> = Vec::new();
     loop {
         let read = input
             .read(&mut byte)
@@ -147,12 +167,18 @@ pub fn converse(settings: &Settings) {
             if let Response::Answer(replied) = ask(settings, &question) {
                 answer = replied;
             }
+        } else if byte[0] == BACKSPACE {
+            question.pop();
         } else {
-            question.push(byte[0] as char);
+            partial.push(byte[0]);
+            if let Ok(typed) = std::str::from_utf8(&partial) {
+                question.push_str(typed);
+                partial.clear();
+            }
         }
         draw(
             &mut out,
-            &box_lines(columns as usize, title, &[&question, &answer, keys]),
+            &box_lines(width, title, &[&question, &answer, keys], coloured),
             false,
         );
     }
@@ -163,11 +189,14 @@ pub fn converse(settings: &Settings) {
 /// The lines the box is drawn from, each `width` cells wide: a top border
 /// carrying the title, one line for each body row, and a bottom border. A row
 /// wider than the box is cut to it, so the border stands whatever the operator
-/// types.
+/// types. A coloured box carries the colour escapes inside each line, so the
+/// cells the box claims are the only ones drawn in it.
 ///
 /// @planks("a bordered region titled {string} is drawn beneath it")
 /// @planks("the region titled {string} shows {string}")
-fn box_lines(width: usize, title: &str, body: &[&str]) -> Vec<String> {
+/// @planks("the region titled {string} is drawn in a colour other than the default foreground")
+/// @planks("no cell is drawn in a colour other than the default foreground")
+fn box_lines(width: usize, title: &str, body: &[&str], coloured: bool) -> Vec<String> {
     let inner = width - 2;
     let mut lines = Vec::with_capacity(body.len() + 2);
     let named = cut(title, inner);
@@ -182,6 +211,12 @@ fn box_lines(width: usize, title: &str, body: &[&str]) -> Vec<String> {
         "{BOTTOM_LEFT}{}{BOTTOM_RIGHT}",
         HORIZONTAL.repeat(inner)
     ));
+    if coloured {
+        lines = lines
+            .iter()
+            .map(|line| format!("{COLOUR}{line}{DEFAULT_COLOUR}"))
+            .collect();
+    }
     lines
 }
 

@@ -108,6 +108,9 @@ struct TinmanWorld {
     // what the run wrote to the terminal, control sequences intact, so a screen
     // assertion reads the bytes the terminal received
     run_raw: Option<Vec<u8>>,
+    // the width of the terminal the run drew on, so a screen assertion parses
+    // the bytes on the grid the program addressed
+    run_columns: Option<u16>,
     // flow orchestration
     flow_outcome: Option<tinman::flow::FlowOutcome>,
     flow_error: Option<String>,
@@ -1335,7 +1338,20 @@ async fn the_count_is(world: &mut TinmanWorld, expected: usize) {
 
 #[then(expr = "the command exits with status {int}")]
 async fn the_command_exits_with_status(world: &mut TinmanWorld, expected: i32) {
-    let status = world.run_status.expect("a command was run");
+    // A session still standing is the interactive case: the program's own exit
+    // is the signal this step ends on, bounded by a budget sized to a real run.
+    let status = match world.run_status {
+        Some(status) => status,
+        None => {
+            let status = world
+                .terminal_session
+                .as_mut()
+                .expect("a command was run")
+                .wait(std::time::Duration::from_secs(20));
+            world.run_status = Some(status);
+            status
+        }
+    };
     assert_eq!(status, expected, "exit status");
 }
 
@@ -1643,6 +1659,109 @@ async fn operator_runs_interactive(world: &mut TinmanWorld, line: String) {
     world.run_raw = Some(outcome.raw);
 }
 
+#[when(expr = "the operator runs {string} in an interactive terminal {int} columns wide")]
+async fn operator_runs_interactive_at(world: &mut TinmanWorld, line: String, columns: u16) {
+    let dir = working_dir(world);
+    let args = tinman_args(&line);
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let env = configured_env(world);
+    let outcome = support::run_tinman_on_a_terminal_at(&dir, &argv, &env, columns)
+        .unwrap_or_else(|e| panic!("running {line:?} on a {columns} column terminal failed: {e}"));
+    world.run_stdout = Some(outcome.stdout);
+    world.run_status = Some(outcome.status);
+    world.run_raw = Some(outcome.raw);
+    world.run_columns = Some(columns);
+}
+
+/// The width of the terminal the run drew on: the width the scenario named, or
+/// the width a session opens by default when it named none.
+fn run_columns(world: &TinmanWorld) -> u16 {
+    world.run_columns.unwrap_or(support::TERMINAL_COLS)
+}
+
+/// The region titled `title` in the model built from what the run drew, read on
+/// the grid the program addressed.
+fn run_region(world: &TinmanWorld, title: &str) -> tinman::tom::Region {
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    let screen = support::terminal_screen_at(raw, run_columns(world));
+    tinman::tom::build(&screen)
+        .find_named(title)
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "the terminal object model reads no region titled {title:?}; screen:\n{}",
+                screen.contents()
+            )
+        })
+}
+
+#[then(expr = "the region titled {string} is {int} columns wide")]
+async fn the_region_titled_is_columns_wide(world: &mut TinmanWorld, title: String, expected: u16) {
+    let region = run_region(world, &title);
+    assert_eq!(
+        region.rect.width, expected,
+        "the width of the region titled {title:?}"
+    );
+}
+
+#[then(expr = "the region titled {string} is at most {int} columns wide")]
+async fn the_region_titled_is_at_most_columns_wide(
+    world: &mut TinmanWorld,
+    title: String,
+    limit: u16,
+) {
+    let region = run_region(world, &title);
+    assert!(
+        region.rect.width <= limit,
+        "the region titled {title:?} is {} columns wide, wider than the {limit} columns allowed",
+        region.rect.width
+    );
+}
+
+#[then(expr = "the region titled {string} is drawn in a colour other than the default foreground")]
+async fn the_region_titled_is_drawn_in_colour(world: &mut TinmanWorld, title: String) {
+    let region = run_region(world, &title);
+    let rect = region.rect;
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    // The model's rectangle is 0-based and the cell report is 1-based, so the
+    // reported cell is converted before it is placed in the box.
+    let inside = support::coloured_cells(raw, run_columns(world))
+        .into_iter()
+        .any(|(row, col)| {
+            let (row, col) = (row - 1, col - 1);
+            row >= rect.y
+                && row < rect.y + rect.height
+                && col >= rect.x
+                && col < rect.x + rect.width
+        });
+    assert!(
+        inside,
+        "no cell of the region titled {title:?} is drawn in a colour other than the default foreground"
+    );
+}
+
+#[then("no cell is drawn in a colour other than the default foreground")]
+async fn no_cell_is_drawn_in_colour(world: &mut TinmanWorld) {
+    let raw = world
+        .run_raw
+        .as_ref()
+        .expect("the terminal output was read");
+    let coloured = support::coloured_cells(raw, run_columns(world));
+    assert!(
+        coloured.is_empty(),
+        "{} cells are drawn in a colour other than the default foreground, the first at row {} column {}",
+        coloured.len(),
+        coloured[0].0,
+        coloured[0].1
+    );
+}
+
 #[given(expr = "the operator runs {string} in an interactive terminal")]
 async fn given_operator_runs_interactive(world: &mut TinmanWorld, line: String) {
     let dir = working_dir(world);
@@ -1670,15 +1789,6 @@ async fn the_operator_types_at_the_assistant_prompt(world: &mut TinmanWorld, que
         .as_mut()
         .expect("an interactive terminal session")
         .type_line(&question);
-}
-
-#[then(expr = "the output displays the answer {string}")]
-async fn the_output_displays_the_answer(world: &mut TinmanWorld, expected: String) {
-    world
-        .terminal_session
-        .as_ref()
-        .expect("an interactive terminal session")
-        .await_output_after_mark(&expected, std::time::Duration::from_secs(20));
 }
 
 #[when("the operator ends the input")]
@@ -1811,6 +1921,19 @@ fn region_contents(region: &tinman::tom::Region) -> String {
     shown
 }
 
+/// Whether one line of what `region` shows reads exactly `expected`. The
+/// trailing spaces are the box's padding rather than the text's, so they are cut
+/// before the comparison.
+///
+/// The line is compared whole because a containment reading cannot tell an
+/// erased character from one still standing: the shorter text is a prefix of the
+/// longer, so `contains` answers yes either way.
+fn region_shows_line(region: &tinman::tom::Region, expected: &str) -> bool {
+    region_contents(region)
+        .lines()
+        .any(|line| line.trim_end() == expected)
+}
+
 #[then(expr = "the region titled {string} shows {string}")]
 async fn the_region_titled_shows(world: &mut TinmanWorld, title: String, expected: String) {
     let session = world
@@ -1823,7 +1946,7 @@ async fn the_region_titled_shows(world: &mut TinmanWorld, title: String, expecte
     loop {
         let screen = support::terminal_screen(&session.raw_output());
         if let Some(region) = tinman::tom::build(&screen).find_named(&title)
-            && region_contents(region).contains(&expected)
+            && region_shows_line(region, &expected)
         {
             return;
         }
@@ -1839,15 +1962,11 @@ async fn the_region_titled_shows(world: &mut TinmanWorld, title: String, expecte
 
 #[when(expr = "the operator presses {string} at the assistant prompt")]
 async fn the_operator_presses_at_the_assistant_prompt(world: &mut TinmanWorld, key: String) {
-    let status = {
-        let session = world
-            .terminal_session
-            .as_mut()
-            .expect("an interactive terminal session");
-        session.press(&key);
-        session.wait(std::time::Duration::from_secs(20))
-    };
-    world.run_status = Some(status);
+    world
+        .terminal_session
+        .as_mut()
+        .expect("an interactive terminal session")
+        .press(&key);
 }
 
 /// The line of the run's output that the help asset reserves for the tagline.
