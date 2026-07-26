@@ -11,6 +11,13 @@ Feature: bundled skill
     When the skill front matter is parsed
     Then it conforms to the "skill" schema in "scantlings/skill.schema.json"
 
+  Rule: the bundled skill is the whole context the assistant answers from, so a command line it names is a command an operator will be told to run. The skill and the parser are the same two-list problem the help text has, one list further from the code, and the skill ships to coding agents rather than to a reader who can check. A command struck from the parser stayed in this asset through the voyage that struck it, and nothing reddened.
+
+  Scenario: every command the bundled skill names is a command the parser accepts
+    Given the command lines in the asset at "assets/skill/SKILL.md"
+    When each named command is passed to the command parser
+    Then the parser accepts every command the skill names
+
   Scenario: Tinman loads the skill it ships
     Given the bundled skill at "assets/skill/SKILL.md"
     When Tinman loads its bundled skill

@@ -12,10 +12,10 @@ Feature: interactive help
 
   Scenario: a question typed at the prompt is answered
     Given inference is available
-    And the assistant answers "Replay runs a recorded plan with no model."
+    And the assistant answers "Inspect prints the terminal object model of a running program."
     And the operator runs "tinman --help" in an interactive terminal
-    When the operator types "what does replay do" at the assistant prompt
-    Then the output displays the answer "Replay runs a recorded plan with no model."
+    When the operator types "what does inspect do" at the assistant prompt
+    Then the output displays the answer "Inspect prints the terminal object model of a running program."
 
   Scenario: the assistant session ends when the operator ends the input
     Given inference is available
@@ -51,9 +51,9 @@ Feature: interactive help
     Then the assistant refuses the proposal
 
   Scenario: a question is answered without proposing a command
-    Given the assistant answers "Replay runs a recorded plan with no model."
-    When the operator asks "what does replay do"
-    Then the assistant displays the answer "Replay runs a recorded plan with no model."
+    Given the assistant answers "Inspect prints the terminal object model of a running program."
+    When the operator asks "what does inspect do"
+    Then the assistant displays the answer "Inspect prints the terminal object model of a running program."
     And no command is offered to the operator
 
   @contract

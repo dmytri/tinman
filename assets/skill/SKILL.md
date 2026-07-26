@@ -32,8 +32,7 @@ Locators bind to the TOM by role and name, and resolution is mechanical. A test 
 ## Commands
 
 - `tinman record <command...>` captures a live session into an editable plan.
-- `tinman replay <plan>` replays a recorded plan exactly.
-- `tinman test <plan>` runs a plan and reports whether it passed.
+- `tinman test <plan>` runs a plan and reports whether it passed, replaying it exactly with no model invocation and no network.
 - `tinman inspect <command...>` prints the terminal object model of a running program.
 - `tinman driver` speaks the JSON driver protocol on stdin and stdout.
 

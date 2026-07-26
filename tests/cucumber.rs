@@ -92,8 +92,12 @@ struct TinmanWorld {
     asset_text: Option<String>,
     accepted_commands: Option<Vec<String>>,
     read_command_set: Option<Vec<String>>,
+    listed_commands: Option<Vec<String>>,
     advertised_options: Option<Vec<String>>,
     option_rejections: Option<Vec<String>>,
+    // the Tinman command lines an asset names, and the parser's refusals
+    named_command_lines: Option<Vec<String>>,
+    command_line_rejections: Option<Vec<String>>,
     placeholder_count: Option<usize>,
     // running the real binary
     scratch: Option<support::ScratchDir>,
@@ -995,6 +999,48 @@ fn skill_from_file(world: &TinmanWorld) -> tinman::skill::Skill {
         .unwrap_or_else(|e| panic!("bundled skill {path} did not parse: {e}"))
 }
 
+#[given(expr = "the command lines in the asset at {string}")]
+async fn the_command_lines_in_the_asset(world: &mut TinmanWorld, path: String) {
+    let asset =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("asset {path} unreadable: {e}"));
+    world.named_command_lines = Some(support::named_command_lines(&asset));
+}
+
+#[when("each named command is passed to the command parser")]
+async fn each_named_command_is_passed_to_the_parser(world: &mut TinmanWorld) {
+    let lines = world
+        .named_command_lines
+        .as_ref()
+        .expect("the asset's command lines were read");
+    let mut rejections = Vec::new();
+    for line in lines {
+        if let Err(e) = tinman::cli::parse_command_line(line) {
+            rejections.push(format!("{line:?} refused: {e}"));
+        }
+    }
+    world.command_line_rejections = Some(rejections);
+}
+
+#[then("the parser accepts every command the skill names")]
+async fn the_parser_accepts_every_command_the_skill_names(world: &mut TinmanWorld) {
+    let lines = world
+        .named_command_lines
+        .as_ref()
+        .expect("the asset's command lines were read");
+    assert!(
+        !lines.is_empty(),
+        "the skill names no command line, so this scenario would assert nothing"
+    );
+    let rejected = world
+        .command_line_rejections
+        .as_ref()
+        .expect("the command lines were passed to the parser");
+    assert!(
+        rejected.is_empty(),
+        "command lines the skill names but the parser refuses: {rejected:?}"
+    );
+}
+
 #[when("the skill front matter is parsed")]
 async fn skill_front_matter_is_parsed(world: &mut TinmanWorld) {
     let skill = skill_from_file(world);
@@ -1176,32 +1222,38 @@ async fn the_verifier_checks_command_dispatch_completeness(world: &mut TinmanWor
     ));
 }
 
-#[when(expr = "each is looked for in the asset at {string}")]
-async fn each_is_looked_for_in_the_asset(world: &mut TinmanWorld, path: String) {
-    world.asset_text = Some(
-        std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("help asset {path} unreadable: {e}")),
-    );
+#[when(expr = "each is looked for in the Commands block of the asset at {string}")]
+async fn each_is_looked_for_in_the_commands_block(world: &mut TinmanWorld, path: String) {
+    let asset = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("help asset {path} unreadable: {e}"));
+    world.listed_commands = Some(support::listed_commands(&asset));
 }
 
-#[then("every accepted command appears in the help text")]
-async fn every_accepted_command_appears(world: &mut TinmanWorld) {
+#[then("every accepted command is listed in the Commands block")]
+async fn every_accepted_command_is_listed(world: &mut TinmanWorld) {
     let commands = world
         .accepted_commands
         .as_ref()
         .expect("the parser reported its commands");
-    let text = world.asset_text.as_ref().expect("the help asset was read");
+    let listed = world
+        .listed_commands
+        .as_ref()
+        .expect("the Commands block was read");
     assert!(
         !commands.is_empty(),
         "the parser reported no commands, so this scenario would assert nothing"
     );
+    assert!(
+        !listed.is_empty(),
+        "the Commands block lists nothing, so this scenario would assert nothing"
+    );
     let missing: Vec<&String> = commands
         .iter()
-        .filter(|command| !text.contains(command.as_str()))
+        .filter(|command| !listed.contains(command))
         .collect();
     assert!(
         missing.is_empty(),
-        "commands the parser accepts but the help text omits: {missing:?}"
+        "commands the parser accepts but the Commands block omits: {missing:?}"
     );
 }
 
@@ -4402,9 +4454,25 @@ async fn an_engine_that_returns_role(world: &mut TinmanWorld, role: String) {
     use_provider(world, provider);
 }
 
+#[given(expr = "an engine that answers {string}")]
+async fn an_engine_that_answers(world: &mut TinmanWorld, reply: String) {
+    let provider = support::LocalProvider::returning(&reply);
+    use_provider(world, provider);
+}
+
 // ---------------------------------------------------------------------------
 // the configured provider, reached for real on the @inference tier
 // ---------------------------------------------------------------------------
+
+/// The failure ceiling one real call to the configured provider carries. It
+/// sits above the ceiling production applies to its own request, so a call that
+/// ends on a ceiling ends on production's rather than the harness's.
+const PROVIDER_ATTEMPT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The deadline an @inference step retries toward. A hosted provider that
+/// answers nothing once is asked again; one that answers nothing until this
+/// passes is reported as no answer, in the terms the scenario asserts.
+const PROVIDER_DEADLINE: std::time::Duration = std::time::Duration::from_secs(240);
 
 /// The settings the @inference tier runs against: the operator's real
 /// credential and endpoint, read from the process environment and a dotenv
@@ -4423,9 +4491,10 @@ fn configured_settings() -> tinman::inference::Settings {
 #[when(expr = "the assistant request {string} is sent")]
 async fn the_assistant_request_is_sent(world: &mut TinmanWorld, question: String) {
     let settings = configured_settings();
-    world.provider_reply = support::within_budget(
+    world.provider_reply = support::within_deadline(
         "the configured inference provider",
-        std::time::Duration::from_secs(120),
+        PROVIDER_ATTEMPT,
+        PROVIDER_DEADLINE,
         move || tinman::inference::assistant_completion(&settings, &question),
     );
 }
@@ -4487,9 +4556,10 @@ async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld)
         .clone();
     let contents = screen.contents();
     let started = std::time::Instant::now();
-    let inferred = support::within_budget(
+    let inferred = support::within_deadline(
         "the configured inference engine",
-        std::time::Duration::from_secs(120),
+        PROVIDER_ATTEMPT,
+        PROVIDER_DEADLINE,
         move || tinman::inference::tom_completion(&settings, &contents),
     );
     let elapsed = started.elapsed();
@@ -4508,9 +4578,10 @@ async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld)
 async fn an_acronym_expansion_is_generated(world: &mut TinmanWorld) {
     let settings = configured_settings();
     let started = std::time::Instant::now();
-    world.provider_reply = support::within_budget(
+    world.provider_reply = support::within_deadline(
         "the configured inference engine",
-        std::time::Duration::from_secs(120),
+        PROVIDER_ATTEMPT,
+        PROVIDER_DEADLINE,
         move || tinman::inference::expansion(&settings),
     );
     world.provider_elapsed = Some(started.elapsed());

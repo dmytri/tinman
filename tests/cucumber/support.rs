@@ -1456,6 +1456,55 @@ pub fn advertised_options(asset: &str) -> Vec<String> {
     options
 }
 
+/// The commands a help asset lists in its `Commands:` block: the first token of
+/// every indented entry, in the order the asset lists them. The block runs from
+/// the `Commands:` heading to the first line that is not one of its indented
+/// entries. The asset's prose uses command names as ordinary English words, so
+/// a command counts as documented only when this block lists it.
+pub fn listed_commands(asset: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut in_block = false;
+    for line in asset.lines() {
+        if line.trim_end() == "Commands:" {
+            in_block = true;
+            continue;
+        }
+        if !in_block {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        if let Some(name) = line.split_whitespace().next() {
+            commands.push(name.to_string());
+        }
+    }
+    commands
+}
+
+/// The Tinman command lines an asset names: every inline code span opening with
+/// `tinman`, in the order the asset names them. A fenced code block is skipped,
+/// so a JSON or YAML sample is never read as a command line.
+pub fn named_command_lines(asset: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut fenced = false;
+    for line in asset.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        for (index, span) in line.split('`').enumerate() {
+            if index % 2 == 1 && (span == "tinman" || span.starts_with("tinman ")) {
+                lines.push(span.to_string());
+            }
+        }
+    }
+    lines
+}
+
 /// The index of the line the tagline occupies in the help asset, found by the
 /// placeholder the asset carries. The rendered help puts whatever fills the
 /// tagline on that same line, so a scenario asserting on "the tagline line"
@@ -1657,6 +1706,44 @@ pub fn within_budget<T: Send + 'static>(
             budget.as_secs()
         )
     })
+}
+
+/// What a real-service call produced, retried toward `deadline`. Each attempt
+/// carries `attempt` as its own failure ceiling, so no attempt hangs the run.
+/// An attempt that answers with nothing is a transient of a hosted service
+/// rather than a verdict, so another attempt starts while the deadline stands.
+/// Absent once the deadline passes with no answer, so the calling step reports
+/// the absence in the terms its own scenario asserts. Every abandoned attempt
+/// is named on stderr, because a step that retried silently would report a
+/// degrading provider as an ordinary green.
+pub fn within_deadline<T: Send + 'static>(
+    what: &str,
+    attempt: std::time::Duration,
+    deadline: std::time::Duration,
+    call: impl Fn() -> Option<T> + Send + Sync + 'static,
+) -> Option<T> {
+    let call = std::sync::Arc::new(call);
+    let started = std::time::Instant::now();
+    let mut attempts = 0usize;
+    while started.elapsed() < deadline {
+        attempts += 1;
+        let call = std::sync::Arc::clone(&call);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(call());
+        });
+        let observed = match receiver.recv_timeout(attempt) {
+            Ok(Some(value)) => return Some(value),
+            Ok(None) => "answered with nothing".to_string(),
+            Err(_) => format!("did not answer within {}s", attempt.as_secs()),
+        };
+        eprintln!(
+            "{what} {observed} on attempt {attempts}, {:.1}s into its {}s deadline",
+            started.elapsed().as_secs_f64(),
+            deadline.as_secs()
+        );
+    }
+    None
 }
 
 /// Check the source a boundary policy governs against that policy. Returns

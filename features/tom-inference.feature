@@ -67,6 +67,16 @@ Feature: terminal object model inference
     When the terminal object model is inferred
     Then the region named "Files" has the role "list"
 
+  Rule: text that parses as JSON is not thereby a model. A provider answering `null`, a bare string or an array has returned nothing a model can be read from, so the deterministic model stands exactly as it does when no credential is configured and when the provider cannot be reached. A real provider does answer this way: an observed sweep failed on the four characters `null` against production that had passed twice, which is the same reply arriving on a different day.
+
+  Scenario: an engine answering with a value that is not a model is discarded
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that answers "null"
+    When the terminal object model is inferred
+    Then the region named "Files" has the role "list"
+
+  Rule: an @inference scenario asserts Tinman's seam and never the provider's latency. The seam is the request Tinman builds, the call it makes and the reply it parses; how long a third party takes to answer is that party's behaviour, the same class as whether it obeys an instruction. A single real call returning nothing inside its ceiling is a transient of a hosted service, so the step retries toward a deadline rather than failing on one slow answer. The cost of getting this wrong is measured rather than argued: with production byte-identical across two custody attempts, the tier sweep moved from 85s green to 159s red, and a ceiling sized off a 76s observed tail was exceeded within a day of being set. Chasing that tail with a larger constant buys the next reprieve and no more.
+
   @inference
   Scenario: the configured engine infers a conforming model from a real screen
     Given the fixture terminal program is captured through a PTY

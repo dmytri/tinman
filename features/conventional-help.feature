@@ -17,10 +17,12 @@ Feature: conventional help
     When the operator runs "tinman help" with stdout redirected to a file
     Then the help output is the asset at "assets/help/tinman.txt" with the tagline line removed
 
-  Scenario: every command the parser accepts appears in the help text
+  Rule: the commands are looked for in the help text's Commands block rather than anywhere in the file. A command name is an ordinary English word that the surrounding prose uses freely, so a whole-file search reports a command as documented when only the prose mentions it. That is not hypothetical: while the parser still accepted "replay" and the Commands block had already dropped it, a whole-file search passed on the closing sentence about replay time being deterministic.
+
+  Scenario: every command the parser accepts is listed in the help text's Commands block
     Given the commands the parser accepts
-    When each is looked for in the asset at "assets/help/tinman.txt"
-    Then every accepted command appears in the help text
+    When each is looked for in the Commands block of the asset at "assets/help/tinman.txt"
+    Then every accepted command is listed in the Commands block
 
   Scenario: every option the help text advertises is accepted by the parser
     Given the options the asset at "assets/help/tinman.txt" advertises

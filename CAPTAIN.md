@@ -10,6 +10,40 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 Run the Opening retrieval anyway and believe it over this paragraph.
 
+## The retry works, and it uncovered a second fault underneath
+
+QM's retry is proven live rather than merely compiled: the green sweep printed `the configured inference engine answered with nothing on attempt 1, 110.0s into its 240s deadline`, and attempt 2 carried it. `PROVIDER_ATTEMPT` 120s, `PROVIDER_DEADLINE` 240s, in verification support.
+
+**The fault underneath: the provider answered `null`.** Four characters, valid JSON, not an object, failing the `@inference` scenario's schema assertion with `null is not of type "object"`. **Production turned out to be correct already**, and this is the correction worth carrying: `src/tom.rs:326` parses the reply into a typed `Model` and falls back to the deterministic model on any parse error, which a bare `null` triggers. Captain's first reading blamed `tom_completion` for returning content unchecked; the discard simply lives a layer up. QM established it by command after proving the new scenario falsifiable with a planted well-formed reply. The new scenario stays, because it pins a real guarantee nothing else pinned, and QM's plant proved it is not a vacuous pass. The `Rule:` was corrected to state the behaviour and to stop naming which seam performs it: `Rule:` prose carries durable context, never implementation placement, and QM caught Captain breaking that.
+
+**So the fragile thing is the `@inference` scenario, not the product.** `the configured engine infers a conforming model from a real screen` asserts the provider's raw reply conforms to the tom schema, which is asserting the model's compliance, the exact thing the standing decision and the new `Rule:` forbid. The retry does not rescue it, because `tom_completion` returns `Some("null")` rather than `None`, so the call looks like it succeeded and no attempt is spent. **Pivot, named rather than parked: the next time that tier reddens on a non-model reply, the fix is to treat a reply that cannot be read as a model as answered-with-nothing inside the `@inference` step, so the deadline retry covers it.** Not done now: the product is correct, two attempts already make a double `null` unlikely, and the only way to verify the change is another paid sweep.
+
+QM was right not to retry past the red. Retrying until the schema assertion passes would weaken the assertion, which is forbidden, and Crew could not take it without a failing target.
+
+**Next harbour, Shipwright, new: the weather record silently drops killed runs.** QM's failing sweep appended no line while its green sweep did. The `broad-*` commands append after the run and `exit $r`, so a sweep killed by a foreground budget never reaches the `printf`. Effect: yesterday's weather reads healthier than observed, and concurrency sizing starts from a rosy prior. Cause unverified by QM and unverified here; the fix is to append from a trap rather than a trailing statement.
+
+## Voyage 7 custody fouled on a third party, not on our code
+
+Boatswain refused custody: `features/tom-inference.feature:the configured engine generates an acronym expansion` red at the 110s `GENERATION_CEILING`. **`git diff --stat cc15e3c` carries no `src/` hunk**, so production is byte-identical to the commit whose custody recorded this tier green. The weather record says it plainly: `@inference` `85067ms result:0`, then `158868ms result:101`, same code. The provider roughly halved in speed.
+
+QM predicted this one voyage earlier, in writing: a 110s bound sized off a 76.2s measured tail against a 15-16s median, holding "until a provider routing change." It reopened within a day.
+
+**Ruling: do not raise the constant.** The standing decision that the `@inference` tier asserts our seam and never the model's compliance extends to latency, which is the same class of third-party behaviour. A single real call returning nothing inside its ceiling is a transient of a hosted service, and the Verification agreement's answer to a transient is a bounded retry toward a deadline. Written as a `Rule:` in `features/tom-inference.feature`. Chasing the tail with a larger constant buys one reprieve and no more, and each raise also lengthens the worst case an operator waits.
+
+**Held, not scheduled: the model choice.** `deepseek/deepseek-v4-flash` through OpenRouter is what these swings are measured against. A steadier or faster default would reduce the tail at its source, and it is configuration rather than code, `TINMAN_MODEL`. Not changed, because a retry fixes the suite honestly and a model swap to chase a green is tuning the thermometer. Revisit if the tier keeps swinging after the retry lands.
+
+## Voyage 7, authored 2026-07-26. Live for QM; not a pending Captain item.
+
+Voyage 6 is committed at `cc15e3c`. Voyage 7 closes the `replay` strike's long tail, which two roles found and no check did.
+
+**False green fourteen, and the best argument yet for naming the region a check reads.** `every command the parser accepts appears in the help text` matched each command name against the **whole asset file**. While the parser still accepted `replay` and the Commands block had already dropped it, the target passed, on the closing prose "replay time is deterministic". A command name is an ordinary English word the surrounding prose uses freely, so a whole-file search reports a command as documented when only the prose mentions it. Rewritten to read the Commands block. The old scenario is replaced rather than joined, because two checks holding one rule is the duplication the standing preferences forbid.
+
+**The second asset nobody checked.** `assets/skill/SKILL.md:35` advertised `tinman replay <plan>` through the entire voyage that struck the command. `features/bundled-skill.feature` makes that asset the assistant's whole answering context, so the assistant would have described a command `parse_command_line` rejects. Same two-list problem as the help text, one list further from the code, and shipped to coding agents rather than to a reader who can check. Struck, and bound: a new scenario passes every command line the skill names through the parser.
+
+**Stale example data.** `features/interactive-help.feature` used "what does replay do" in two scenarios. The answers are stubbed by their `Given`, so the data was arbitrary and nothing was wrong, but example data naming a removed command teaches the next reader a command that does not exist. Moved to `inspect`.
+
+**Open Captain question, for the user.** Three root reference documents keep drifting and roles keep re-reporting them: `help.md` shows a help block listing `replay`, `isolation.md:108` shows `from: fixture` which production never had, and `idea.md` still carries old requirements as MUST prose. They are `Cargo.toml` `exclude`d so they never ship, and two scantling descriptions name `help.md` and `isolation.md` as the source of their invariants, so they are referenced rather than inert. Refresh them, delete them, or mark them historical. Not decided; do not treat their content as requirements meanwhile.
+
 ## Voyage 6, authored 2026-07-26. Live for QM; not a pending Captain item.
 
 **Strike `replay`, and hand dispatch completeness to rustc.** User ruling: `tinman replay` was declared in the parser, advertised in the help asset, accepted by `parse_command_line`, proposed by the interactive assistant, and swallowed by `_ => {}` in `src/main.rs:72`, exiting 0 having done nothing. All six `replay.feature` scenarios were green throughout, because they drive the library seam and never the subcommand. `test` already does the job, so the command goes.
