@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/tom.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/tom.schema.json",
   "title": "Tinman terminal object model",
   "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names and text. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
   "type": "object",

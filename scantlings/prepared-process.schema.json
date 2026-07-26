@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@main/scantlings/prepared-process.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.1/scantlings/prepared-process.schema.json",
   "title": "Tinman prepared process",
   "description": "Everything the PTY runner needs to launch a process, with no backend knowledge. Referenced by features/prepared-process.feature.",
   "type": "object",
