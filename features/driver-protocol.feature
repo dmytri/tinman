@@ -46,6 +46,14 @@ Feature: driver protocol
     Then the driver replies with a failed result
     And the driver answers a later screen request for the same session
 
+  Rule: a terminal echoes what is typed at it by default, so a driver that sends keys to a session and then reads the screen back reads its own keystrokes alongside the program's output. Every assertion about what a program displayed is unsound while that holds, because the driver cannot tell what it wrote from what the program wrote. A program that transforms its input is what separates the two: the typed form and the answered form differ, so only one of them can be the program's.
+
+  Scenario: the screen carries the program's answer rather than the driver's keystrokes
+    Given the Tinman driver has a session running "read -r word; printf %s \"$word\" | tr a-z A-Z"
+    When the test runner types "handshake"
+    Then the screen carries "HANDSHAKE"
+    And the screen does not carry "handshake"
+
   Scenario: closing a session reclaims its sandbox resources
     Given the Tinman driver has a session running "printf READY"
     When the test runner closes the session
@@ -57,17 +65,21 @@ Feature: driver protocol
     When the test runner requests the terminal object model
     Then every exchanged message conforms to the "driver-protocol" schema in "scantlings/driver-protocol.schema.json"
 
+  Rule: a test runner that crashes or is interrupted closes the driver's stdin without closing its sessions, so stdin closing is the disconnect a real suite produces most often. The session must be reclaimed on that path, not only on an orderly close call. The precondition carries the assertion here: asserting that no sandbox directory stands, in a scenario that launched nothing, asserts nothing.
+
   Scenario: the driver exits when its stdin closes
-    Given the Tinman driver is running
+    Given the Tinman driver has a session running "printf READY"
     When the test runner closes the driver's stdin
     Then the driver process exits with a success status
     And the driver leaves no session sandbox directory standing
+
+  Rule: a driver holds several sessions at once, so every call except launch names the session it addresses and an omitted session is ambiguous rather than defaultable. The requests below are exact wire messages except for the token {session}, which the step replaces with the identifier the launch returned. A literal identifier cannot be written into a spec, because the driver assigns it at run time, and a request that omitted the session would test the session rule rather than the parameter rule it names.
 
   Scenario: a call missing a required parameter is answered with an invalid-params error
     Given the Tinman driver has a session running "printf READY"
     When the test runner sends the request:
       """
-      {"jsonrpc": "2.0", "id": 2, "method": "capture", "params": {"within": "log", "role": "article"}}
+      {"jsonrpc": "2.0", "id": 2, "method": "capture", "params": {"session": "{session}", "within": "log", "role": "article"}}
       """
     Then the driver replies to request 2 with the error code -32602
     And the error data names the missing parameter "scope"
@@ -77,7 +89,16 @@ Feature: driver protocol
     Given the Tinman driver has a session running "printf READY"
     When the test runner sends the request:
       """
-      {"jsonrpc": "2.0", "id": 2, "method": "capture", "params": {"within": "log", "role": "article", "scope": "evrything"}}
+      {"jsonrpc": "2.0", "id": 2, "method": "capture", "params": {"session": "{session}", "within": "log", "role": "article", "scope": "evrything"}}
       """
     Then the driver replies to request 2 with the error code -32602
     And the error data names the rejected scope "evrything"
+
+  Scenario: a call omitting the session it addresses is answered with an invalid-params error
+    Given the Tinman driver has a session running "printf READY"
+    When the test runner sends the request:
+      """
+      {"jsonrpc": "2.0", "id": 2, "method": "screen", "params": {}}
+      """
+    Then the driver replies to request 2 with the error code -32602
+    And the error data names the missing parameter "session"

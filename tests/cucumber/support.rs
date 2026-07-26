@@ -652,6 +652,10 @@ pub enum ProviderReply {
     Content(String),
     /// A rejected credential.
     Unauthorized,
+    /// Nothing at all: the connection is accepted and held open, and no reply is
+    /// ever written. A refused connection fails a client on its own, so only a
+    /// client-side ceiling ends this one.
+    Stall,
 }
 
 /// A real HTTP server on loopback that speaks the OpenAI-compatible
@@ -669,6 +673,7 @@ pub enum ProviderReply {
 pub struct LocalProvider {
     base_url: String,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    received: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -681,6 +686,12 @@ impl LocalProvider {
     /// Start a provider that rejects the credential it is given.
     pub fn rejecting() -> LocalProvider {
         LocalProvider::start(ProviderReply::Unauthorized)
+    }
+
+    /// Start a provider that accepts the connection, reads the request, and
+    /// never answers, holding the socket open for as long as it runs.
+    pub fn stalling() -> LocalProvider {
+        LocalProvider::start(ProviderReply::Stall)
     }
 
     fn start(reply: ProviderReply) -> LocalProvider {
@@ -698,8 +709,14 @@ impl LocalProvider {
 
         let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop = std::sync::Arc::clone(&shutdown);
+        let received = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let arrived = std::sync::Arc::clone(&received);
 
         let handle = std::thread::spawn(move || {
+            // A stalled connection is held rather than dropped: dropping the
+            // socket would answer the client with an end of stream, which is a
+            // fault it can see, and this provider withholds its answer instead.
+            let mut held: Vec<std::net::TcpStream> = Vec::new();
             while !stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
@@ -709,11 +726,13 @@ impl LocalProvider {
                         let mut reader =
                             BufReader::new(stream.try_clone().expect("the connection is cloned"));
                         let mut length = 0usize;
+                        let mut saw_request = false;
                         loop {
                             let mut line = String::new();
                             if reader.read_line(&mut line).unwrap_or(0) == 0 {
                                 break;
                             }
+                            saw_request = true;
                             if let Some(value) =
                                 line.to_ascii_lowercase().strip_prefix("content-length:")
                             {
@@ -725,6 +744,16 @@ impl LocalProvider {
                         }
                         let mut body = vec![0u8; length];
                         let _ = reader.read_exact(&mut body);
+
+                        // The readiness probe connects and sends nothing, so a
+                        // request is what a read line reports, not an accept.
+                        if saw_request {
+                            arrived.store(true, Ordering::Relaxed);
+                        }
+                        if matches!(reply, ProviderReply::Stall) {
+                            held.push(stream);
+                            continue;
+                        }
 
                         let mut stream = stream;
                         let response = match &reply {
@@ -745,6 +774,9 @@ impl LocalProvider {
                                 });
                                 http_response(200, "OK", &payload.to_string())
                             }
+                            ProviderReply::Stall => {
+                                unreachable!("a stalled provider writes no response")
+                            }
                         };
                         let _ = stream.write_all(response.as_bytes());
                         let _ = stream.flush();
@@ -760,10 +792,17 @@ impl LocalProvider {
         let provider = LocalProvider {
             base_url: format!("http://{addr}/v1"),
             shutdown,
+            received,
             handle: Some(handle),
         };
         provider.await_ready();
         provider
+    }
+
+    /// Whether a request has reached this provider. The readiness probe sends
+    /// nothing, so this reports a real request rather than a connection.
+    pub fn received_request(&self) -> bool {
+        self.received.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Poll the listening port until it observably accepts a connection, so no
@@ -1758,6 +1797,66 @@ pub fn plank_inventory() -> Vec<Plank> {
     planks
 }
 
+/// One provisional plank the inventory reports: the seam it sits on, and the
+/// scenario reference it names.
+#[derive(Debug, Clone)]
+pub struct ProvisionalPlank {
+    pub file: String,
+    pub line: usize,
+    pub reference: String,
+}
+
+/// Every `@planks-provisional` annotation in the implementation, beside the size
+/// of the plank inventory they were read from.
+///
+/// An empty provisional set is the healthy resting state, so the count that
+/// guards this read is the inventory's own: an unreadable scan and a tree
+/// carrying no provisional plank both report an empty provisional set, and only
+/// the inventory size tells them apart.
+#[derive(Debug, Clone)]
+pub struct ProvisionalInventory {
+    pub annotations: usize,
+    pub provisional: Vec<ProvisionalPlank>,
+}
+
+/// The provisional planks the implementation carries, read through the same
+/// `plank-inventory` command in RIGGING.md that reports the ordinary planks. A
+/// provisional plank names a `@captain` scenario rather than a step-definition
+/// pattern, so it is no member of the pattern join and is read here instead.
+pub fn provisional_plank_inventory() -> ProvisionalInventory {
+    let reported = run_inline_scan(PLANK_INVENTORY_RULE, "src");
+    let annotations = reported.len();
+    let mut provisional = Vec::new();
+    for entry in reported {
+        let text = entry.text.trim().to_string();
+        let line = entry.range.start.line + 1;
+        let Some((_, rest)) = text.split_once("@planks-provisional(") else {
+            continue;
+        };
+        let literal = rest.strip_suffix(')').unwrap_or_else(|| {
+            panic!(
+                "{}:{line} carries a malformed provisional plank: {text}",
+                entry.file
+            )
+        });
+        let reference = read_string_literal(literal).unwrap_or_else(|| {
+            panic!(
+                "{}:{line} names no readable scenario reference: {text}",
+                entry.file
+            )
+        });
+        provisional.push(ProvisionalPlank {
+            file: entry.file,
+            line,
+            reference,
+        });
+    }
+    ProvisionalInventory {
+        annotations,
+        provisional,
+    }
+}
+
 /// How a step definition matches a step, exactly as the runner matches it: a
 /// cucumber expression through the expression crate the runner's own macros
 /// use, a bare literal by equality.
@@ -1840,6 +1939,31 @@ pub struct SpecScenario {
     pub feature: String,
     pub name: String,
     pub steps: Vec<String>,
+    /// Every tag reaching this scenario, its feature's and its rule's included,
+    /// each without its leading `@`, as the Gherkin parser reports them.
+    pub tags: Vec<String>,
+}
+
+impl SpecScenario {
+    /// This scenario's watchbill reference, the `<spec>.feature:<Scenario Name>`
+    /// form a provisional plank names a scenario by.
+    pub fn reference(&self) -> String {
+        format!("{}:{}", self.feature, self.name)
+    }
+
+    /// Whether `tag` reaches this scenario, named with or without its `@`.
+    pub fn carries_tag(&self, tag: &str) -> bool {
+        let wanted = tag.trim_start_matches('@');
+        self.tags.iter().any(|carried| carried == wanted)
+    }
+}
+
+/// Tag names without their leading `@`, so a tag is compared one way wherever it
+/// is read.
+fn strip_tag_marks(tags: &[String]) -> Vec<String> {
+    tags.iter()
+        .map(|tag| tag.trim_start_matches('@').to_string())
+        .collect()
 }
 
 /// Every scenario the specs declare, read with the Gherkin parser the runner
@@ -1864,17 +1988,23 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
             .iter()
             .flat_map(|background| background.steps.iter().map(|step| step.value.clone()))
             .collect();
-        let mut collect = |scenario: &cucumber::gherkin::Scenario, ambient: &[String]| {
+        let feature_tags = strip_tag_marks(&feature.tags);
+        let mut collect = |scenario: &cucumber::gherkin::Scenario,
+                           ambient: &[String],
+                           ambient_tags: &[String]| {
             let mut steps = ambient.to_vec();
             steps.extend(scenario.steps.iter().map(|step| step.value.clone()));
+            let mut tags = ambient_tags.to_vec();
+            tags.extend(strip_tag_marks(&scenario.tags));
             found.push(SpecScenario {
                 feature: display.clone(),
                 name: scenario.name.clone(),
                 steps,
+                tags,
             });
         };
         for scenario in &feature.scenarios {
-            collect(scenario, &feature_background);
+            collect(scenario, &feature_background, &feature_tags);
         }
         for rule in &feature.rules {
             let mut ambient = feature_background.clone();
@@ -1883,8 +2013,10 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
                     .iter()
                     .flat_map(|background| background.steps.iter().map(|step| step.value.clone())),
             );
+            let mut ambient_tags = feature_tags.clone();
+            ambient_tags.extend(strip_tag_marks(&rule.tags));
             for scenario in &rule.scenarios {
-                collect(scenario, &ambient);
+                collect(scenario, &ambient, &ambient_tags);
             }
         }
     }
@@ -1930,6 +2062,138 @@ pub fn conformance_rule_ids() -> Vec<String> {
 /// passes the name to the runner as a regex. This is the set the runner's own
 /// expression crate escapes when it builds a regex from a literal.
 pub const REGEX_METACHARACTERS: &str = "^$[]()\\{}.|?*+";
+
+/// The `- key: value` items one `## Section` of the rigging declares, in the
+/// fixed Markdown shape the Rigging read contract states. A key repeats once per
+/// value, so a multi-value key is read whole, and only the first colon separates
+/// a key from its value, so a command value carrying colons survives.
+fn rigging_section(path: &str, section: &str) -> Vec<(String, String)> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("the rigging at {path} is unreadable: {e}"));
+    let mut items = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            inside = heading.trim() == section;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(item) = line.strip_prefix("- ") else {
+            continue;
+        };
+        let Some((key, value)) = item.split_once(':') else {
+            continue;
+        };
+        items.push((
+            key.trim().to_string(),
+            value.trim().trim_matches('`').to_string(),
+        ));
+    }
+    items
+}
+
+/// A wall-clock value the rigging declares, such as `90s` or `500ms`.
+fn read_duration(value: &str) -> Option<std::time::Duration> {
+    if let Some(millis) = value.strip_suffix("ms") {
+        return Some(std::time::Duration::from_millis(
+            millis.trim().parse().ok()?,
+        ));
+    }
+    let seconds = value.strip_suffix('s')?;
+    Some(std::time::Duration::from_secs(seconds.trim().parse().ok()?))
+}
+
+/// One tier ceiling the rigging declares: the key declaring it, the tier tag it
+/// bounds, the wall clock it allows, and the sweep command that records that
+/// tier's wall clock.
+#[derive(Debug, Clone)]
+pub struct TierBudget {
+    pub key: String,
+    pub tier: String,
+    pub ceiling: std::time::Duration,
+    pub sweep: Option<String>,
+}
+
+/// Every tier budget the rigging declares, joined to the tier tag it bounds and
+/// to the sweep command that records that tier's wall clock. A `budget` key
+/// bounds the default tier and a `budget-<tier>` key bounds the tier that suffix
+/// names, so the join follows the rigging's own suffix convention rather than a
+/// list kept here: a tier added to the rigging is read without an edit.
+pub fn tier_budgets(rigging: &str) -> Vec<TierBudget> {
+    let tiers = rigging_section(rigging, "Tiers");
+    let commands = rigging_section(rigging, "Commands");
+    let mut budgets = Vec::new();
+    for (key, value) in &tiers {
+        let suffix = if key == "budget" {
+            "default"
+        } else {
+            match key.strip_prefix("budget-") {
+                Some(suffix) => suffix,
+                None => continue,
+            }
+        };
+        let tier = tiers
+            .iter()
+            .find(|(named, _)| named == suffix)
+            .map(|(_, tag)| tag.clone())
+            .unwrap_or_else(|| panic!("the rigging declares {key} but names no {suffix} tier"));
+        let ceiling = read_duration(value)
+            .unwrap_or_else(|| panic!("the rigging declares {key}: {value}, which is no duration"));
+        let sweep_key = if suffix == "default" {
+            "broad".to_string()
+        } else {
+            format!("broad-{suffix}")
+        };
+        budgets.push(TierBudget {
+            key: key.clone(),
+            tier,
+            ceiling,
+            sweep: commands
+                .iter()
+                .find(|(named, _)| *named == sweep_key)
+                .map(|(_, command)| command.clone()),
+        });
+    }
+    budgets
+}
+
+/// The path the rigging keeps the weather record at.
+pub fn weather_record_path(rigging: &str) -> String {
+    rigging_section(rigging, "Tiers")
+        .into_iter()
+        .find(|(key, _)| key == "weather")
+        .map(|(_, path)| path)
+        .unwrap_or_else(|| panic!("the rigging at {rigging} names no weather record"))
+}
+
+/// One tier sweep the weather record carries: the tier it swept and the wall
+/// clock it took.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RecordedSweep {
+    pub tier: String,
+    pub ms: u64,
+}
+
+/// Every sweep the weather record carries. The record is the wake, so it is
+/// absent on a fresh clone where no sweep has run yet: an absent record reads as
+/// no sweep rather than as a fault, and the producer is what the check verifies
+/// structurally there.
+pub fn recorded_sweeps(rigging: &str) -> Vec<RecordedSweep> {
+    let path = weather_record_path(rigging);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|e| {
+                panic!("the weather record {path} carries a line that is no sweep: {e}\n{line}")
+            })
+        })
+        .collect()
+}
 
 /// One enumeration a scantling declares: the scantling declaring it, the JSON
 /// pointer it sits at, and the values it names.

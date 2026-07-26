@@ -32,6 +32,17 @@ Feature: inference provider
     When Tinman checks whether inference is available
     Then inference is reported unavailable
 
+  Rule: a provider that refuses a connection and a provider that accepts one and then withholds its answer are different faults with the same remedy. The first fails on its own, so a caller needs no ceiling to survive it. The second never returns, so only a ceiling ends it, and a request built without one waits forever on a socket that stays open. Tinman calls this path from `tinman --help`, so an operator with a stalled provider gets a hung command rather than a report.
+
+  Rule: an availability probe and a generation call are two operations, and one ceiling cannot serve both. A probe asks only whether the provider answers, so it is bounded tightly and a slow answer is indistinguishable from no answer. A generation call asks a model to produce a structured document, which legitimately takes tens of seconds, so a ceiling sized for the probe truncates real work and reports absence where the provider was answering correctly. The two bounds are pinned from opposite directions: the stalled-provider scenario below is the ceiling, and the @inference scenarios that assert a real model produced a real result are the floor. A single shared ceiling satisfies whichever of the two was written most recently and silently breaks the other.
+
+  Scenario: a stalled provider reports inference unavailable within a bounded time
+    Given the inference credential is configured
+    And the inference provider endpoint accepts the connection and never answers
+    When Tinman checks whether inference is available
+    Then the stalled endpoint received the request
+    And inference is reported unavailable within 30 seconds
+
   @inference
   Scenario: the configured provider answers a completion request
     Given the inference credential is configured

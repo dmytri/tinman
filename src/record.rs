@@ -5,7 +5,7 @@
 
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
 use crate::process::PreparedProcess;
-use crate::pty::{InteractiveCapture, capture_interactive_in};
+use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
 use crate::tom::{Binding, Model, Region, build, confirm};
@@ -192,16 +192,15 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
         return Err(format!("{} already exists", path.display()));
     }
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
-    let mut capture = capture_interactive_in(
+    let mut capture = capture_interactive_at(
         &PreparedProcess {
             program: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), command_line(command)],
             env: Vec::new(),
-            cwd: None,
+            cwd: Some(workspace.to_string_lossy().into_owned()),
             cleanup: Vec::new(),
         },
         None,
-        Some(workspace),
     )?;
     let (opening, opening_view) = opening_screen(&mut capture);
     let mut session = RecordingSession::for_command(command.clone());

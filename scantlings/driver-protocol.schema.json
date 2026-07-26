@@ -9,10 +9,38 @@
   ],
   "$defs": {
     "request": {
-      "description": "A call from the test runner to the driver.",
+      "description": "A call from the test runner to the driver. The parameters a method requires are constrained here rather than on the params object, because params alone cannot see which method it belongs to. A driver holds several sessions at once, so an omitted session on a call that addresses one is ambiguous rather than defaultable.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method"],
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "const": "launch" } } },
+          "then": {
+            "properties": {
+              "params": {
+                "required": ["command"],
+                "not": { "required": ["session"] }
+              }
+            },
+            "required": ["params"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "method": { "not": { "const": "launch" } } },
+            "required": ["method"]
+          },
+          "then": {
+            "properties": { "params": { "required": ["session"] } },
+            "required": ["params"]
+          }
+        },
+        {
+          "if": { "properties": { "method": { "const": "capture" } } },
+          "then": { "properties": { "params": { "required": ["scope"] } } }
+        }
+      ],
       "properties": {
         "jsonrpc": { "const": "2.0" },
         "id": {
@@ -38,7 +66,7 @@
       }
     },
     "params": {
-      "description": "Arguments for the called method. Every method except launch addresses an existing session.",
+      "description": "Arguments for the called method. Which of these each method requires is constrained by the request definition's conditional branches, because that is the only place the method name is in scope. Declaring a property here permits it; it never requires it.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

@@ -84,13 +84,16 @@ struct Sessions {
 
 /// Speak the driver protocol on stdin and stdout until the client closes its
 /// end: read one request per line, answer each with one reply line, flushed so
-/// the client reads it without waiting for the next.
+/// the client reads it without waiting for the next. A client that closes its
+/// stdin without closing its sessions leaves them to the disconnect, so every
+/// session still open is reclaimed before the driver exits.
 ///
 /// @planks("the Tinman driver is running")
 /// @planks("the test runner sends the request:")
 /// @planks("every exchanged message conforms to the {string} schema in {string}")
 /// @planks("the test runner closes the driver's stdin")
 /// @planks("the driver process exits with a success status")
+/// @planks("the driver leaves no session sandbox directory standing")
 pub fn serve() {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -101,6 +104,15 @@ pub fn serve() {
         let reply = answer(&request, &mut sessions);
         writeln!(stdout, "{reply}").expect("the reply reaches the client");
         stdout.flush().expect("the reply is flushed");
+    }
+    for (_, mut session) in sessions.open.drain() {
+        session.capture.end_session();
+        std::fs::remove_dir_all(&session.home).unwrap_or_else(|e| {
+            panic!(
+                "the sandbox home {} was not reclaimed: {e}",
+                session.home.display()
+            )
+        });
     }
 }
 
@@ -394,10 +406,26 @@ fn pane_items(model: &Model, within: &str, role: &str) -> Vec<String> {
         .collect()
 }
 
-/// Answer with the session's current screen.
+/// Answer with the session's current screen. A call omitting the session it
+/// addresses is a protocol fault carrying the reserved invalid-params code and
+/// the parameter it concerned: a driver holds several sessions at once, so it
+/// has none to default to.
 ///
 /// @planks("the driver answers a later screen request for the same session")
+/// @planks("the driver replies to request {int} with the error code {int}")
+/// @planks("the error data names the missing parameter {string}")
 fn screen(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
+    if params["session"].as_str().is_none() {
+        return json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": INVALID_PARAMS,
+                "message": "the call addresses no session",
+                "data": "session",
+            },
+        });
+    }
     let session = addressed(params, sessions);
     reply(
         id,

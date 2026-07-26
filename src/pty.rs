@@ -7,7 +7,6 @@ use crate::process::PreparedProcess;
 use crate::screen::VirtualScreen;
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use std::io::{Read, Write};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// Launch a prepared process on a PTY and wait for it to exit.
@@ -82,7 +81,7 @@ impl std::fmt::Debug for InteractiveCapture {
 ///
 /// @planks("the process is captured through a PTY")
 pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapture, String> {
-    capture_interactive_in(prepared, None, None)
+    capture_interactive_at(prepared, None)
 }
 
 /// Launch a prepared process the same way, on a terminal `columns` wide. Size is
@@ -91,27 +90,17 @@ pub fn capture_interactive(prepared: &PreparedProcess) -> Result<InteractiveCapt
 /// and the virtual screen together, so the program draws and is read at one
 /// width.
 ///
-/// @planks("the process is captured through a PTY")
-/// @planks("that plan is replayed at {int} columns")
-pub fn capture_interactive_at(
-    prepared: &PreparedProcess,
-    columns: Option<u16>,
-) -> Result<InteractiveCapture, String> {
-    capture_interactive_in(prepared, columns, None)
-}
-
-/// Launch a prepared process on a PTY inside `cwd` when given, so a relative
-/// program name it names resolves against the directory the caller means
-/// rather than against the operator's own home, which is where an unset
-/// working directory otherwise lands the child.
+/// The working directory comes from the prepared process, so a relative program
+/// name resolves against the directory the backend that prepared it means
+/// rather than against the operator's own home, which is where an unset working
+/// directory otherwise lands the child.
 ///
 /// @planks("the process is captured through a PTY")
 /// @planks("that plan is replayed at {int} columns")
 /// @planks("the operator records the fixture terminal program")
-pub fn capture_interactive_in(
+pub fn capture_interactive_at(
     prepared: &PreparedProcess,
     columns: Option<u16>,
-    cwd: Option<&Path>,
 ) -> Result<InteractiveCapture, String> {
     let pty_system = native_pty_system();
     let columns = columns.unwrap_or(PtySize::default().cols);
@@ -125,7 +114,7 @@ pub fn capture_interactive_in(
     for arg in &prepared.args {
         cmd.arg(arg.clone());
     }
-    if let Some(cwd) = cwd {
+    if let Some(cwd) = &prepared.cwd {
         cmd.cwd(cwd);
     }
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;

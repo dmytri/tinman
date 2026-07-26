@@ -1,13 +1,17 @@
 {
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/pty-sandbox-boundary.json",
   "title": "PTY / sandbox dependency boundary",
-  "description": "isolation.md invariant: the PTY layer must not know about Bubblewrap. The PTY runner source MUST NOT reference the Bubblewrap backend or bwrap mechanics; it accepts only a prepared process. Discharged by the pty-sandbox-boundary checker in verification support, which scans the PTY runner source. Attested by the @contract scenario in features/pty-sandbox-boundary.feature.",
+  "description": "isolation.md invariant: the PTY layer must not know about Bubblewrap. The PTY runner source MUST NOT reference the Bubblewrap backend or bwrap mechanics; it accepts only a prepared process. Accepting only a prepared process is a constraint on the runner's arguments as much as on its vocabulary: a launch input arriving beside the prepared process rather than inside it leaves the runner reading two sources, and a second source is where backend knowledge re-enters. The working directory is that input, so the runner reads it from the prepared process and takes no separate path argument. Discharged by the pty-sandbox-boundary checker in verification support, which scans the PTY runner source. Attested by the @contract scenario in features/pty-sandbox-boundary.feature.",
   "module": "src/pty.rs",
   "forbiddenReferences": [
     "bubblewrap",
     "Bubblewrap",
     "bwrap",
-    "BubblewrapBackend"
+    "BubblewrapBackend",
+    "cwd: Option<&Path>"
   ],
-  "rationale": "New sandbox backends must never change the PTY architecture. The PTY runner takes a PreparedProcess and launches it verbatim."
+  "requiredReferences": [
+    "prepared.cwd"
+  ],
+  "rationale": "New sandbox backends must never change the PTY architecture. The PTY runner takes a PreparedProcess and launches it verbatim. A field the prepared process declares and the runner never reads is the same divergence as a field it does not declare at all: the shape validates, the capability is carried elsewhere, and every attestation stays green."
 }

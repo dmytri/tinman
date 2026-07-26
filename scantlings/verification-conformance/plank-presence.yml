@@ -1,0 +1,33 @@
+id: plank-presence
+language: rust
+severity: error
+message: A public seam carries no @planks annotation.
+note: |
+  Every production seam is planked, Article 9: every production seam MUST have at
+  least one @planks annotation. The plank-form rule checks the shape of a plank that
+  exists, so a declaration carrying no plank at all passed every gate the project
+  owned. A seam with no plank is either unspecified behaviour, which earns a @captain
+  scenario in harbour, or dead code, per the Current design only Article.
+
+  A doc comment carrying prose but no @planks tag is a match: documentation is not a
+  trace link. Private declarations are not matched, because a public declaration is
+  the seam boundary a step contract reaches.
+
+  Proven at adoption against a plant of five declarations: it matched a bare pub fn
+  and a pub fn documented with prose only, and stayed silent on a plank on the
+  immediately preceding line, a plank followed by trailing prose, and a private
+  unplanked fn. It reports no match against src at adoption, where all 92 public
+  functions carry a plank.
+files:
+  - src/**
+rule:
+  all:
+    - kind: function_item
+      regex: '^pub '
+    - not:
+        follows:
+          kind: line_comment
+          regex: '@planks'
+          stopBy:
+            not:
+              kind: line_comment

@@ -59,6 +59,16 @@ struct TinmanWorld {
     stale_planks: Option<Vec<String>>,
     unbound_patterns: Option<Vec<String>>,
     metacharacter_names: Option<Vec<String>>,
+    // the provisional planks the implementation carries, and the spent ones,
+    // naming a scenario Captain has already disposed of
+    provisional_planks: Option<support::ProvisionalInventory>,
+    spent_provisional_planks: Option<Vec<String>>,
+    // the tier ceilings the rigging declares, the sweeps the weather record
+    // carries, and the tiers whose most recent sweep outran their ceiling
+    rigging_path: Option<String>,
+    tier_budgets: Option<Vec<support::TierBudget>>,
+    recorded_sweeps: Option<Vec<support::RecordedSweep>>,
+    over_budget_sweeps: Option<Vec<String>>,
     // published scantling contracts: the dialect-declaring scantlings, what the
     // meta-schema said of each, the packaged version, and the URIs consumers
     // fetch
@@ -136,8 +146,14 @@ struct TinmanWorld {
     settings: Option<tinman::inference::Settings>,
     built_requests: Vec<tinman::inference::Request>,
     inference_available: Option<bool>,
+    // how long the availability check took, so a report claimed to be bounded is
+    // judged on the clock rather than on its own word
+    availability_elapsed: Option<std::time::Duration>,
     // what the configured provider generated, on the @inference tier
     provider_reply: Option<String>,
+    // how long the configured provider took to generate it, so a step that got
+    // nothing reports the clock it waited rather than only the absence
+    provider_elapsed: Option<std::time::Duration>,
 }
 
 /// The scenario's working directory: the one a dotenv file is staged in and the
@@ -1315,6 +1331,12 @@ async fn the_provider_rejects_the_credential(world: &mut TinmanWorld) {
     use_provider(world, provider);
 }
 
+#[given("the inference provider endpoint accepts the connection and never answers")]
+async fn the_provider_accepts_and_never_answers(world: &mut TinmanWorld) {
+    let provider = support::LocalProvider::stalling();
+    use_provider(world, provider);
+}
+
 #[given("inference is unavailable")]
 async fn inference_is_unavailable(world: &mut TinmanWorld) {
     world.env_vars.remove("TINMAN_API_KEY");
@@ -1356,13 +1378,53 @@ async fn the_resolved_credential_is(world: &mut TinmanWorld, expected: String) {
 #[when("Tinman checks whether inference is available")]
 async fn tinman_checks_availability(world: &mut TinmanWorld) {
     let settings = resolved_settings(world);
-    world.inference_available = Some(tinman::inference::is_available(&settings));
+    let started = std::time::Instant::now();
+    // A provider that accepts the connection and never answers returns only once
+    // a ceiling ends the call, so this real-service step carries a failure
+    // ceiling of its own. It sits above any ceiling a scenario asserts: what
+    // fails here is a call carrying no ceiling at all, and a call whose ceiling a
+    // scenario judges is left for that scenario to judge.
+    let available = support::within_budget(
+        "the configured inference provider",
+        std::time::Duration::from_secs(45),
+        move || tinman::inference::is_available(&settings),
+    );
+    world.availability_elapsed = Some(started.elapsed());
+    world.inference_available = Some(available);
 }
 
 #[then("inference is reported unavailable")]
 async fn inference_is_reported_unavailable(world: &mut TinmanWorld) {
     let available = world.inference_available.expect("availability was checked");
     assert!(!available, "inference was reported available");
+}
+
+#[then("the stalled endpoint received the request")]
+async fn the_stalled_endpoint_received_the_request(world: &mut TinmanWorld) {
+    let provider = world
+        .provider
+        .as_ref()
+        .expect("a local provider is running");
+    assert!(
+        provider.received_request(),
+        "the stalled endpoint received no request, so the report came from \
+         something other than a real call left unanswered"
+    );
+}
+
+#[then(expr = "inference is reported unavailable within {int} seconds")]
+async fn inference_is_reported_unavailable_within(world: &mut TinmanWorld, seconds: u64) {
+    let available = world.inference_available.expect("availability was checked");
+    let elapsed = world
+        .availability_elapsed
+        .expect("availability was checked");
+    assert!(!available, "inference was reported available");
+    assert!(
+        elapsed <= std::time::Duration::from_secs(seconds),
+        "inference was reported unavailable only after {:.1}s, over the {seconds}s \
+         the caller allows",
+        elapsed.as_secs_f64()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1837,12 +1899,19 @@ async fn the_driver_has_a_session_running_the_fixture(world: &mut TinmanWorld) {
 /// Start the driver and launch `command`, keeping the session it opened, so
 /// every step that needs a running session opens it the one way.
 ///
-/// A launch reply says the program started, not that it has drawn. Every
-/// program launched this way draws `READY` last, after the menu line closes its
-/// reverse-video run, so the session is gated on that observed signal before
+/// A launch reply says the program started, not that it has drawn. A program
+/// that draws `READY` draws it last, after the menu line closes its
+/// reverse-video run, so such a session is gated on that observed signal before
 /// any step reads the screen. Without the gate a step can read a half-drawn
 /// line whose reverse video has not been reset yet, which reads back as a menu
 /// with every item selected.
+///
+/// A program that draws nothing until it is typed at announces no such signal,
+/// so gating it on `READY` would wait out the driver's expectation deadline and
+/// then fail on a signal the program never promised. Its own assertion step
+/// carries the wait instead, on the output the program answers with. The PTY
+/// buffers input the program has not read yet, so keys typed before it reaches
+/// its read still reach it.
 async fn launch_driver_session(world: &mut TinmanWorld, command: &str) {
     world.driver = Some(support::DriverProcess::start());
     let id = next_id(world);
@@ -1856,18 +1925,37 @@ async fn launch_driver_session(world: &mut TinmanWorld, command: &str) {
         .as_str()
         .unwrap_or_else(|| panic!("the launch reply carries no session identifier: {reply}"))
         .to_string();
-    let gate_id = next_id(world);
-    let drawn = driver(world).request(rpc(
-        gate_id,
-        "expect",
-        serde_json::json!({"session": identifier, "text": "READY"}),
+    if command.contains("READY") {
+        let gate_id = next_id(world);
+        let drawn = driver(world).request(rpc(
+            gate_id,
+            "expect",
+            serde_json::json!({"session": identifier, "text": "READY"}),
+        ));
+        assert_eq!(
+            result(&drawn)["ok"],
+            serde_json::Value::Bool(true),
+            "the launched program never drew READY: {drawn}"
+        );
+    }
+    world.session_id = Some(identifier);
+    world.reply = Some(reply);
+}
+
+#[when(expr = "the test runner types {string}")]
+async fn the_test_runner_types(world: &mut TinmanWorld, text: String) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(
+        id,
+        "press",
+        serde_json::json!({"session": session, "key": text}),
     ));
     assert_eq!(
-        result(&drawn)["ok"],
+        result(&reply)["ok"],
         serde_json::Value::Bool(true),
-        "the launched program never drew READY: {drawn}"
+        "typing {text:?} failed: {reply}"
     );
-    world.session_id = Some(identifier);
     world.reply = Some(reply);
 }
 
@@ -1964,6 +2052,46 @@ fn failure_message(world: &TinmanWorld) -> String {
         .as_str()
         .unwrap_or_else(|| panic!("the reply carries no failure message: {reply}"))
         .to_string()
+}
+
+/// The session's current screen, as the driver reports it.
+fn session_screen(world: &mut TinmanWorld) -> String {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(id, "screen", serde_json::json!({"session": session})));
+    result(&reply)["screen"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the reply carries no screen: {reply}"))
+        .to_string()
+}
+
+#[then(expr = "the screen carries {string}")]
+async fn the_screen_carries(world: &mut TinmanWorld, text: String) {
+    let id = next_id(world);
+    let session = session(world);
+    // The driver's own expectation waits for the text toward a deadline, so this
+    // ends on the program's output rather than on a screen read at a guessed
+    // moment.
+    let reply = driver(world).request(rpc(
+        id,
+        "expect",
+        serde_json::json!({"session": session, "text": text}),
+    ));
+    assert_eq!(
+        result(&reply)["ok"],
+        serde_json::Value::Bool(true),
+        "the screen never carried {text:?}: {reply}"
+    );
+}
+
+#[then(expr = "the screen does not carry {string}")]
+async fn the_screen_does_not_carry(world: &mut TinmanWorld, text: String) {
+    let screen = session_screen(world);
+    assert!(
+        !screen.contains(&text),
+        "the screen carries {text:?}, so what the driver typed is on it beside \
+         what the program drew:\n{screen}"
+    );
 }
 
 /// The root region of the terminal object model of the session's current
@@ -4311,8 +4439,20 @@ async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld)
         .as_ref()
         .expect("a captured virtual screen")
         .clone();
-    let inferred = tinman::inference::tom_completion(&settings, &screen.contents())
-        .expect("the configured engine answered with a model");
+    let contents = screen.contents();
+    let started = std::time::Instant::now();
+    let inferred = support::within_budget(
+        "the configured inference engine",
+        std::time::Duration::from_secs(120),
+        move || tinman::inference::tom_completion(&settings, &contents),
+    );
+    let elapsed = started.elapsed();
+    let inferred = inferred.unwrap_or_else(|| {
+        panic!(
+            "the configured engine answered with no model, after {:.1}s",
+            elapsed.as_secs_f64()
+        )
+    });
     let value: serde_json::Value = serde_json::from_str(&inferred)
         .unwrap_or_else(|e| panic!("the engine's model is not JSON: {e}\nit reads:\n{inferred}"));
     world.serialized = Some(value);
@@ -4321,15 +4461,25 @@ async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld)
 #[when("an acronym expansion is generated by the configured engine")]
 async fn an_acronym_expansion_is_generated(world: &mut TinmanWorld) {
     let settings = configured_settings();
-    world.provider_reply = tinman::inference::expansion(&settings);
+    let started = std::time::Instant::now();
+    world.provider_reply = support::within_budget(
+        "the configured inference engine",
+        std::time::Duration::from_secs(120),
+        move || tinman::inference::expansion(&settings),
+    );
+    world.provider_elapsed = Some(started.elapsed());
 }
 
 #[then("a non-empty expansion is produced")]
 async fn a_non_empty_expansion_is_produced(world: &mut TinmanWorld) {
+    let elapsed = world
+        .provider_elapsed
+        .map(|e| format!("{:.1}s", e.as_secs_f64()))
+        .unwrap_or_else(|| "an unrecorded time".to_string());
     let expansion = world
         .provider_reply
         .as_ref()
-        .expect("the configured engine generated an expansion");
+        .unwrap_or_else(|| panic!("the configured engine generated no expansion, after {elapsed}"));
     assert!(
         !expansion.trim().is_empty(),
         "the configured engine generated an empty expansion"
@@ -4510,14 +4660,19 @@ async fn no_rule_reports_a_match(world: &mut TinmanWorld) {
 }
 
 #[then(
-    "the rule set carries at least the plank-form, perturbation-quiescence and forbidden-doubles rules"
+    "the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules"
 )]
 async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
     let carried = support::conformance_rule_ids();
-    let missing: Vec<&str> = ["plank-form", "perturbation-quiescence", "forbidden-doubles"]
-        .into_iter()
-        .filter(|named| !carried.iter().any(|id| id == named))
-        .collect();
+    let missing: Vec<&str> = [
+        "plank-form",
+        "plank-presence",
+        "perturbation-quiescence",
+        "forbidden-doubles",
+    ]
+    .into_iter()
+    .filter(|named| !carried.iter().any(|id| id == named))
+    .collect();
     assert!(
         missing.is_empty(),
         "the rule set is missing {} named rule(s): {} (it carries {})",
@@ -4578,6 +4733,71 @@ async fn the_plank_inventory_is_not_empty(world: &mut TinmanWorld) {
     assert!(
         !planks.is_empty(),
         "the plank inventory reports no plank, so the join asserted nothing"
+    );
+}
+
+#[given("the provisional plank references and the scenarios in the specs")]
+async fn the_provisional_planks_and_the_scenarios(world: &mut TinmanWorld) {
+    world.provisional_planks = Some(support::provisional_plank_inventory());
+    world.spec_scenarios = Some(support::spec_scenarios());
+}
+
+#[when(expr = "each reference is matched against the scenarios the specs still tag {string}")]
+async fn each_provisional_reference_is_matched(world: &mut TinmanWorld, tag: String) {
+    let inventory = world
+        .provisional_planks
+        .as_ref()
+        .expect("the provisional plank inventory was read");
+    let scenarios = world
+        .spec_scenarios
+        .as_ref()
+        .expect("the scenarios were read");
+    let awaiting: Vec<String> = scenarios
+        .iter()
+        .filter(|scenario| scenario.carries_tag(&tag))
+        .map(|scenario| scenario.reference())
+        .collect();
+    world.spent_provisional_planks = Some(
+        inventory
+            .provisional
+            .iter()
+            .filter(|plank| !awaiting.contains(&plank.reference))
+            .map(|plank| {
+                format!(
+                    "{}:{} names {:?}, which no scenario still tagged {tag} declares",
+                    plank.file, plank.line, plank.reference
+                )
+            })
+            .collect(),
+    );
+}
+
+#[then(expr = "every provisional plank names a scenario still tagged {string}")]
+async fn every_provisional_plank_awaits_review(world: &mut TinmanWorld, tag: String) {
+    let spent = world
+        .spent_provisional_planks
+        .as_ref()
+        .expect("each reference was matched");
+    assert!(
+        spent.is_empty(),
+        "{} provisional plank(s) name no scenario still tagged {tag}, so a seam \
+         Captain has already disposed of still reads as covered:\n{}",
+        spent.len(),
+        spent.join("\n")
+    );
+}
+
+#[then("the inventory the provisional planks were read from is not empty")]
+async fn the_provisional_inventory_is_not_empty(world: &mut TinmanWorld) {
+    let inventory = world
+        .provisional_planks
+        .as_ref()
+        .expect("the provisional plank inventory was read");
+    assert!(
+        inventory.annotations > 0,
+        "the plank inventory reports no annotation at all, so the provisional set \
+         is empty because nothing was read rather than because no provisional \
+         plank stands"
     );
 }
 
@@ -4687,6 +4907,111 @@ async fn no_scenario_name_carries_a_metacharacter(world: &mut TinmanWorld) {
         "{} scenario name(s) carry a regex metacharacter, which the focused command would pass unescaped:\n{}",
         carrying.len(),
         carrying.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the tier ceilings the rigging declares
+// ---------------------------------------------------------------------------
+
+#[given(expr = "the tier budgets in {string} and the weather record")]
+async fn the_tier_budgets_and_the_weather_record(world: &mut TinmanWorld, rigging: String) {
+    world.tier_budgets = Some(support::tier_budgets(&rigging));
+    world.recorded_sweeps = Some(support::recorded_sweeps(&rigging));
+    world.rigging_path = Some(rigging);
+}
+
+#[when("the most recent recorded sweep for each tier is read against that tier's budget")]
+async fn the_most_recent_sweep_of_each_tier_is_read_against_its_budget(world: &mut TinmanWorld) {
+    let budgets = world
+        .tier_budgets
+        .as_ref()
+        .expect("the tier budgets were read");
+    let sweeps = world
+        .recorded_sweeps
+        .as_ref()
+        .expect("the weather record was read");
+    world.over_budget_sweeps = Some(
+        budgets
+            .iter()
+            .filter_map(|budget| {
+                // The record is append-only, so the last entry naming a tier is
+                // that tier's most recent sweep. A tier the record never named
+                // carries no observation to judge, and the producer assertion is
+                // the floor that keeps a silent tier honest.
+                let sweep = sweeps
+                    .iter()
+                    .rev()
+                    .find(|sweep| sweep.tier == budget.tier)?;
+                let ceiling = budget.ceiling.as_millis();
+                (u128::from(sweep.ms) > ceiling).then(|| {
+                    format!(
+                        "the most recent {} sweep took {}ms, over the {}ms {} allows",
+                        sweep.tier, sweep.ms, ceiling, budget.key
+                    )
+                })
+            })
+            .collect(),
+    );
+}
+
+#[then("no tier's most recent sweep exceeds its budget")]
+async fn no_tiers_most_recent_sweep_exceeds_its_budget(world: &mut TinmanWorld) {
+    let over = world
+        .over_budget_sweeps
+        .as_ref()
+        .expect("the most recent sweeps were read against their budgets");
+    assert!(
+        over.is_empty(),
+        "{} tier(s) outran the ceiling they declare on their most recent sweep:\n{}",
+        over.len(),
+        over.join("\n")
+    );
+}
+
+#[then("every tier declaring a budget has a sweep command that records its wall clock")]
+async fn every_budgeted_tier_records_its_wall_clock(world: &mut TinmanWorld) {
+    let budgets = world
+        .tier_budgets
+        .as_ref()
+        .expect("the tier budgets were read");
+    let rigging = world
+        .rigging_path
+        .as_ref()
+        .expect("the rigging was named")
+        .clone();
+    assert!(
+        !budgets.is_empty(),
+        "the rigging at {rigging} declares no tier budget, so this scenario would \
+         assert nothing"
+    );
+    let weather = support::weather_record_path(&rigging);
+    let silent: Vec<String> = budgets
+        .iter()
+        .filter(|budget| {
+            !budget
+                .sweep
+                .as_deref()
+                .is_some_and(|command| command.contains(&weather))
+        })
+        .map(|budget| match &budget.sweep {
+            None => format!(
+                "{} bounds the {} tier, which has no sweep command at all",
+                budget.key, budget.tier
+            ),
+            Some(command) => format!(
+                "{} bounds the {} tier, whose sweep command records nothing to \
+                 {weather}: {command}",
+                budget.key, budget.tier
+            ),
+        })
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "{} budgeted tier(s) record no wall clock, so their ceiling could never be \
+         exceeded:\n{}",
+        silent.len(),
+        silent.join("\n")
     );
 }
 
