@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proof contract meta-schema",
+  "description": "The shape a proof contract must satisfy. A proof contract declares no JSON Schema dialect of its own because it is discharged by a bespoke checker in verification support rather than by a schema validator, so nothing validated its own shape. The checkers deserialize into typed structs: a missing required key fails loudly, but a key the struct defaults fails silently, and a misspelled optional key silently empties the constraint it names while the attestation stays green. Every branch below closes to additional properties so a misspelled key is rejected rather than ignored. This meta-schema guards the project's own method and is not published under a versioned URI.",
+  "oneOf": [
+    {
+      "title": "Reference boundary contract",
+      "description": "Constrains one module's source to reference, or never reference, named symbols.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$id", "title", "description", "module", "forbiddenReferences"],
+      "properties": {
+        "$id": { "type": "string", "format": "uri" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "forbiddenReferences": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "requiredReferences": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "title": "Argument vector policy contract",
+      "description": "Constrains the structure of a generated argument vector.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$id",
+        "title",
+        "description",
+        "requiredFlags",
+        "networkDenyRequiresFlag",
+        "homeSetenv",
+        "forbid",
+        "systemMountFlag"
+      ],
+      "properties": {
+        "$id": { "type": "string", "format": "uri" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "requiredFlags": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "networkDenyRequiresFlag": { "type": "string", "minLength": 1 },
+        "systemMountFlag": { "type": "string", "minLength": 1 },
+        "homeSetenv": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["flag", "name", "mustNotEqualOperatorHome"],
+          "properties": {
+            "flag": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 },
+            "mustNotEqualOperatorHome": { "type": "boolean" }
+          }
+        },
+        "forbid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operatorHomeAsBindSource",
+            "hostPathInheritance",
+            "writableSystemMounts"
+          ],
+          "properties": {
+            "operatorHomeAsBindSource": { "type": "boolean" },
+            "hostPathInheritance": { "type": "boolean" },
+            "writableSystemMounts": { "type": "boolean" }
+          }
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    }
+  ]
+}

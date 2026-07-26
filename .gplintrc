@@ -1,0 +1,40 @@
+{
+  "no-unnamed-features": "error",
+  "no-unnamed-scenarios": "error",
+  "no-empty-file": "error",
+  "no-files-without-scenarios": "error",
+  "no-scenario-outlines-without-examples": "error",
+  "no-examples-in-scenarios": "error",
+  "no-empty-background": "error",
+  "no-background-only-scenario": "error",
+  "no-dupe-feature-names": "error",
+  "no-dupe-scenario-names": [
+    "error",
+    "in-feature"
+  ],
+  "no-duplicate-tags": "error",
+  "no-partially-commented-tag-lines": "error",
+  "one-space-between-tags": "error",
+  "allowed-tags": [
+    "error",
+    {
+      "tags": [
+        "@logic",
+        "@sandbox",
+        "@inference",
+        "@contract",
+        "@conformance",
+        "@captain",
+        "@shipwright"
+      ]
+    }
+  ],
+  "keywords-in-logical-order": "error",
+  "use-and": "error",
+  "no-trailing-spaces": "error",
+  "no-multiple-empty-lines": "error",
+  "new-line-at-eof": [
+    "error",
+    "yes"
+  ]
+}

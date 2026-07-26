@@ -4,6 +4,7 @@
 - language: Rust
 - runtime: rustc stable, edition 2024
 - packageManager: cargo
+- packageManager: npm
 
 ## Directories
 - implementation: src
@@ -22,10 +23,10 @@
 - coverage: `CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 64`
 - coverage-sandbox: `CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 4`
 - coverage-inference: `CUCUMBER_FILTER_TAGS="@inference and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 2`
-- step-usage: none
+- step-usage: `ast-grep scan --inline-rules '{id: step-usage, language: rust, rule: {any: [{pattern: "#[given(expr = $P)]"}, {pattern: "#[when(expr = $P)]"}, {pattern: "#[then(expr = $P)]"}, {pattern: "#[given($P)]"}, {pattern: "#[when($P)]"}, {pattern: "#[then($P)]"}]}}' --json=compact tests`
 - plank-inventory: `ast-grep scan --inline-rules '{id: planks, language: rust, rule: {kind: line_comment, regex: "@planks"}}' --json=compact src`
 - typecheck: `cargo check --all-targets`
-- lint: `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+- lint: `npx --no-install gplint "features/**" && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 - conformance: `ast-grep scan`
 
 ## Perturbation
@@ -58,6 +59,7 @@
 - dependency: dotenvy
 - dependency: cargo-llvm-cov
 - dependency: ast-grep
+- dependency: gplint
 
 ## Outbound
 - outbound: crates.io

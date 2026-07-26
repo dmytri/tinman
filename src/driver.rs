@@ -76,6 +76,7 @@ struct Sessions {
 /// @planks("the Tinman driver is running")
 /// @planks("the test runner sends the request:")
 /// @planks("every exchanged message conforms to the {string} schema in {string}")
+/// @planks-provisional("features/driver-protocol.feature:the driver exits when its stdin closes")
 pub fn serve() {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -273,6 +274,8 @@ fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 /// @planks("the first item of the capture named {string} is {string}")
 /// @planks("the last item of the capture named {string} is {string}")
 /// @planks("the failure reports the capture reached its scroll limit")
+/// @planks-provisional("features/driver-protocol.feature:a call missing a required parameter is answered with an invalid-params error")
+/// @planks-provisional("features/driver-protocol.feature:a capture naming an unknown scope is answered with an invalid-params error")
 fn capture(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     let role = params["role"]
         .as_str()

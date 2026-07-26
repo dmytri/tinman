@@ -36,4 +36,15 @@ Feature: inference provider
   Scenario: the configured provider answers a completion request
     Given the inference credential is configured
     When the assistant request "reply with the single word READY" is sent
-    Then the provider's reply contains "READY"
+    Then a reply is parsed from the provider's response
+    And the parsed reply carries non-empty content
+
+  Scenario: a built request carries the configured credential as a bearer token
+    Given the environment sets "TINMAN_API_KEY" to "sk-or-v1-8f3c2a91"
+    When an inference request is built
+    Then the request carries the authorization header "Bearer sk-or-v1-8f3c2a91"
+
+  Scenario: a request built without a credential carries no authorization header
+    Given neither the environment nor a dotenv file sets "TINMAN_API_KEY"
+    When an inference request is built
+    Then the request carries no authorization header

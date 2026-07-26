@@ -13,7 +13,7 @@
     },
     "home": {
       "description": "How the sandbox home directory is provisioned.",
-      "enum": ["empty", "fixture"]
+      "enum": ["empty"]
     },
     "network": {
       "description": "Whether the sandboxed process may reach the network.",
@@ -34,7 +34,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["from"],
-            "properties": { "from": { "enum": ["fixture", "host"] } }
+            "properties": { "from": { "enum": ["host"] } }
           }
         ]
       }

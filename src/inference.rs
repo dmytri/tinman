@@ -204,6 +204,11 @@ pub fn assistant_request(settings: &Settings, question: &str) -> Request {
     request(settings, ASSISTANT_TEMPERATURE, prompt)
 }
 
+/// Build a request against the configured settings. The credential becomes a
+/// bearer token, absent when no credential is configured.
+///
+/// @planks-provisional("features/inference-provider.feature:a built request carries the configured credential as a bearer token")
+/// @planks-provisional("features/inference-provider.feature:a request built without a credential carries no authorization header")
 fn request(settings: &Settings, temperature: f64, prompt: String) -> Request {
     Request {
         base_url: settings.base_url.clone(),
