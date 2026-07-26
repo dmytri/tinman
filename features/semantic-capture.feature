@@ -4,11 +4,11 @@ Feature: semantic capture
   I want to collect every item in a scrolling pane
   So that I can read the whole conversation instead of one screenful
 
-  Rule: capture is mechanical at run time. The runtime scrolls the pane, collects its items, deduplicates them and returns structured data. Inference decides how a pane is captured; it never runs while a test does.
-
   Background:
     Given the Tinman driver has a session running the fixture terminal program
     And the fixture program shows a "log" holding 12 messages in a 9 line window
+
+  Rule: capture is mechanical at run time. The runtime scrolls the pane, collects its items, deduplicates them and returns structured data. Inference decides how a pane is captured; it never runs while a test does.
 
   Scenario: capturing every item collects past the visible window
     When the test runner captures every "article" in the "log" as "conversation"

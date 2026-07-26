@@ -2038,6 +2038,20 @@ async fn the_screen_contains_the_text(world: &mut TinmanWorld, text: String) {
     );
 }
 
+#[then(expr = "the screen shows a {string} named {string}")]
+async fn the_screen_shows_a_region(world: &mut TinmanWorld, role: String, name: String) {
+    let model = session_model(world);
+    let mut regions = Vec::new();
+    regions_playing(&model, &role, &mut regions);
+    let shown = regions
+        .iter()
+        .any(|region| region["name"].as_str() == Some(name.as_str()));
+    assert!(
+        shown,
+        "the screen shows no {role:?} named {name:?}; model:\n{model:#}"
+    );
+}
+
 #[given(expr = "the menu's selected item is {string}")]
 async fn the_menus_selected_item_is(world: &mut TinmanWorld, expected: String) {
     let model = session_model(world);

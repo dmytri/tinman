@@ -253,10 +253,50 @@ impl Drop for ScratchDir {
 /// positioning, waits for the operator, and redraws when driven, so a plan can
 /// address it by role and name through the same terminal object model any other
 /// program reaches.
+///
+/// The program carries a real menu: it holds which item the selection sits on,
+/// redraws the menu bar with that item in reverse video, and opens what the
+/// selection lands on. Opening `Settings` draws a `Save` button the first frame
+/// does not show, so an assertion naming that button tells an opened pane from
+/// an unopened one. The labelled input stays on the first frame, because the
+/// failure-report scenarios in `features/replay.feature` and
+/// `features/test-command.feature` assert on that text.
+///
+/// A driver activation arrives here as one line: the directional key, with the
+/// confirming carriage return ending it. So a directional line moves the
+/// selection one item and opens what it reaches, which is the gesture the
+/// driver sends. A selection driven past either end stays on the end item, so a
+/// program driven towards an item it cannot reach opens something the naming
+/// assertion does not match rather than pretending to arrive.
 const FIXTURE_TUI: &str = "\
 #!/bin/sh
+sel=0
+
+menu() {
+  case $sel in
+    0) printf '\\033[1;1H  \\033[7mFiles\\033[0m   Settings   Quit  ' ;;
+    1) printf '\\033[1;1H  Files   \\033[7mSettings\\033[0m   Quit  ' ;;
+    2) printf '\\033[1;1H  Files   Settings   \\033[7mQuit\\033[0m  ' ;;
+  esac
+}
+
+open_pane() {
+  case $sel in
+    1) printf '\\033[11;1H[Save]' ;;
+    *) printf '\\033[11;1H\\033[K' ;;
+  esac
+}
+
+opened() {
+  case $sel in
+    0) printf '\\033[24;1H\\033[KOPEN:Files' ;;
+    1) printf '\\033[24;1H\\033[KOPEN:Settings' ;;
+    2) printf '\\033[24;1H\\033[KOPEN:Quit' ;;
+  esac
+}
+
 printf '\\033[2J'
-printf '\\033[1;1H  \\033[7mFiles\\033[0m   Settings   Quit  '
+menu
 printf '\\033[3;1H\u{250c}Files\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
 printf '\\033[4;1H\u{2502}src            \u{2502}'
 printf '\\033[5;1H\u{2502}tests          \u{2502}'
@@ -268,11 +308,28 @@ cols=`stty size | cut -d' ' -f2`
 printf '\\033[23;1HWIDTH:%s' \"${cols:-80}\"
 printf '\\033[24;1HREADY'
 while read -r key; do
-  if [ \"$key\" = q ]; then
-    printf '\\033[24;1H\\033[KQuit?'
-  else
-    printf '\\033[24;1H\\033[KSaved'
-  fi
+  case \"$key\" in
+    *'[C')
+      sel=$((sel + 1))
+      if [ \"$sel\" -gt 2 ]; then sel=2; fi
+      menu
+      open_pane
+      opened
+      ;;
+    *'[D')
+      sel=$((sel - 1))
+      if [ \"$sel\" -lt 0 ]; then sel=0; fi
+      menu
+      open_pane
+      opened
+      ;;
+    q)
+      printf '\\033[24;1H\\033[KQuit?'
+      ;;
+    *)
+      printf '\\033[24;1H\\033[KSaved'
+      ;;
+  esac
 done
 ";
 

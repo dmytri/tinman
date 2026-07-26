@@ -4,23 +4,25 @@ Feature: driver session
   I want the same semantic verbs a browser driver offers
   So that a terminal test reads like the interaction a person would perform
 
-  Rule: a terminal has no pointer. Where a browser driver clicks a coordinate, a terminal driver reaches its target the way a person does, by moving the selection and confirming it.
-
   Background:
     Given the Tinman driver has a session running the fixture terminal program
+
+  Rule: a terminal has no pointer. Where a browser driver clicks a coordinate, a terminal driver reaches its target the way a person does, by moving the selection and confirming it.
 
   Scenario: a launched program is sandboxed by default
     When the test runner requests the session's sandbox backend
     Then the reported backend is "bubblewrap"
 
+  Rule: what activation opened must be something the screen did not already show. The fixture draws its labelled input from the first frame, because the failure-report scenarios in `features/replay.feature` and `features/test-command.feature` assert on that text, so a `Then` naming it cannot tell an opened pane from an unopened one. These scenarios name the `Save` button instead, which `assets/examples/settings-flow.yaml` places inside Settings.
+
   Scenario: activating a menu item opens what it names
     When the test runner activates the "menuitem" named "Settings"
-    Then the screen contains the text "Username"
+    Then the screen shows a "button" named "Save"
 
   Scenario: activation reaches an item the selection is not already on
     Given the menu's selected item is "Files"
     When the test runner activates the "menuitem" named "Settings"
-    Then the screen contains the text "Username"
+    Then the screen shows a "button" named "Save"
 
   Scenario: activation leaves the selection on the item it named
     Given the menu's selected item is "Files"
