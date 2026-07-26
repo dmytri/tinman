@@ -284,7 +284,7 @@ pub fn build(screen: &VirtualScreen) -> Model {
         children.push(plain_region(grid, 0, column, rows));
         children.push(plain_region(grid, column + 1, cols - column - 1, rows));
     }
-    if let Some(menu) = menu_bar(grid, cols) {
+    if let Some(menu) = menu_bar(grid, cols, screen) {
         children.push(menu);
     }
     children.extend(controls(grid));
@@ -529,12 +529,14 @@ fn status_bar(grid: &[Vec<String>], rows: u16, cols: u16) -> Option<Region> {
 }
 
 /// The top line of `grid` read as a menu bar, each label it carries a menu
-/// item. A line drawing a border is a pane's edge rather than a menu, and a
-/// line carrying one label is a heading rather than a bar of items.
+/// item, the reversed label being the selected one. A line drawing a border is
+/// a pane's edge rather than a menu, and a line carrying one label is a
+/// heading rather than a bar of items.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the second {string} of that region is named {string}")
-fn menu_bar(grid: &[Vec<String>], cols: u16) -> Option<Region> {
+/// @planks("the menu's selected item is {string}")
+fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<Region> {
     let row = &grid[0];
     if draws_a_border(row) {
         return None;
@@ -552,11 +554,12 @@ fn menu_bar(grid: &[Vec<String>], cols: u16) -> Option<Region> {
                 width,
                 height: 1,
             };
+            let selected = (x..x + width).any(|col| screen.reverse(1, col + 1));
             Region {
                 role: Role::Menuitem,
                 name: Some(text.clone()),
                 text: Some(text),
-                selected: false,
+                selected,
                 rect: item,
                 children: Vec::new(),
                 cells: cells_of(grid, item),

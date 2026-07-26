@@ -85,6 +85,25 @@ pub struct Mount {
     pub mode: MountMode,
 }
 
+/// Where a sandboxed environment variable's value comes from.
+///
+/// @planks("a process is prepared and launched")
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvOrigin {
+    Host,
+}
+
+/// A named environment variable the plan grants the sandboxed process, and
+/// where its value comes from. A variable the plan never names never reaches
+/// the target, however the operator's own environment carries it.
+///
+/// @planks("a process is prepared and launched")
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EnvGrant {
+    pub from: EnvOrigin,
+}
+
 impl Backend {
     /// Parse a backend name from the harness or CLI.
     ///
@@ -107,6 +126,7 @@ impl Backend {
 /// @planks("the parsed sandbox specification names no Bubblewrap flag")
 /// @planks("the parsed sandbox specification denies network access")
 /// @planks("the parsed sandbox specification provisions an empty home")
+/// @planks("a process is prepared and launched")
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SandboxSpec {
@@ -114,6 +134,8 @@ pub struct SandboxSpec {
     pub home: Home,
     pub network: Network,
     pub mounts: Vec<Mount>,
+    pub env: std::collections::BTreeMap<String, EnvGrant>,
+    pub path: Vec<String>,
 }
 
 impl SandboxSpec {
@@ -128,6 +150,8 @@ impl SandboxSpec {
             home: Home::Empty,
             network: Network::Deny,
             mounts: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            path: Vec::new(),
         }
     }
 }

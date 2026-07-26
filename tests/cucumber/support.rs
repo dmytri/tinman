@@ -256,19 +256,24 @@ impl Drop for ScratchDir {
 const FIXTURE_TUI: &str = "\
 #!/bin/sh
 printf '\\033[2J'
-printf '\\033[1;1H  Files   Settings   Quit  '
+printf '\\033[1;1H  \\033[7mFiles\\033[0m   Settings   Quit  '
 printf '\\033[3;1H\u{250c}Files\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
 printf '\\033[4;1H\u{2502}src            \u{2502}'
 printf '\\033[5;1H\u{2502}tests          \u{2502}'
 printf '\\033[6;1H\u{2502}README         \u{2502}'
 printf '\\033[7;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}'
 printf '\\033[9;1HUsername: ________'
-cols=`stty size 2>/dev/null | cut -d' ' -f2`
+printf '\\033[22;1HHOME:%s' \"$HOME\"
+cols=`stty size | cut -d' ' -f2`
 printf '\\033[23;1HWIDTH:%s' \"${cols:-80}\"
 printf '\\033[24;1HREADY'
-read -r _key
-printf '\\033[24;1H\\033[KSaved'
-read -r _key
+while read -r key; do
+  if [ \"$key\" = q ]; then
+    printf '\\033[24;1H\\033[KQuit?'
+  else
+    printf '\\033[24;1H\\033[KSaved'
+  fi
+done
 ";
 
 /// A fixture terminal program that draws a different pane title on each draw,
@@ -289,6 +294,57 @@ printf '\\033[5;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{250
 printf '\\033[24;1HREADY'
 read -r _key
 ";
+
+/// A fixture terminal program whose selection never moves: it draws the same
+/// menu bar with "Files" selected and redraws on every key without ever
+/// shifting the highlight, so a selection sent towards another item never
+/// arrives. Real inertness, not a simulated failure.
+const FIXTURE_TUI_NO_ARROWS: &str = "\
+#!/bin/sh
+printf '\\033[2J'
+printf '\\033[1;1H  \\033[7mFiles\\033[0m   Settings   Quit  '
+printf '\\033[9;1HUsername: ________'
+printf '\\033[24;1HREADY'
+while read -r _key; do
+  printf '\\033[24;1H\\033[KREADY'
+done
+";
+
+/// Stage the fixture terminal program inside `workspace` and answer the
+/// relative name it is reachable by. A recorded plan replays inside a sandbox
+/// binding the workspace, so a program named there is reachable at replay time,
+/// as an operator's own program in their project is. A program in a temporary
+/// directory the sandbox does not bind is not.
+pub fn stage_fixture_in(workspace: &std::path::Path) -> String {
+    let program = workspace.join("fixture-tui");
+    std::fs::write(&program, FIXTURE_TUI)
+        .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
+    set_executable(&program);
+    "./fixture-tui".to_string()
+}
+
+/// The source of the fixture terminal program that ignores directional keys.
+pub fn fixture_ignoring_directional_keys_source() -> &'static str {
+    FIXTURE_TUI_NO_ARROWS
+}
+
+/// The source of a fixture terminal program drawing two buttons that carry the
+/// same name, on separate rows, so a locator naming that button matches both.
+/// The terminal object model reads one bracketed label per row as a button.
+pub fn fixture_with_two_buttons_source(name: &str) -> String {
+    format!(
+        "\
+#!/bin/sh
+printf '\\033[2J'
+printf '\\033[3;1H[{name}]'
+printf '\\033[5;1H[{name}]'
+printf '\\033[24;1HREADY'
+while read -r _key; do
+  printf '\\033[24;1H\\033[KREADY'
+done
+"
+    )
+}
 
 /// Where the shared fixture programs for this run live, provisioned once.
 static FIXTURE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
@@ -313,6 +369,14 @@ pub fn fixture_terminal_program() -> std::path::PathBuf {
         set_executable(&program);
     }
     program
+}
+
+/// The fixture terminal program's own source. A driver session runs its command
+/// inside a sandbox binding the system directories and the session home, so a
+/// program written to a temporary directory is not there to run; the shell the
+/// session launches reads the program on its command line instead.
+pub fn fixture_terminal_source() -> &'static str {
+    FIXTURE_TUI
 }
 
 /// The path of the fixture terminal program whose pane titles change between
@@ -364,6 +428,164 @@ fn set_executable(path: &std::path::Path) {
             path.display()
         )
     });
+}
+
+/// The inner width of the scrolling log panes the capture fixtures draw.
+const LOG_PANE_WIDTH: usize = 30;
+
+/// The shell function every scrolling log fixture waits on. It blocks for the
+/// first byte, then drains whatever else arrived within a tenth of a second, so
+/// one input advances the window exactly once whether the runtime scrolls with
+/// a single character or with a multi-byte escape sequence. A read yielding
+/// nothing is the terminal closing and a read yielding the end-of-transmission
+/// character is the session ending; both end the program, so a closed session
+/// reclaims rather than waits.
+///
+/// Output the screen must not carry is captured into a shell variable rather
+/// than redirected away. The sandbox a driver session runs under mounts the
+/// system directories and the session home, so it has no `/dev` and therefore
+/// no `/dev/null`: a redirect to it fails, and the command it was meant to
+/// quieten never runs at all. Command substitution needs no device.
+const SCROLL_READER: &str = "\
+scroll() {
+  scroll_stty=`stty raw -echo min 1 time 0 2>&1`
+  scroll_bytes=`dd bs=1 count=1 status=none | tr -d '\\004' | wc -c | tr -d ' '`
+  scroll_stty=`stty min 0 time 1 2>&1`
+  scroll_drained=`dd bs=64 count=1 status=none`
+  [ \"$scroll_bytes\" -gt 0 ]
+}
+";
+
+/// The shell commands that draw one window of a log pane: a bordered pane
+/// titled `title` whose `window` inner lines carry `messages` separated by
+/// blank lines, which is what the terminal object model reads as a log of
+/// articles. A window holding fewer messages than it has room for leaves the
+/// remaining lines blank.
+fn draw_log_window(title: &str, messages: &[String], window: usize) -> String {
+    let mut out = String::from("printf '\\033[2J'\n");
+    let title_rule = "\u{2500}".repeat(LOG_PANE_WIDTH.saturating_sub(title.chars().count()));
+    out.push_str(&format!(
+        "printf '\\033[1;1H\u{250c}{title}{title_rule}\u{2510}'\n"
+    ));
+    for line in 0..window {
+        let text = if line.is_multiple_of(2) {
+            messages.get(line / 2).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let pad = " ".repeat(LOG_PANE_WIDTH.saturating_sub(text.chars().count()));
+        out.push_str(&format!(
+            "printf '\\033[{};1H\u{2502}{text}{pad}\u{2502}'\n",
+            line + 2
+        ));
+    }
+    let rule = "\u{2500}".repeat(LOG_PANE_WIDTH);
+    out.push_str(&format!(
+        "printf '\\033[{};1H\u{2514}{rule}\u{2518}'\n",
+        window + 2
+    ));
+    out
+}
+
+/// How many messages a window of `window` inner lines shows, given each message
+/// is separated from the next by one blank line.
+fn messages_per_window(window: usize) -> usize {
+    window.div_ceil(2)
+}
+
+/// A real full-screen program drawing a scrolling log pane, written from the
+/// windows it shows in order. Each scroll advances to the next window; once the
+/// last window is reached the program redraws it for every later scroll, so a
+/// runtime collecting items sees nothing new and stops.
+fn log_fixture_script(title: &str, windows: &[Vec<String>], window: usize) -> String {
+    let mut script = format!("#!/bin/sh\n{SCROLL_READER}");
+    let (last, leading) = windows.split_last().expect("the fixture shows a window");
+    for messages in leading {
+        script.push_str(&draw_log_window(title, messages, window));
+        script.push_str("scroll || exit 0\n");
+    }
+    script.push_str("while :; do\n");
+    script.push_str(&draw_log_window(title, last, window));
+    script.push_str("scroll || exit 0\ndone\n");
+    script
+}
+
+/// The windows a log of `count` messages shows, `step` messages further on at
+/// each scroll position, with each window holding as many messages as the
+/// window has room for. A step smaller than the window's capacity repeats the
+/// tail of the previous window at the head of the next.
+fn log_windows(count: usize, window: usize, step: usize) -> Vec<Vec<String>> {
+    let per_window = messages_per_window(window);
+    let mut windows = Vec::new();
+    let mut start = 1;
+    while start <= count {
+        windows.push(
+            (start..=count.min(start + per_window - 1))
+                .map(|n| format!("message {n}"))
+                .collect(),
+        );
+        start += step;
+    }
+    windows
+}
+
+/// A scrolling log fixture whose windows follow one another with no message
+/// shown twice: a program holding `count` messages, showing them through a
+/// pane titled `title` whose window is `window` lines.
+///
+/// The fixture is the program's own source rather than a path to it. A driver
+/// session runs its command inside a sandbox binding the system directories and
+/// the session home, and nothing else, so a program written to a temporary
+/// directory is not there to run. The shell the session already launches reads
+/// the program on its command line, and every tool these fixtures use lives in
+/// `/bin`, which the sandbox binds.
+pub fn log_fixture_program(title: &str, count: usize, window: usize) -> String {
+    let per_window = messages_per_window(window);
+    log_fixture_script(title, &log_windows(count, window, per_window), window)
+}
+
+/// A scrolling log fixture that shows the last `repeat` messages of each window
+/// again at the head of the next, so collecting every item reaches the same
+/// message at more than one scroll position.
+pub fn repeating_log_fixture_program(
+    title: &str,
+    count: usize,
+    window: usize,
+    repeat: usize,
+) -> String {
+    let step = messages_per_window(window) - repeat;
+    log_fixture_script(title, &log_windows(count, window, step), window)
+}
+
+/// A scrolling log fixture that never reaches an end: every scroll draws a
+/// window of messages none of the earlier windows carried, so a runtime
+/// collecting every item scrolls until its own limit stops it.
+pub fn endless_log_fixture_program(title: &str, window: usize) -> String {
+    let per_window = messages_per_window(window);
+    let title_rule = "\u{2500}".repeat(LOG_PANE_WIDTH.saturating_sub(title.chars().count()));
+    let rule = "\u{2500}".repeat(LOG_PANE_WIDTH);
+    let script = format!(
+        "#!/bin/sh\n{SCROLL_READER}n=0\n\
+while :; do\n\
+  printf '\\033[2J'\n\
+  printf '\\033[1;1H\u{250c}{title}{title_rule}\u{2510}'\n\
+  r=2\n\
+  i=1\n\
+  while [ $i -le {per_window} ]; do\n\
+    printf '\\033[%d;1H\u{2502}%-{LOG_PANE_WIDTH}s\u{2502}' \"$r\" \"message $((n+i))\"\n\
+    r=$((r+1))\n\
+    if [ $i -lt {per_window} ]; then\n\
+      printf '\\033[%d;1H\u{2502}%-{LOG_PANE_WIDTH}s\u{2502}' \"$r\" \"\"\n\
+      r=$((r+1))\n\
+    fi\n\
+    i=$((i+1))\n\
+  done\n\
+  printf '\\033[%d;1H\u{2514}{rule}\u{2518}' \"$r\"\n\
+  n=$((n+{per_window}))\n\
+  scroll || exit 0\n\
+done\n"
+    );
+    script
 }
 
 /// What the local provider answers a chat-completions request with.
@@ -613,6 +835,7 @@ impl DriverProcess {
     pub fn start() -> DriverProcess {
         use std::io::{BufRead, BufReader};
 
+        SESSIONS_RECLAIMED.call_once(reclaim_stale_session_dirs);
         let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tinman"))
             .arg("driver")
             .stdin(std::process::Stdio::piped())
@@ -673,6 +896,34 @@ impl Drop for DriverProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// Whether this run has already reclaimed the session homes earlier runs left.
+static SESSIONS_RECLAIMED: std::sync::Once = std::sync::Once::new();
+
+/// Remove the sandbox home directories driver sessions of earlier runs left
+/// behind. A scenario that never closes its session, and a run that is killed,
+/// both leave one standing, so the reclaim at first driver start is the net
+/// that keeps them from accumulating. A directory whose driver is still alive
+/// is left alone.
+fn reclaim_stale_session_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix("tinman-sess-") else {
+            continue;
+        };
+        let Some((pid, _)) = rest.split_once('-') else {
+            continue;
+        };
+        if std::path::Path::new("/proc").join(pid).exists() {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
     }
 }
 

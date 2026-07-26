@@ -5,7 +5,7 @@
 
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
 use crate::process::PreparedProcess;
-use crate::pty::{InteractiveCapture, capture_interactive};
+use crate::pty::{InteractiveCapture, capture_interactive_in};
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
 use crate::tom::{Binding, Model, Region, build, confirm};
@@ -183,6 +183,7 @@ impl Default for RecordingSession {
 /// @planks("the operator records that program")
 /// @planks("the written plan names the command {string}")
 /// @planks("the written plan records a key press {string}")
+/// @planks("the written plan carries an expectation on the text {string}")
 /// @planks("the plan is written to {string}")
 /// @planks("recording fails and reports the file already exists")
 pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> Result<(), String> {
@@ -191,13 +192,17 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
         return Err(format!("{} already exists", path.display()));
     }
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
-    let mut capture = capture_interactive(&PreparedProcess {
-        program: "/bin/sh".to_string(),
-        args: vec!["-c".to_string(), command_line(command)],
-        env: Vec::new(),
-        cleanup: Vec::new(),
-    })?;
-    let opening = opening_screen(&mut capture);
+    let mut capture = capture_interactive_in(
+        &PreparedProcess {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), command_line(command)],
+            env: Vec::new(),
+            cleanup: Vec::new(),
+        },
+        None,
+        Some(workspace),
+    )?;
+    let (opening, opening_view) = opening_screen(&mut capture);
     let mut session = RecordingSession::for_command(command.clone());
 
     let mut keys = std::io::stdin();
@@ -216,22 +221,30 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
     crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
 
     capture.end_session();
-    let closing = build(&capture.screen());
+    let final_screen = capture.screen();
+    let closing = build(&final_screen);
     if let Some(name) = renamed_region(&opening, &closing) {
         return Err(format!(
             "the plan did not replay: the region named {name:?} the recording addresses is not on the screen the session ended on"
         ));
     }
 
+    let mut steps = Vec::new();
+    let expectation_text = screen_text(&opening_view);
+    if !expectation_text.is_empty() {
+        steps.push(Action::Expect(Expectation {
+            text: expectation_text,
+            within: None,
+            locator: None,
+        }));
+    }
+    steps.extend(session.recorded_keys().into_iter().map(Action::Press));
+
     let plan = Plan {
         sandbox: SandboxSpec::default_for_record(),
         flow: vec![FlowStep::Tui(TuiProcess {
             command: command_line(command),
-            steps: session
-                .recorded_keys()
-                .into_iter()
-                .map(Action::Press)
-                .collect(),
+            steps,
         })],
     };
     let written = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
@@ -305,18 +318,47 @@ fn key_name(byte: u8) -> String {
 }
 
 /// The model of the screen the recorded program opens on, taken the moment it
-/// carries a region or the program finishes.
+/// carries a region or the program finishes, together with the raw screen that
+/// model was read from.
 ///
 /// @planks("the operator records the fixture terminal program")
-fn opening_screen(capture: &mut InteractiveCapture) -> Model {
+/// @planks("the written plan carries an expectation on the text {string}")
+fn opening_screen(capture: &mut InteractiveCapture) -> (Model, VirtualScreen) {
     let deadline = Instant::now() + DRAW_DEADLINE;
     loop {
-        let model = build(&capture.screen());
-        if !model.root.children.is_empty() || capture.finished() || Instant::now() >= deadline {
-            return model;
+        let screen = capture.screen();
+        let model = build(&screen);
+        if !model.root.children.is_empty() || Instant::now() >= deadline {
+            return (model, screen);
+        }
+        if capture.finished() {
+            // The program has exited, but the background reader may not yet
+            // have drained its last output into the screen: give it one more
+            // moment before taking the screen as it stands.
+            std::thread::sleep(Duration::from_millis(20));
+            let screen = capture.screen();
+            let model = build(&screen);
+            return (model, screen);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// The text of the line the opening screen carried, trimmed, read from the
+/// bottom so a screen whose content sits above blank rows still yields it.
+/// Recording this line as the plan's first expectation proves the locator
+/// while the operator is still present, rather than leaving that proof to
+/// whoever replays the plan after they are gone.
+///
+/// @planks("the written plan carries an expectation on the text {string}")
+fn screen_text(screen: &VirtualScreen) -> String {
+    screen
+        .rows()
+        .iter()
+        .rev()
+        .map(|row| row.concat().trim_end().to_string())
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
 }
 
 /// The name the opening screen carried that the closing screen no longer

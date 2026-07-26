@@ -2,9 +2,10 @@
 //! workspace, so a later step sees what an earlier step wrote. The first step
 //! that fails stops the flow and names itself.
 
+use crate::bwrap::BubblewrapBackend;
 use crate::plan::{Action, FlowStep, Plan};
-use crate::process::PreparedProcess;
 use crate::pty::{InteractiveCapture, capture_interactive_at};
+use crate::sandbox::CommandSpec;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -44,15 +45,24 @@ pub struct FlowOutcome {
 /// @planks("that plan is replayed")
 /// @planks("replaying the written plan reproduces the recorded interaction")
 /// @planks("that plan is replayed at {int} columns")
+/// @planks("the fixture program reports a home directory other than the operator's home")
+/// @planks("the step reports a home directory other than the operator's home")
 pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<FlowOutcome, String> {
+    let backend = BubblewrapBackend::new();
     let mut steps = Vec::new();
     for step in &plan.flow {
         match step {
             FlowStep::Run(run) => {
-                let mut child = Command::new("sh")
-                    .arg("-c")
-                    .arg(&run.command)
-                    .current_dir(workspace)
+                let prepared = backend.prepare_with_home(
+                    &plan.sandbox,
+                    &CommandSpec {
+                        program: "/bin/sh".to_string(),
+                        args: vec!["-c".to_string(), run.command.clone()],
+                    },
+                    Some(workspace),
+                )?;
+                let mut child = Command::new(&prepared.program)
+                    .args(&prepared.args)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -75,15 +85,15 @@ pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<Fl
                 });
             }
             FlowStep::Tui(tui) => {
-                let mut session = capture_interactive_at(
-                    &PreparedProcess {
+                let prepared = backend.prepare_with_home(
+                    &plan.sandbox,
+                    &CommandSpec {
                         program: "/bin/sh".to_string(),
                         args: vec!["-c".to_string(), tui.command.clone()],
-                        env: Vec::new(),
-                        cleanup: Vec::new(),
                     },
-                    columns,
+                    Some(workspace),
                 )?;
+                let mut session = capture_interactive_at(&prepared, columns)?;
                 for action in &tui.steps {
                     match action {
                         Action::Expect(expectation) => {

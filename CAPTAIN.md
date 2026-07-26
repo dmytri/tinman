@@ -141,7 +141,43 @@ Watches for the terminal object model and locators, tom-inference, and record an
 
 **7. A launch that cannot execute its program is a failed launch.** Crew observed `/bin/sh: 1: /tmp/tinman-probe/p: not found`, because the bwrap vector binds `/bin`, `/lib` and `/lib64` only, while `launch` answered `ok:true` as soon as `/bin/sh` started. That is a vacuous pass: every later step then asserts against a blank screen and passes while doing it, which is the same false-green shape that let the perturbation discharge and that ruling 5 had to undo. A `Rule:` in `driver-protocol.feature` now states that a launch binds the system directories plus whatever the session's sandbox spec names and nothing more, that `home: fixture` in `scantlings/sandbox-spec.schema.json` is the provision for reaching a fixture, and that an unreachable program fails rather than yielding a session. A scenario pins it, and it rides the `@sandbox` sweep with the rest of that feature.
 
-**Interim custody dispatched at base `88da55d`.** The watchbill was not spent, so this departs from the usual trigger, and QM named custody as owed. Thirty-six verified green targets plus a full dependency refit had sat uncommitted across the whole voyage, and the exposure was no longer proportionate to waiting for a spent bill. The watchbill is now down to semantic capture and the three tier sweeps.
+**Interim custody landed: `190a7ee`, tree clean.** The watchbill was not spent, so this departed from the usual trigger, and QM named custody as owed. Thirty-six verified green targets plus a full dependency refit had sat uncommitted across the whole voyage, and the exposure was no longer proportionate to waiting for a spent bill. 49 files, +3863/-497. **The base commit is now `190a7ee`; `88da55d` is spent.**
+
+Boatswain ran the plank join rather than reading it, extracting 270 step-definition pattern literals and joining by exact string against the inventory: 291 of 291 planks match a current pattern, zero stale, zero malformed, no provisional. No custody foul, no regression. All 23 sweep failures are `Step doesn't match any function`, never an assertion, so the reds are unwritten steps rather than broken behaviour.
+
+**Three findings carried, none of them Captain's to decide:**
+
+1. Five orphaned step definitions in `tests/cucumber.rs`, including two left by ruling 5's rewrite, `an engine that labels that pane a {string}` and `an engine that labels that line a {string}`. QM's write scope; it has cleaned orphans before and re-derives them without help.
+2. `pub struct FrontMatter` and `pub struct Skill` in `src/skill.rs` carry no plank. Beyond the diff, so harbour.
+3. `step-usage` and `discover` still read `none`, so Boatswain discharged the join with a scratch script this voyage. That is not repeatable custody. Deriving a checker that extracts the `#[given]`, `#[when]` and `#[then]` pattern literals would make it a real project command. Shipwright work at the next harbour, and the strongest candidate there.
+
+## The default tier is fully green. 2026-07-26.
+
+`@logic`: 127 scenarios, 127 passed, exit 0, 31.7s at 64 workers against the 120s budget. Semantic capture spent green with it, and Crew implemented the `capture` seam in `src/driver.rs`. `@sandbox` stands at 8 of 26, every failure an undefined step rather than an assertion, so the remainder is QM authoring work with no blocker in front of it.
+
+QM fixed three verification-support defects that were each silently disarming the sandbox tier: fixtures unreachable inside the sandbox because `args_with_home` binds only `/bin`, `/lib`, `/lib64` and the session home; every `2>/dev/null` redirect failing because the sandbox has no `/dev`, which aborted the scroll reader after one window; and 44 leaked session homes under `/tmp`, now reclaimed at suite start.
+
+**8. Semantic capture is retagged `@sandbox`.** It carried no tag, so it sat in the default tier while its Background launched a real Bubblewrap driver session at 64 workers. The tier policy assigns that to `@sandbox`. This is the case the tier-placement note anticipated: retag the scenario, never weaken the tier policy. `@logic` drops to 122 and `@sandbox` rises to 31.
+
+**9. A stale green outside the watchbill, and the fix is at its root.** `a written plan replays the interaction it recorded` proved nothing: a real record run writes only `tui: {command, steps: [press: q]}`, so the plan carried no expectation and the step asserted only that `flow::execute` returned `Ok`. It would pass identically against an error screen.
+
+Strengthening the step would have treated the symptom. The defect is that a recorded plan carries nothing to verify, which contradicts this feature's own `Rule:` that a recording which cannot replay itself is a draft. `a recorded plan carries an expectation for what the screen showed` now pins the root, and the replay scenario becomes meaningful once plans carry expectations. Both ride watch1.
+
+That is the fourth false green this voyage: the discharged perturbation, the vacuous `menu` role, the vacuous launch, and now this. Every one passed while asserting nothing. The pattern worth carrying: when a scenario goes green early and cheaply, ask what it would take to make it red, and if nothing would, the scenario is the defect.
+
+## Voyage 2 is verified across all three tiers. 2026-07-26.
+
+Watchbill spent, every watch green: `@logic` 123 scenarios and 404 steps, `@sandbox` 31 scenarios and 120 steps, `@inference` 3 scenarios and 8 steps against the real provider. 336 planks all naming current patterns, `ast-grep` conformance clean, `fmt` and `clippy` clean, no `PERTURBATION` standing. QM authored 29 previously undefined steps and fixed four harness defects in its own scope, including a `pty::capture` that hung forever on a fixture whose read loop never exits.
+
+Custody dispatched at base `190a7ee` with the watchbill to be struck.
+
+**Deliberately deferred rather than folded into this voyage.** Both were live when the bill went spent, and taking custody of a fully green voyage first is worth more than closing them a cycle sooner.
+
+**A fifth false green, and the next voyage opens on it.** `features/driver-session.feature:activating a menu item opens what it names` asserts the screen contains `"Username"`, but the shared fixture draws `Username: ________` from its first frame and must, because `features/replay.feature:a failure report shows the screen the step saw` and `features/test-command.feature:the failure report names the step and shows the screen` both assert on that text. So the `Then` cannot distinguish activation having opened anything; only the `When` still carries weight. The scenario needs a `Then` naming something the fixture draws only after activation. Do not weaken the two scenarios that depend on the first-frame text; change this one.
+
+**`cwd` divergence, harbour.** `scantlings/prepared-process.schema.json` documents a `cwd` field that `PreparedProcess` does not carry; Crew threaded it as a parameter instead, because adding the field means touching struct literals in `tests/cucumber.rs`, which is QM's scope. The conformance scenario is green because the field is optional, so this is latent divergence rather than a live failure. `AGENTS.md` says the PTY runner accepts only a prepared process and never constructs backend arguments itself, which argues the field should land rather than the scantling drop it. Decide at harbour with a scenario to drive it.
+
+**Rigging contradiction worth recording once.** `focused` carries no tag exclusions because cucumber-rs forbids `--name` with `--tags`, established by running it. The Rigging read contract expects the exclusions on every derived command, so this stack cannot satisfy that clause on this one command. `AGENTS.md` already documents the constraint; the contract-level exception is what was missing, and it is recorded here now so a later role stops rediscovering it.
 
 ## Design decisions this voyage (user-confirmed)
 

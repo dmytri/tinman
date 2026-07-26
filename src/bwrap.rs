@@ -3,7 +3,7 @@
 //! unavailable Bubblewrap is a hard failure, never a silent unsandboxed run.
 
 use crate::process::PreparedProcess;
-use crate::sandbox::{CommandSpec, Network, SandboxSpec};
+use crate::sandbox::{CommandSpec, EnvOrigin, MountMode, Network, SandboxSpec};
 use std::path::Path;
 
 /// Where the sandboxed program's home directory sits inside the sandbox.
@@ -83,15 +83,58 @@ impl BubblewrapBackend {
             args.push(system_path.to_string());
             args.push(system_path.to_string());
         }
-        // A temporary HOME, never the operator's real home.
+        // A temporary HOME, never the operator's real home. The sandboxed
+        // process starts there, so relative paths it writes land in the host
+        // directory the caller bound, rather than in a directory the new mount
+        // namespace cannot reach.
         if let Some(home) = home {
             args.push("--bind".to_string());
             args.push(home.display().to_string());
+            args.push(SANDBOX_HOME.to_string());
+            args.push("--chdir".to_string());
             args.push(SANDBOX_HOME.to_string());
         }
         args.push("--setenv".to_string());
         args.push("HOME".to_string());
         args.push(SANDBOX_HOME.to_string());
+        // The PATH the plan lists, and nothing else: an unlisted plan grants no
+        // PATH beyond what --clearenv already leaves cleared.
+        if !spec.path.is_empty() {
+            args.push("--setenv".to_string());
+            args.push("PATH".to_string());
+            args.push(spec.path.join(":"));
+        }
+        // Named environment variables the plan grants from the host, read fresh
+        // so a grant never outlives what the operator's own environment
+        // currently holds.
+        for (name, grant) in &spec.env {
+            match grant.from {
+                EnvOrigin::Host => {
+                    if let Ok(value) = std::env::var(name) {
+                        args.push("--setenv".to_string());
+                        args.push(name.clone());
+                        args.push(value);
+                    }
+                }
+            }
+        }
+        // Explicitly mounted fixture trees: read-only unless the plan grants a
+        // writable bind or a private writable copy.
+        for mount in &spec.mounts {
+            let source = match mount.mode {
+                MountMode::Copy => writable_copy_of(&mount.source),
+                MountMode::Readonly | MountMode::Writable => {
+                    std::path::PathBuf::from(&mount.source)
+                }
+            };
+            let flag = match mount.mode {
+                MountMode::Readonly => "--ro-bind",
+                MountMode::Writable | MountMode::Copy => "--bind",
+            };
+            args.push(flag.to_string());
+            args.push(source.display().to_string());
+            args.push(mount.target.clone());
+        }
         // The command to run inside the sandbox.
         args.push(command.program.clone());
         args.extend(command.args.iter().cloned());
@@ -118,6 +161,8 @@ impl BubblewrapBackend {
     ///
     /// @planks("the Tinman driver has a session running {string}")
     /// @planks("the session's temporary sandbox directories no longer exist")
+    /// @planks("the fixture program reports a home directory other than the operator's home")
+    /// @planks("the step reports a home directory other than the operator's home")
     pub fn prepare_with_home(
         &self,
         spec: &SandboxSpec,
@@ -135,6 +180,34 @@ impl BubblewrapBackend {
             cleanup: Vec::new(),
         })
     }
+}
+
+/// A fresh, private directory seeded with `source`'s entries, so a copy mount
+/// gives the target a writable copy the original tree never sees a write
+/// through.
+///
+/// @planks("the fixture terminal program writes {string} into {string}")
+fn writable_copy_of(source: &str) -> std::path::PathBuf {
+    let staging = std::env::temp_dir().join(format!(
+        "tinman-copy-mount-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is after the epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&staging).unwrap_or_else(|e| {
+        panic!(
+            "copy mount staging directory {} not created: {e}",
+            staging.display()
+        )
+    });
+    if let Ok(entries) = std::fs::read_dir(source) {
+        for entry in entries.flatten() {
+            let _ = std::fs::copy(entry.path(), staging.join(entry.file_name()));
+        }
+    }
+    staging
 }
 
 /// Whether an executable name resolves to a real file, either as an absolute

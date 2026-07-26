@@ -18,6 +18,10 @@ Feature: record command
 
   Rule: a recording that cannot replay itself is a draft, not a recording. The operator is present at capture time and absent at replay time, so a locator proved while they are still here costs a moment, and one that fails after they leave costs a debugging session.
 
+  Scenario: a recorded plan carries an expectation for what the screen showed
+    When the operator records the command "printf READY"
+    Then the written plan carries an expectation on the text "READY"
+
   Scenario: a written plan replays the interaction it recorded
     When the operator records the fixture terminal program
     Then replaying the written plan reproduces the recorded interaction

@@ -76,6 +76,17 @@ struct TinmanWorld {
     session_id: Option<String>,
     session_dirs: Vec<std::path::PathBuf>,
     next_request_id: u64,
+    // the command a launch call named, so a failed launch can be checked to
+    // name the program it could not start
+    launched_command: Option<String>,
+    // a staged fixture file and the contents it was staged with, so a mount
+    // scenario can tell a changed source from an untouched one
+    fixture_file: Option<(std::path::PathBuf, String)>,
+    // semantic capture
+    captures: std::collections::BTreeMap<String, Vec<String>>,
+    log_title: Option<String>,
+    log_messages: Option<usize>,
+    log_window: Option<usize>,
     // harness plans
     plan_sources: Vec<String>,
     parsed_plans: Vec<tinman::plan::Plan>,
@@ -102,6 +113,8 @@ struct TinmanWorld {
     settings: Option<tinman::inference::Settings>,
     built_requests: Vec<tinman::inference::Request>,
     inference_available: Option<bool>,
+    // what the configured provider generated, on the @inference tier
+    provider_reply: Option<String>,
 }
 
 /// The scenario's working directory: the one a dotenv file is staged in and the
@@ -290,6 +303,20 @@ async fn bwrap_absent(world: &mut TinmanWorld) {
 
 #[when("a process is prepared and launched")]
 async fn prepared_and_launched(world: &mut TinmanWorld) {
+    // The sandbox-configuration scenarios give a sandbox section and assert on
+    // what the launched process could see, so it reports what it was granted.
+    if world.backend.is_none() {
+        let spec = sandbox_section(world);
+        let name = world
+            .secret_name
+            .clone()
+            .unwrap_or_else(|| "PATH".to_string());
+        let prepared = BubblewrapBackend::new()
+            .prepare(&spec, &reporting_process(&name))
+            .unwrap_or_else(|e| panic!("the Bubblewrap backend did not prepare the process: {e}"));
+        world.screen = Some(tinman::pty::capture(&prepared).expect("the process is captured"));
+        return;
+    }
     // A command whose only effect would be to create a sentinel file. If any
     // unsandboxed process runs, the sentinel appears; the assertion below then
     // proves nothing ran.
@@ -1631,6 +1658,54 @@ async fn a_flow_whose_only_step_runs_with_the_input(
     ));
 }
 
+#[given("a flow whose only step drives the fixture terminal program")]
+async fn a_flow_whose_only_step_drives_the_fixture(world: &mut TinmanWorld) {
+    let source = support::fixture_terminal_source();
+    // The fixture draws its home directory before it draws READY, so expecting
+    // READY gates the step on the program having drawn, rather than reading the
+    // screen while it is still blank.
+    world.plan_sources.push(format!(
+        "flow:\n  - tui:\n      command: {source:?}\n      steps:\n        - expect: READY\n"
+    ));
+}
+
+#[given(expr = "a flow whose only step runs {string}")]
+async fn a_flow_whose_only_step_runs(world: &mut TinmanWorld, command: String) {
+    world
+        .plan_sources
+        .push(format!("flow:\n  - run: {command:?}\n"));
+}
+
+#[then("the fixture program reports a home directory other than the operator's home")]
+async fn the_fixture_reports_another_home(world: &mut TinmanWorld) {
+    let screen = only_step(world).output.clone();
+    let operator_home = std::env::var("HOME").expect("operator HOME is set");
+    let home = screen
+        .lines()
+        .find_map(|line| line.trim_end().strip_prefix("HOME:"))
+        .map(str::trim_end)
+        .unwrap_or_else(|| {
+            panic!("the fixture program printed no home directory; screen:\n{screen}")
+        })
+        .to_string();
+    assert!(!home.is_empty(), "the sandbox home directory is empty");
+    assert_ne!(
+        home, operator_home,
+        "the fixture program ran with the operator's home {operator_home}"
+    );
+}
+
+#[then("the step reports a home directory other than the operator's home")]
+async fn the_step_reports_another_home(world: &mut TinmanWorld) {
+    let reported = only_step(world).output.trim().to_string();
+    let operator_home = std::env::var("HOME").expect("operator HOME is set");
+    assert!(!reported.is_empty(), "the step reported no home directory");
+    assert_ne!(
+        reported, operator_home,
+        "the step ran with the operator's home {operator_home}"
+    );
+}
+
 /// The one outcome a single-step flow produced.
 fn only_step(world: &TinmanWorld) -> &tinman::flow::StepOutcome {
     let outcome = world.flow_outcome.as_ref().unwrap_or_else(|| {
@@ -1728,10 +1803,7 @@ async fn the_driver_has_a_session_running(world: &mut TinmanWorld, command: Stri
 
 #[given("the Tinman driver has a session running the fixture terminal program")]
 async fn the_driver_has_a_session_running_the_fixture(world: &mut TinmanWorld) {
-    let program = support::fixture_terminal_program()
-        .to_string_lossy()
-        .into_owned();
-    launch_driver_session(world, &program).await;
+    launch_driver_session(world, support::fixture_terminal_source()).await;
 }
 
 /// Start the driver and launch `command`, keeping the session it opened, so
@@ -1763,6 +1835,13 @@ async fn the_test_runner_sends_the_request(
         .expect("the step carries a request doc string")
         .trim()
         .to_string();
+    // Keep the command the call named, so a step asserting on a failed launch
+    // reads the program from the request rather than restating it.
+    let request: serde_json::Value =
+        serde_json::from_str(&line).expect("the request doc string is JSON");
+    if let Some(command) = request["params"]["command"].as_str() {
+        world.launched_command = Some(command.to_string());
+    }
     let reply = driver(world).send_line(&line);
     world.reply = Some(reply);
 }
@@ -1825,6 +1904,282 @@ async fn the_driver_replies_with_a_session(world: &mut TinmanWorld, id: u64) {
     assert!(
         !identifier.is_empty(),
         "the reply carries an empty session identifier"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// driver session: the semantic verbs a test runner drives a terminal with
+// ---------------------------------------------------------------------------
+
+/// The `failure` a failed result carries, which names what was looked for.
+fn failure_message(world: &TinmanWorld) -> String {
+    let reply = reply(world);
+    result(reply)["failure"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the reply carries no failure message: {reply}"))
+        .to_string()
+}
+
+/// The root region of the terminal object model of the session's current
+/// screen. The model carries its screen size beside a single root region, so
+/// the walk starts at that root rather than at the model itself.
+fn session_model(world: &mut TinmanWorld) -> serde_json::Value {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(id, "tom", serde_json::json!({"session": session})));
+    let model = result(&reply)["tom"].clone();
+    let root = model["root"].clone();
+    assert!(!root.is_null(), "the model carries no root region: {model}");
+    root
+}
+
+/// The regions playing `role` anywhere in the model, in the order the model
+/// carries them.
+fn regions_playing(model: &serde_json::Value, role: &str, found: &mut Vec<serde_json::Value>) {
+    if model["role"].as_str() == Some(role) {
+        found.push(model.clone());
+    }
+    if let Some(children) = model["children"].as_array() {
+        for child in children {
+            regions_playing(child, role, found);
+        }
+    }
+}
+
+/// Ask the driver to activate the region playing `role` and named `name`.
+fn activate_region(world: &mut TinmanWorld, role: &str, name: &str) -> serde_json::Value {
+    let id = next_id(world);
+    let session = session(world);
+    driver(world).request(rpc(
+        id,
+        "activate",
+        serde_json::json!({"session": session, "role": role, "name": name}),
+    ))
+}
+
+#[when("the test runner requests the session's sandbox backend")]
+async fn the_runner_requests_the_sandbox_backend(world: &mut TinmanWorld) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(id, "sandbox", serde_json::json!({"session": session})));
+    world.reply = Some(reply);
+}
+
+#[then(expr = "the reported backend is {string}")]
+async fn the_reported_backend_is(world: &mut TinmanWorld, expected: String) {
+    let reply = reply(world);
+    let backend = result(reply)["backend"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the reply carries no backend: {reply}"));
+    assert_eq!(
+        backend, expected,
+        "the sandbox backend the session runs under"
+    );
+}
+
+#[when(expr = "the test runner activates the {string} named {string}")]
+async fn the_runner_activates(world: &mut TinmanWorld, role: String, name: String) {
+    let reply = activate_region(world, &role, &name);
+    world.reply = Some(reply);
+}
+
+#[given(expr = "the test runner has activated the {string} named {string}")]
+async fn the_runner_has_activated(world: &mut TinmanWorld, role: String, name: String) {
+    let reply = activate_region(world, &role, &name);
+    assert_eq!(
+        result(&reply)["ok"],
+        serde_json::Value::Bool(true),
+        "the activation this scenario builds on failed: {reply}"
+    );
+    world.reply = Some(reply);
+}
+
+#[when(expr = "the test runner fills the textbox labelled {string} with {string}")]
+async fn the_runner_fills_the_textbox(world: &mut TinmanWorld, label: String, value: String) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(
+        id,
+        "fill",
+        serde_json::json!({"session": session, "label": label, "value": value}),
+    ));
+    world.reply = Some(reply);
+}
+
+#[when(expr = "the test runner presses the key {string}")]
+async fn the_runner_presses_the_key(world: &mut TinmanWorld, key: String) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(
+        id,
+        "press",
+        serde_json::json!({"session": session, "key": key}),
+    ));
+    assert_eq!(
+        result(&reply)["ok"],
+        serde_json::Value::Bool(true),
+        "the key press failed: {reply}"
+    );
+    world.reply = Some(reply);
+}
+
+#[then(expr = "the screen contains the text {string}")]
+async fn the_screen_contains_the_text(world: &mut TinmanWorld, text: String) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(id, "screen", serde_json::json!({"session": session})));
+    let screen = result(&reply)["screen"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the reply carries no screen: {reply}"))
+        .to_string();
+    assert!(
+        screen.contains(&text),
+        "the screen does not contain {text:?}; screen:\n{screen}"
+    );
+}
+
+#[given(expr = "the menu's selected item is {string}")]
+async fn the_menus_selected_item_is(world: &mut TinmanWorld, expected: String) {
+    let model = session_model(world);
+    let mut items = Vec::new();
+    regions_playing(&model, "menuitem", &mut items);
+    assert!(
+        !items.is_empty(),
+        "the program draws no menu items, so this scenario's precondition does not hold"
+    );
+    let selected: Vec<&str> = items
+        .iter()
+        .filter(|item| item["selected"] == serde_json::Value::Bool(true))
+        .filter_map(|item| item["name"].as_str())
+        .collect();
+    assert_eq!(
+        selected,
+        vec![expected.as_str()],
+        "the menu items the model reports as selected"
+    );
+}
+
+#[then(expr = "the selected {string} is {string}")]
+async fn the_selected_region_is(world: &mut TinmanWorld, role: String, expected: String) {
+    let model = session_model(world);
+    let mut items = Vec::new();
+    regions_playing(&model, &role, &mut items);
+    let selected: Vec<&str> = items
+        .iter()
+        .filter(|item| item["selected"] == serde_json::Value::Bool(true))
+        .filter_map(|item| item["name"].as_str())
+        .collect();
+    assert_eq!(
+        selected,
+        vec![expected.as_str()],
+        "the {role} regions the model reports as selected"
+    );
+}
+
+#[then(expr = "the textbox labelled {string} contains {string}")]
+async fn the_textbox_labelled_contains(world: &mut TinmanWorld, label: String, value: String) {
+    let model = session_model(world);
+    let mut boxes = Vec::new();
+    regions_playing(&model, "textbox", &mut boxes);
+    let found = boxes
+        .iter()
+        .find(|region| region["name"].as_str() == Some(label.as_str()))
+        .unwrap_or_else(|| panic!("the model carries no textbox labelled {label:?}: {model}"));
+    let text = found["text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains(&value),
+        "the textbox labelled {label:?} reads {text:?}, so it does not contain {value:?}"
+    );
+}
+
+#[then("the failure reports the text was not found on screen")]
+async fn the_failure_reports_the_text_not_found(world: &mut TinmanWorld) {
+    let message = failure_message(world);
+    assert!(
+        message.contains("not found"),
+        "the failure does not report the text was not found: {message}"
+    );
+    let reply = reply(world);
+    let screen = result(reply)["screen"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the failed reply carries no screen: {reply}"));
+    assert!(
+        !screen.trim().is_empty(),
+        "the failed reply carries an empty screen, so it does not show what the step saw"
+    );
+}
+
+#[then(expr = "the failure reports no {string} named {string} was found")]
+async fn the_failure_reports_none_found(world: &mut TinmanWorld, role: String, name: String) {
+    let message = failure_message(world);
+    assert!(
+        message.contains(&role) && message.contains(&name),
+        "the failure does not name the {role} {name:?} it looked for: {message}"
+    );
+}
+
+#[then(expr = "the failure reports {int} matches for the {string} named {string}")]
+async fn the_failure_reports_matches(
+    world: &mut TinmanWorld,
+    count: usize,
+    role: String,
+    name: String,
+) {
+    let message = failure_message(world);
+    assert!(
+        message.contains(&count.to_string()) && message.contains(&role) && message.contains(&name),
+        "the failure does not report {count} matches for the {role} {name:?}: {message}"
+    );
+}
+
+#[then(expr = "the failure reports the selection did not reach the {string} named {string}")]
+async fn the_failure_reports_selection_did_not_reach(
+    world: &mut TinmanWorld,
+    role: String,
+    name: String,
+) {
+    let message = failure_message(world);
+    assert!(
+        message.contains(&role) && message.contains(&name),
+        "the failure does not name the {role} {name:?} the selection did not reach: {message}"
+    );
+}
+
+#[given("the fixture program ignores directional keys")]
+async fn the_fixture_ignores_directional_keys(world: &mut TinmanWorld) {
+    launch_driver_session(world, support::fixture_ignoring_directional_keys_source()).await;
+}
+
+#[given(expr = "the fixture program shows two buttons named {string}")]
+async fn the_fixture_shows_two_buttons(world: &mut TinmanWorld, name: String) {
+    launch_driver_session(world, &support::fixture_with_two_buttons_source(&name)).await;
+}
+
+#[then(expr = "the driver replies to request {int} with a failed result")]
+async fn the_driver_replies_to_request_with_a_failed_result(world: &mut TinmanWorld, id: u64) {
+    let reply = reply(world);
+    assert_eq!(reply["jsonrpc"], serde_json::json!("2.0"), "reply framing");
+    assert_eq!(reply["id"], serde_json::json!(id), "replied request id");
+    assert_eq!(
+        result(reply)["ok"],
+        serde_json::Value::Bool(false),
+        "the reply is not a failed result: {reply}"
+    );
+}
+
+#[then("the failure names the program it could not start")]
+async fn the_failure_names_the_program(world: &mut TinmanWorld) {
+    let command = world
+        .launched_command
+        .clone()
+        .expect("a launch call named a command");
+    let reply = reply(world);
+    let failure = result(reply)["failure"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the failed reply carries no failure message: {reply}"));
+    assert!(
+        failure.contains(&command),
+        "the failure does not name the program {command:?}: {failure}"
     );
 }
 
@@ -1934,6 +2289,191 @@ async fn every_exchanged_message_conforms(
         }
     }
     assert!(bad.is_empty(), "schema violations: {bad:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// semantic capture: collecting the items of a scrolling pane
+// ---------------------------------------------------------------------------
+
+/// Replace the session's program with `program`, keeping the driver already
+/// running and closing the session it holds, so the sandbox home that session
+/// owns is reclaimed rather than left standing.
+async fn relaunch_driver_session(world: &mut TinmanWorld, program: &str) {
+    if let Some(name) = world.session_id.take() {
+        let id = next_id(world);
+        let reply = driver(world).request(rpc(id, "close", serde_json::json!({"session": name})));
+        assert_eq!(
+            result(&reply)["ok"],
+            serde_json::Value::Bool(true),
+            "the session the fixture replaces did not close: {reply}"
+        );
+    }
+    let id = next_id(world);
+    let reply = driver(world).request(rpc(id, "launch", serde_json::json!({"command": program})));
+    assert_eq!(
+        result(&reply)["ok"],
+        serde_json::Value::Bool(true),
+        "the fixture program did not launch: {reply}"
+    );
+    let identifier = result(&reply)["session"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the launch reply carries no session identifier: {reply}"))
+        .to_string();
+    world.session_id = Some(identifier);
+    world.reply = Some(reply);
+}
+
+/// The log pane an earlier step of the scenario established: its title, how
+/// many messages it holds, and how many lines its window shows.
+fn log_shape(world: &TinmanWorld) -> (String, usize, usize) {
+    (
+        world
+            .log_title
+            .clone()
+            .expect("an earlier step showed a log"),
+        world.log_messages.expect("the log holds messages"),
+        world.log_window.expect("the log has a window"),
+    )
+}
+
+#[given(
+    expr = "the fixture program shows a {string} holding {int} messages in a {int} line window"
+)]
+async fn the_fixture_shows_a_log(
+    world: &mut TinmanWorld,
+    title: String,
+    count: usize,
+    window: usize,
+) {
+    let program = support::log_fixture_program(&title, count, window);
+    world.log_title = Some(title);
+    world.log_messages = Some(count);
+    world.log_window = Some(window);
+    relaunch_driver_session(world, &program).await;
+}
+
+#[given(expr = "the fixture program repeats its last {int} messages at each scroll position")]
+async fn the_fixture_repeats_its_last_messages(world: &mut TinmanWorld, repeat: usize) {
+    let (title, count, window) = log_shape(world);
+    let program = support::repeating_log_fixture_program(&title, count, window, repeat);
+    relaunch_driver_session(world, &program).await;
+}
+
+#[given(expr = "the fixture program scrolls its {string} without ever reaching an end")]
+async fn the_fixture_scrolls_without_end(world: &mut TinmanWorld, title: String) {
+    let (_, _, window) = log_shape(world);
+    let program = support::endless_log_fixture_program(&title, window);
+    relaunch_driver_session(world, &program).await;
+}
+
+/// Ask the driver to capture the items a locator names, binding the items the
+/// reply carries to `name`, which is what the call's `as` argument binds them
+/// to for a client. A call that captured nothing binds nothing, so a failed
+/// capture is reported by the step that reads the reply.
+async fn capture_items(world: &mut TinmanWorld, role: &str, within: &str, scope: &str, name: &str) {
+    let id = next_id(world);
+    let session = session(world);
+    let reply = driver(world).request(rpc(
+        id,
+        "capture",
+        serde_json::json!({
+            "session": session,
+            "role": role,
+            "within": within,
+            "scope": scope,
+            "as": name,
+        }),
+    ));
+    if let Some(items) = reply
+        .get("result")
+        .and_then(|result| result.get("items"))
+        .and_then(serde_json::Value::as_array)
+    {
+        let items = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .unwrap_or_else(|| panic!("the captured item is not a string: {item}"))
+                    .to_string()
+            })
+            .collect();
+        world.captures.insert(name.to_string(), items);
+    }
+    world.reply = Some(reply);
+}
+
+#[when(expr = "the test runner captures every {string} in the {string} as {string}")]
+async fn the_runner_captures_every(
+    world: &mut TinmanWorld,
+    role: String,
+    within: String,
+    name: String,
+) {
+    capture_items(world, &role, &within, "all", &name).await;
+}
+
+#[when(expr = "the test runner captures the visible {string} items in the {string} as {string}")]
+async fn the_runner_captures_the_visible(
+    world: &mut TinmanWorld,
+    role: String,
+    within: String,
+    name: String,
+) {
+    capture_items(world, &role, &within, "visible", &name).await;
+}
+
+/// The items bound to `name`, reported with the driver's own reply when the
+/// capture bound nothing, so a call that failed says what it answered.
+fn captured<'a>(world: &'a TinmanWorld, name: &str) -> &'a [String] {
+    world
+        .captures
+        .get(name)
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| {
+            panic!(
+                "no capture is bound to {name:?}; the driver replied {}",
+                world
+                    .reply
+                    .as_ref()
+                    .map_or_else(|| "nothing".to_string(), ToString::to_string)
+            )
+        })
+}
+
+#[then(expr = "the capture named {string} holds {int} items")]
+async fn the_capture_holds_items(world: &mut TinmanWorld, name: String, count: usize) {
+    let items = captured(world, &name);
+    assert_eq!(items.len(), count, "the capture {name:?} holds {items:#?}");
+}
+
+#[then(expr = "the first item of the capture named {string} is {string}")]
+async fn the_first_item_of_the_capture_is(world: &mut TinmanWorld, name: String, expected: String) {
+    let items = captured(world, &name);
+    let first = items
+        .first()
+        .unwrap_or_else(|| panic!("the capture {name:?} is empty"));
+    assert_eq!(first, &expected, "the capture {name:?} holds {items:#?}");
+}
+
+#[then(expr = "the last item of the capture named {string} is {string}")]
+async fn the_last_item_of_the_capture_is(world: &mut TinmanWorld, name: String, expected: String) {
+    let items = captured(world, &name);
+    let last = items
+        .last()
+        .unwrap_or_else(|| panic!("the capture {name:?} is empty"));
+    assert_eq!(last, &expected, "the capture {name:?} holds {items:#?}");
+}
+
+#[then("the failure reports the capture reached its scroll limit")]
+async fn the_failure_reports_the_scroll_limit(world: &mut TinmanWorld) {
+    let reply = reply(world);
+    let failure = result(reply)["failure"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the failed reply reports no failure: {reply}"));
+    assert!(
+        failure.to_lowercase().contains("scroll limit"),
+        "the failure does not report the capture reached its scroll limit: {failure:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2179,6 +2719,170 @@ async fn a_sandbox_section_mounting_without_mode(
     ));
 }
 
+#[given(expr = "a plan sandbox section mounting {string} at {string} with mode {string}")]
+async fn a_sandbox_section_mounting_with_mode(
+    world: &mut TinmanWorld,
+    source: String,
+    target: String,
+    mode: String,
+) {
+    world.plan_sources.push(format!(
+        "mounts:\n  - source: {source}\n    target: {target}\n    mode: {mode}\n"
+    ));
+}
+
+#[given(expr = "a plan sandbox section that names no environment variables")]
+async fn a_sandbox_section_naming_no_environment(world: &mut TinmanWorld) {
+    world
+        .plan_sources
+        .push("backend: auto\nhome: empty\nnetwork: deny\n".to_string());
+}
+
+#[given(expr = "a plan sandbox section that injects {string} from the host")]
+async fn a_sandbox_section_injecting_from_the_host(world: &mut TinmanWorld, name: String) {
+    world.plan_sources.push(format!(
+        "backend: auto\nhome: empty\nnetwork: deny\nenv:\n  {name}:\n    from: host\n"
+    ));
+}
+
+#[given(expr = "a plan sandbox section whose path lists {string}")]
+async fn a_sandbox_section_whose_path_lists(world: &mut TinmanWorld, entry: String) {
+    world.plan_sources.push(format!(
+        "backend: auto\nhome: empty\nnetwork: deny\npath:\n  - {entry}\n"
+    ));
+}
+
+#[given(expr = "the operator's environment defines {string} as {string}")]
+async fn the_operator_environment_defines(world: &mut TinmanWorld, name: String, value: String) {
+    // Set it in the test process's own environment, which Bubblewrap inherits
+    // and must clear unless the plan names it, so a leak is a real leak.
+    unsafe {
+        std::env::set_var(&name, &value);
+    }
+    world.secret_name = Some(name);
+    world.secret_value = Some(value);
+}
+
+#[given(expr = "the fixture directory {string} contains the file {string}")]
+async fn the_fixture_directory_contains_the_file(
+    world: &mut TinmanWorld,
+    directory: String,
+    name: String,
+) {
+    let dir = working_dir(world).join(directory.trim_start_matches("./"));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| {
+        panic!(
+            "the fixture directory {} was not created: {e}",
+            dir.display()
+        )
+    });
+    let path = dir.join(&name);
+    let contents = "the original fixture contents\n";
+    std::fs::write(&path, contents)
+        .unwrap_or_else(|e| panic!("the fixture file {} was not written: {e}", path.display()));
+    world.fixture_file = Some((path, contents.to_string()));
+}
+
+/// The sandbox specification the scenario's given section describes, parsed by
+/// the production parser so a section production cannot read fails here.
+fn sandbox_section(world: &TinmanWorld) -> tinman::sandbox::SandboxSpec {
+    let source = world
+        .plan_sources
+        .first()
+        .expect("a plan sandbox section was given");
+    tinman::plan::parse_sandbox(source)
+        .unwrap_or_else(|e| panic!("the sandbox section did not parse: {e}\n{source}"))
+}
+
+/// A process that reports what the sandbox granted it: the value of the named
+/// environment variable, and the PATH it was given.
+fn reporting_process(name: &str) -> CommandSpec {
+    let script =
+        format!("printf 'ENVVAL=[%s]\\n' \"${{{name}}}\"; printf 'PATHVAL=[%s]\\n' \"$PATH\"");
+    CommandSpec {
+        program: "/bin/sh".to_string(),
+        args: vec!["-c".to_string(), script],
+    }
+}
+
+/// The bracketed value the reporting process printed for `field`.
+fn reported_field(world: &TinmanWorld, field: &str) -> String {
+    let screen = world.screen.as_ref().expect("a captured virtual screen");
+    let contents = screen.contents();
+    contents
+        .lines()
+        .find_map(|line| line.trim_end().strip_prefix(&format!("{field}=[")))
+        .and_then(|rest| rest.strip_suffix(']'))
+        .map(str::to_string)
+        .unwrap_or_else(|| panic!("the launched process reported no {field}; screen:\n{contents}"))
+}
+
+#[when(expr = "the fixture terminal program writes {string} into {string}")]
+async fn the_fixture_writes_into(world: &mut TinmanWorld, text: String, target: String) {
+    let spec = sandbox_section(world);
+    let command = CommandSpec {
+        program: "/bin/sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            // Only report the write when the redirect actually succeeded, so a
+            // sandbox that never mounted the target cannot pass the scenario by
+            // leaving the source untouched for the wrong reason.
+            format!("printf '{text}' > {target} && printf 'WROTE\\n'"),
+        ],
+    };
+    let prepared = BubblewrapBackend::new()
+        .prepare(&spec, &command)
+        .unwrap_or_else(|e| panic!("the Bubblewrap backend did not prepare the process: {e}"));
+    let screen = tinman::pty::capture(&prepared).expect("the process is captured");
+    assert!(
+        screen.contains("WROTE"),
+        "the sandboxed process did not write into {target}; screen:\n{}",
+        screen.contents()
+    );
+    world.screen = Some(screen);
+}
+
+#[then(expr = "the file {string} is unchanged")]
+async fn the_file_is_unchanged(world: &mut TinmanWorld, _path: String) {
+    let (path, original) = world
+        .fixture_file
+        .clone()
+        .expect("a fixture file was staged");
+    let now = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the fixture file {} unreadable: {e}", path.display()));
+    assert_eq!(
+        now,
+        original,
+        "the fixture file {} was changed through the copy mount",
+        path.display()
+    );
+}
+
+#[then(expr = "the launched process reports {string} is unset")]
+async fn the_launched_process_reports_unset(world: &mut TinmanWorld, _name: String) {
+    let value = reported_field(world, "ENVVAL");
+    assert!(
+        value.is_empty(),
+        "the sandboxed process saw the value {value:?}, so the variable reached it"
+    );
+}
+
+#[then(expr = "the launched process reports {string} is {string}")]
+async fn the_launched_process_reports_value(
+    world: &mut TinmanWorld,
+    _name: String,
+    expected: String,
+) {
+    let value = reported_field(world, "ENVVAL");
+    assert_eq!(value, expected, "the value the sandboxed process saw");
+}
+
+#[then(expr = "the launched process reports its PATH is {string}")]
+async fn the_launched_process_reports_its_path(world: &mut TinmanWorld, expected: String) {
+    let value = reported_field(world, "PATHVAL");
+    assert_eq!(value, expected, "the PATH the sandboxed process saw");
+}
+
 #[when("the sandbox specification is parsed")]
 async fn the_sandbox_specification_is_parsed(world: &mut TinmanWorld) {
     let source = world
@@ -2206,8 +2910,12 @@ async fn the_mounts_mode_is(world: &mut TinmanWorld, expected: String) {
 /// A plan driving the fixture terminal program, expecting the status bar it
 /// draws, and any further text the scenario names as the final step.
 fn fixture_plan_source(final_expect: Option<&str>) -> String {
-    let program = support::fixture_terminal_program();
-    let mut source = format!("tui: {}\nsteps:\n  - expect: READY\n", program.display());
+    // A flow step runs inside a sandbox binding the system directories and the
+    // workspace, so a program written to a temporary directory is not there to
+    // run. The step's shell reads the program on its command line instead, as a
+    // driver session does.
+    let program = support::fixture_terminal_source();
+    let mut source = format!("tui: {program:?}\nsteps:\n  - expect: READY\n");
     if let Some(text) = final_expect {
         source.push_str(&format!("  - expect: {text}\n"));
     }
@@ -2399,13 +3107,15 @@ async fn a_plan_captured_at_columns(world: &mut TinmanWorld, _cols: u16) {
     expr = "a harness plan whose step expects the status bar to contain {string}, captured at {int} columns"
 )]
 async fn a_plan_expecting_the_status_bar(world: &mut TinmanWorld, text: String, _cols: u16) {
-    let program = support::fixture_terminal_program();
+    // A flow step runs sandboxed, so the step's shell reads the program on its
+    // command line rather than from a temporary directory the sandbox does not
+    // bind.
+    let program = support::fixture_terminal_source();
     // `within` is the scoping key the harness-plan scantling defines for an
     // expectation, so the plan is written in the durable form rather than one
     // the suite invents.
     let source = format!(
-        "tui: {}\nsteps:\n  - expect:\n      text: {text}\n      within: status\n",
-        program.display()
+        "tui: {program:?}\nsteps:\n  - expect:\n      text: {text}\n      within: status\n"
     );
     let plan = tinman::plan::parse(&source)
         .unwrap_or_else(|e| panic!("the fixture plan did not parse: {e}"));
@@ -2517,8 +3227,12 @@ async fn the_operator_records_the_command(world: &mut TinmanWorld, command: Stri
 
 #[when("the operator records the fixture terminal program")]
 async fn the_operator_records_the_fixture(world: &mut TinmanWorld) {
-    let program = support::fixture_terminal_program();
-    run_record(world, &program.to_string_lossy(), &["q"]);
+    // A recorded plan replays inside a sandbox binding the workspace, so the
+    // program is staged in the working directory the recording runs in and
+    // named relatively, as an operator's own project program is.
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    run_record(world, &program, &["q"]);
 }
 
 #[given("a fixture terminal program whose pane titles change between draws")]
@@ -2574,6 +3288,66 @@ async fn the_plan_records_a_key_press(world: &mut TinmanWorld, key: String) {
     assert!(
         records_press(&written, &key),
         "the written plan records no key press {key:?}; it reads:\n{text}"
+    );
+}
+
+#[then(expr = "the written plan carries an expectation on the text {string}")]
+async fn the_plan_carries_an_expectation(world: &mut TinmanWorld, expected: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    let plan = written_plan(world, "tinman.yaml");
+    let expectations: Vec<String> = plan
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => Some(expectation.text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        expectations.iter().any(|found| found == &expected),
+        "the written plan carries the expectations {expectations:?}, \
+         so none is on the text {expected:?}; it reads:\n{text}"
+    );
+}
+
+#[then("the recorded snapshots show the secret value is absent")]
+async fn the_recorded_snapshots_show_the_secret_absent(world: &mut TinmanWorld) {
+    let value = world
+        .secret_value
+        .clone()
+        .expect("a secret value was set")
+        .clone();
+    let text = written_plan_text(world, "tinman.yaml");
+    let plan = written_plan(world, "tinman.yaml");
+    let snapshots: Vec<String> = plan
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => Some(expectation.text),
+            _ => None,
+        })
+        .collect();
+    // A recording that captured no screen at all would carry no secret either,
+    // and would pass this step exactly as a clean recording does.
+    assert!(
+        !snapshots.is_empty(),
+        "the recording captured no screen, so this scenario would assert nothing; it reads:\n{text}"
+    );
+    let leaked: Vec<&String> = snapshots
+        .iter()
+        .filter(|snapshot| snapshot.contains(&value))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "the secret value {value:?} leaked into the recorded snapshots {leaked:?}"
     );
 }
 
@@ -3361,6 +4135,102 @@ async fn an_engine_that_returns_role(world: &mut TinmanWorld, role: String) {
     });
     let provider = support::LocalProvider::returning(&reply.to_string());
     use_provider(world, provider);
+}
+
+// ---------------------------------------------------------------------------
+// the configured provider, reached for real on the @inference tier
+// ---------------------------------------------------------------------------
+
+/// The settings the @inference tier runs against: the operator's real
+/// credential and endpoint, read from the process environment and a dotenv
+/// file, as the tier policy in `RIGGING.md` states. A tier scenario reaches the
+/// configured provider rather than a local stand-in, so it resolves its
+/// settings from the environment fitting out provisioned.
+fn configured_settings() -> tinman::inference::Settings {
+    let settings = tinman::inference::Settings::from_process();
+    assert!(
+        settings.api_key.is_some(),
+        "no inference credential is configured, so this tier cannot reach a provider"
+    );
+    settings
+}
+
+#[when(expr = "the assistant request {string} is sent")]
+async fn the_assistant_request_is_sent(world: &mut TinmanWorld, question: String) {
+    let settings = configured_settings();
+    world.provider_reply = tinman::inference::assistant_completion(&settings, &question);
+}
+
+#[then(expr = "the provider's reply contains {string}")]
+async fn the_providers_reply_contains(world: &mut TinmanWorld, expected: String) {
+    let reply = world
+        .provider_reply
+        .as_ref()
+        .expect("the configured provider answered the request");
+    assert!(
+        reply.contains(&expected),
+        "the provider's reply {reply:?} does not contain {expected:?}"
+    );
+}
+
+#[given("the fixture terminal program is captured through a PTY")]
+async fn the_fixture_is_captured_through_a_pty(world: &mut TinmanWorld) {
+    let program = support::fixture_terminal_program();
+    let prepared = shell_process(&program.to_string_lossy());
+    // The fixture waits for the operator, so it is captured live and its screen
+    // read once it has drawn. A capture that waited for the program to exit
+    // would wait for a program that never does.
+    let mut capture =
+        tinman::pty::capture_interactive(&prepared).expect("the fixture program is captured");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let screen = capture.screen();
+        if screen.contains("READY") {
+            world.screen = Some(screen);
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the fixture program never drew READY; screen:\n{}",
+                screen.contents()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    capture.end_session();
+}
+
+#[when("the terminal object model is inferred by the configured engine")]
+async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld) {
+    let settings = configured_settings();
+    let screen = world
+        .screen
+        .as_ref()
+        .expect("a captured virtual screen")
+        .clone();
+    let inferred = tinman::inference::tom_completion(&settings, &screen.contents())
+        .expect("the configured engine answered with a model");
+    let value: serde_json::Value = serde_json::from_str(&inferred)
+        .unwrap_or_else(|e| panic!("the engine's model is not JSON: {e}\nit reads:\n{inferred}"));
+    world.serialized = Some(value);
+}
+
+#[when("an acronym expansion is generated by the configured engine")]
+async fn an_acronym_expansion_is_generated(world: &mut TinmanWorld) {
+    let settings = configured_settings();
+    world.provider_reply = tinman::inference::expansion(&settings);
+}
+
+#[then("a non-empty expansion is produced")]
+async fn a_non_empty_expansion_is_produced(world: &mut TinmanWorld) {
+    let expansion = world
+        .provider_reply
+        .as_ref()
+        .expect("the configured engine generated an expansion");
+    assert!(
+        !expansion.trim().is_empty(),
+        "the configured engine generated an empty expansion"
+    );
 }
 
 #[when("the terminal object model is inferred")]

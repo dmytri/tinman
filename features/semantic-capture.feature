@@ -1,3 +1,4 @@
+@sandbox
 Feature: semantic capture
   As a test author asserting on a coding agent's output
   I want to collect every item in a scrolling pane
