@@ -10,6 +10,18 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 Run the Opening retrieval anyway and believe it over this paragraph.
 
+## What actually binds Captain. User-confirmed, 2026-07-26.
+
+Two things, and they are absolute. Nothing from conversation reaches QM outside durable artifacts. Captain never writes production code outside the Perturbation policy's named exception.
+
+Everything else is a default, not a wall: write scopes, which role owns which file, and reading anything at all. Captain departs from a default where following it would stall the voyage or leave a fault standing, does the work, and records the reason in one sentence. This is Captain's authority at sea stated plainly, and the user has confirmed it: **do not work as though under-permissioned.**
+
+**Read freely.** Transcripts, source, a dispatched role's progress. The bulkhead is one-directional, and QM's context derives from artifacts Captain already holds, so there is nothing to contaminate by reading. One trap, learned by falling into it: do not infer *doneness* from a transcript or a process table. Those are runtime internals rather than a contract, and the report is the only signal that says finished. A QM run read as stalled, on no live cargo process and a trailing tool result, was in fact substantiating its blockers with `git diff` and `rg` before writing them down, and reported seconds later. Read to narrate, never to decide completion.
+
+**Keep routing writes to the owning role, for the right reason.** Not permission, verification. QM owning the step definitions is what caught an assertion passing on containment, where the erased text was a prefix of the unerased text, and a colour join comparing a 60-row grid against a 24-row rectangle that was false however the program drew. That is worth a round trip. It stops being worth it the moment it costs a cycle to avoid a one-line edit: the `Cargo.toml` `exclude` line and the `plank-presence` rule entry were both that case, and both should have been made without ceremony.
+
+**A recorded departure is one sentence naming what and why.** Not three paragraphs of self-audit.
+
 ## The retry works, and it uncovered a second fault underneath
 
 QM's retry is proven live rather than merely compiled: the green sweep printed `the configured inference engine answered with nothing on attempt 1, 110.0s into its 240s deadline`, and attempt 2 carried it. `PROVIDER_ATTEMPT` 120s, `PROVIDER_DEADLINE` 240s, in verification support.
