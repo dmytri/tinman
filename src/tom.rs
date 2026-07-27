@@ -402,13 +402,16 @@ fn pane_region(
             .map(|row| line_of(grid, row, x, right))
             .collect::<Vec<String>>()
             .join("\n");
+        let children = bottom_border_status(grid, x, right, bottom)
+            .into_iter()
+            .collect();
         return Region {
             role: Role::Textbox,
             name: Some(title),
             text: Some(text),
             selected: false,
             rect,
-            children: Vec::new(),
+            children,
             cells: cells_of(grid, rect),
         };
     }
@@ -461,6 +464,9 @@ fn pane_region(
             cells: cells_of(grid, item),
         });
     }
+    if let Some(status) = bottom_border_status(grid, x, right, bottom) {
+        items.push(status);
+    }
     Region {
         role: Role::List,
         name: Some(title),
@@ -470,6 +476,42 @@ fn pane_region(
         children: items,
         cells: cells_of(grid, rect),
     }
+}
+
+/// The hint text a pane's bottom border carries, read the same way the top
+/// border's title is read, as a status region nested inside the pane it
+/// belongs to. A bottom border drawn with no hint yields none.
+///
+/// @planks("the region named {string} contains a region with the role {string}")
+fn bottom_border_status(
+    grid: &[Vec<String>],
+    x: usize,
+    right: usize,
+    bottom: usize,
+) -> Option<Region> {
+    let text: String = grid[bottom][x + 1..right]
+        .iter()
+        .take_while(|cell| cell.as_str() != HORIZONTAL)
+        .cloned()
+        .collect();
+    if text.is_empty() {
+        return None;
+    }
+    let rect = Rect {
+        x: (x + 1) as u16,
+        y: bottom as u16,
+        width: (right - x - 1) as u16,
+        height: 1,
+    };
+    Some(Region {
+        role: Role::Status,
+        name: None,
+        text: Some(text),
+        selected: false,
+        rect,
+        children: Vec::new(),
+        cells: cells_of(grid, rect),
+    })
 }
 
 /// The text row `row` of `grid` shows inside a pane whose borders run down

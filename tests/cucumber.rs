@@ -170,9 +170,12 @@ struct TinmanWorld {
     availability_elapsed: Option<std::time::Duration>,
     // what the configured provider generated, on the @inference tier
     provider_reply: Option<String>,
-    // how long the configured provider took to generate it, so a step that got
-    // nothing reports the clock it waited rather than only the absence
-    provider_elapsed: Option<std::time::Duration>,
+    // the question last sent at the assistant prompt, so a step reading the
+    // request it produced finds that request among the ones the provider took
+    last_question: Option<String>,
+    // what the scenario's local provider answers with, so a step waiting for a
+    // turn to finish ends on the answer reaching the terminal
+    provider_answer: Option<String>,
 }
 
 /// The scenario's working directory: the one a dotenv file is staged in and the
@@ -1140,8 +1143,9 @@ async fn context_contains_the_skill_body(world: &mut TinmanWorld) {
 
 #[given("inference is available")]
 async fn inference_is_available(world: &mut TinmanWorld) {
-    let provider =
-        support::LocalProvider::returning("Tinman Inspects Numerous Machine Agent Nodes");
+    let answer = "Tinman Inspects Numerous Machine Agent Nodes";
+    let provider = support::LocalProvider::returning(answer);
+    world.provider_answer = Some(answer.to_string());
     use_provider(world, provider);
 }
 
@@ -1476,6 +1480,9 @@ async fn the_provider_rejects_the_credential(world: &mut TinmanWorld) {
 #[given("the inference provider endpoint accepts the connection and never answers")]
 async fn the_provider_accepts_and_never_answers(world: &mut TinmanWorld) {
     let provider = support::LocalProvider::stalling();
+    // This provider answers nothing, so a step waiting for a turn to finish has
+    // no signal to end on and must not wait for one.
+    world.provider_answer = None;
     use_provider(world, provider);
 }
 
@@ -1853,6 +1860,7 @@ async fn send_question_at_the_assistant_prompt(world: &mut TinmanWorld, question
         .expect("an interactive terminal session")
         .type_line(&question);
     world.question_sent_at = Some(std::time::Instant::now());
+    world.last_question = Some(question);
 }
 
 #[when(expr = "the operator types {string} at the assistant prompt")]
@@ -1865,7 +1873,10 @@ async fn given_the_operator_types_at_the_assistant_prompt(
     world: &mut TinmanWorld,
     question: String,
 ) {
-    send_question_at_the_assistant_prompt(world, question).await;
+    // Starting state is a finished exchange. The prompt drops keystrokes while a
+    // call is pending, so the question that follows this one is typed only once
+    // the answer to this one has reached the terminal.
+    ask_and_await_the_answer(world, &question).await;
 }
 
 #[when(expr = "the operator types {string} at the assistant prompt without sending")]
@@ -2410,6 +2421,219 @@ async fn the_reported_elapsed_seconds_advance(world: &mut TinmanWorld) {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+// ---------------------------------------------------------------------------
+// the assistant session: what the request Tinman builds carries of the exchange
+// ---------------------------------------------------------------------------
+
+/// How long a step waits for a turn to reach the provider and come back. The
+/// keystrokes cross a real pseudo-terminal and the request crosses a real
+/// socket, so each wait below ends on one of those observable arrivals.
+const TURN_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The chat messages of every request the scenario's provider has received.
+fn provider_requests(world: &TinmanWorld) -> Vec<Vec<(String, String)>> {
+    world
+        .provider
+        .as_ref()
+        .expect("a local provider was started")
+        .received_messages()
+}
+
+/// The request the question last sent at the prompt produced, waited for until
+/// it observably reaches the provider.
+fn assistant_request(world: &TinmanWorld) -> Vec<(String, String)> {
+    let question = world
+        .last_question
+        .clone()
+        .expect("a question was sent at the assistant prompt");
+    let deadline = std::time::Instant::now() + TURN_BUDGET;
+    loop {
+        let received = provider_requests(world);
+        if let Some(request) = received.iter().rev().find(|messages| {
+            messages
+                .iter()
+                .any(|(_, content)| content.contains(&question))
+        }) {
+            return request.clone();
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "no request carrying {question:?} reached the provider; it received {} request(s)",
+                received.len()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Send `question` at the prompt and wait until the answer to it has reached the
+/// terminal, so the next question is typed at a prompt that is listening rather
+/// than at one still holding a call.
+async fn ask_and_await_the_answer(world: &mut TinmanWorld, question: &str) {
+    let configured = world.provider_answer.clone();
+    let answered_before = configured
+        .as_ref()
+        .map(|answer| answers_on_screen(world, answer))
+        .unwrap_or_default();
+    send_question_at_the_assistant_prompt(world, question.to_string()).await;
+    // A provider that answers nothing offers no signal to end on, so a scenario
+    // about a pending call carries on the moment the question is sent.
+    let Some(answer) = configured else {
+        return;
+    };
+    let deadline = std::time::Instant::now() + TURN_BUDGET;
+    loop {
+        if answers_on_screen(world, &answer) > answered_before {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "the answer to {question:?} never reached the terminal; it carried {} answer(s) \
+                 before the question was sent",
+                answered_before
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// How many times the provider's answer stands on the session's terminal, which
+/// is one per turn the assistant has finished.
+fn answers_on_screen(world: &TinmanWorld, answer: &str) -> usize {
+    world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session")
+        .output()
+        .matches(answer)
+        .count()
+}
+
+/// The contents of the request's messages carrying `role`.
+fn messages_with_role(request: &[(String, String)], role: &str) -> Vec<String> {
+    request
+        .iter()
+        .filter(|(carried, _)| carried == role)
+        .map(|(_, content)| content.clone())
+        .collect()
+}
+
+#[given(expr = "the operator has asked {string} and seventeen questions since")]
+async fn the_operator_has_asked_and_seventeen_since(world: &mut TinmanWorld, first: String) {
+    ask_and_await_the_answer(world, &first).await;
+    for number in 2..=18 {
+        ask_and_await_the_answer(world, &format!("question number {number}")).await;
+    }
+}
+
+#[then("the assistant request carries no earlier exchange")]
+async fn the_request_carries_no_earlier_exchange(world: &mut TinmanWorld) {
+    let request = assistant_request(world);
+    let answers = messages_with_role(&request, "assistant");
+    assert!(
+        answers.is_empty(),
+        "the request carries {} earlier answer(s): {answers:?}",
+        answers.len()
+    );
+}
+
+#[then(expr = "the assistant request carries the earlier question {string}")]
+async fn the_request_carries_the_earlier_question(world: &mut TinmanWorld, question: String) {
+    let request = assistant_request(world);
+    assert!(
+        request
+            .iter()
+            .any(|(_, content)| content.contains(&question)),
+        "the request carries no earlier question {question:?}; it carries {request:?}"
+    );
+}
+
+#[then(expr = "the assistant request carries the earlier answer {string}")]
+async fn the_request_carries_the_earlier_answer(world: &mut TinmanWorld, answer: String) {
+    let request = assistant_request(world);
+    let answers = messages_with_role(&request, "assistant");
+    assert!(
+        answers.iter().any(|content| content.contains(&answer)),
+        "the request carries no earlier answer {answer:?}; it carries the answers {answers:?}"
+    );
+}
+
+#[then(expr = "the assistant request carries the question {string}")]
+async fn the_request_carries_the_question(world: &mut TinmanWorld, question: String) {
+    let request = assistant_request(world);
+    assert!(
+        request
+            .iter()
+            .any(|(_, content)| content.contains(&question)),
+        "the request carries no question {question:?}; it carries {request:?}"
+    );
+}
+
+#[then(expr = "the assistant request carries no answer for {string}")]
+async fn the_request_carries_no_answer_for(world: &mut TinmanWorld, question: String) {
+    let request = assistant_request(world);
+    let asked = request
+        .iter()
+        .position(|(role, content)| role == "user" && content.contains(&question))
+        .unwrap_or_else(|| {
+            panic!("the request carries no question {question:?}; it carries {request:?}")
+        });
+    let answered: Vec<&String> = request[asked + 1..]
+        .iter()
+        .take_while(|(role, _)| role != "user")
+        .filter(|(role, _)| role == "assistant")
+        .map(|(_, content)| content)
+        .collect();
+    assert!(
+        answered.is_empty(),
+        "the request still carries an answer for {question:?}: {answered:?}"
+    );
+}
+
+#[then("the assistant request carries seventeen whole exchanges")]
+async fn the_request_carries_seventeen_whole_exchanges(world: &mut TinmanWorld) {
+    let request = assistant_request(world);
+    let answers = messages_with_role(&request, "assistant");
+    assert_eq!(
+        answers.len(),
+        17,
+        "whole exchanges the request carries; it carries {request:?}"
+    );
+}
+
+#[then("the provider received exactly two assistant requests")]
+async fn the_provider_received_exactly_two_assistant_requests(world: &mut TinmanWorld) {
+    let _ = assistant_request(world);
+    let received = provider_requests(world);
+    // The help path also expands the tagline acronym, so the provider's log
+    // carries requests of both kinds. An assistant request is one built on the
+    // assistant context, read from production rather than from a copied literal.
+    let context = tinman::skill::assistant_context();
+    let assistant = received
+        .iter()
+        .filter(|messages| {
+            messages
+                .iter()
+                .any(|(_, content)| content.starts_with(&context))
+        })
+        .count();
+    assert_eq!(
+        assistant,
+        2,
+        "assistant requests the provider received, out of {} request(s) in all; \
+         each request ends with {:?}",
+        received.len(),
+        received
+            .iter()
+            .map(|messages| messages
+                .last()
+                .map(|(_, content)| content.chars().rev().take(40).collect::<String>())
+                .map(|tail| tail.chars().rev().collect::<String>())
+                .unwrap_or_default())
+            .collect::<Vec<String>>()
+    );
 }
 
 #[then(expr = "the assistant prompt names {string} as the key that cancels")]
@@ -4563,6 +4787,22 @@ async fn a_screen_with_a_pane_whose_first_line_reads(
     world.pane = Some((title, lines));
 }
 
+#[given(
+    expr = "a virtual screen showing a bordered pane titled {string} whose bottom border reads {string}"
+)]
+async fn a_screen_with_a_pane_whose_bottom_border_reads(
+    world: &mut TinmanWorld,
+    title: String,
+    hint: String,
+) {
+    world.screen = Some(support::bordered_pane_screen_with_bottom_border(
+        &title,
+        &[],
+        &hint,
+    ));
+    world.pane = Some((title, Vec::new()));
+}
+
 #[given("the cursor rests inside that pane")]
 async fn the_cursor_rests_inside_that_pane(world: &mut TinmanWorld) {
     let (title, items) = world
@@ -4745,6 +4985,53 @@ async fn the_region_named_has_the_role(world: &mut TinmanWorld, name: String, ro
         .clone();
     assert_eq!(region.role(), role, "role of the region named {name:?}");
     world.found_region = Some(region);
+}
+
+#[then(expr = "the region named {string} contains a region with the role {string}")]
+async fn the_region_named_contains_a_region_with_role(
+    world: &mut TinmanWorld,
+    name: String,
+    role: String,
+) {
+    let region = model(world)
+        .find_named(&name)
+        .unwrap_or_else(|| panic!("the model contains no region named {name:?}"))
+        .clone();
+    let found = descendant_with_role(&region, &role).unwrap_or_else(|| {
+        panic!(
+            "the region named {name:?} contains no region with the role {role:?}; it contains {:?}",
+            region
+                .children
+                .iter()
+                .map(|child| child.role())
+                .collect::<Vec<_>>()
+        )
+    });
+    world.found_region = Some(found);
+}
+
+/// The first region beneath `region` carrying `role`, searched depth first so a
+/// region nested any distance inside the named one is found.
+fn descendant_with_role(region: &tinman::tom::Region, role: &str) -> Option<tinman::tom::Region> {
+    for child in &region.children {
+        if child.role() == role {
+            return Some(child.clone());
+        }
+        if let Some(found) = descendant_with_role(child, role) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+#[then(expr = "that status region shows {string}")]
+async fn that_status_region_shows(world: &mut TinmanWorld, expected: String) {
+    let region = world.found_region.as_ref().expect("a region was found");
+    assert_eq!(
+        region.text.as_deref(),
+        Some(expected.as_str()),
+        "the status region's text"
+    );
 }
 
 #[then(expr = "that region has {int} child regions with the role {string}")]
@@ -5356,35 +5643,6 @@ async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld)
     world.serialized = Some(value);
 }
 
-#[when("an acronym expansion is generated by the configured engine")]
-async fn an_acronym_expansion_is_generated(world: &mut TinmanWorld) {
-    let settings = configured_settings();
-    let started = std::time::Instant::now();
-    world.provider_reply = support::within_deadline(
-        "the configured inference engine",
-        PROVIDER_ATTEMPT,
-        PROVIDER_DEADLINE,
-        move || tinman::inference::expansion(&settings),
-    );
-    world.provider_elapsed = Some(started.elapsed());
-}
-
-#[then("a non-empty expansion is produced")]
-async fn a_non_empty_expansion_is_produced(world: &mut TinmanWorld) {
-    let elapsed = world
-        .provider_elapsed
-        .map(|e| format!("{:.1}s", e.as_secs_f64()))
-        .unwrap_or_else(|| "an unrecorded time".to_string());
-    let expansion = world
-        .provider_reply
-        .as_ref()
-        .unwrap_or_else(|| panic!("the configured engine generated no expansion, after {elapsed}"));
-    assert!(
-        !expansion.trim().is_empty(),
-        "the configured engine generated an empty expansion"
-    );
-}
-
 #[when("the terminal object model is inferred")]
 async fn the_model_is_inferred(world: &mut TinmanWorld) {
     let settings = resolved_settings(world);
@@ -5408,6 +5666,7 @@ async fn the_assistant_infers_the_command(world: &mut TinmanWorld, command: Stri
 async fn the_assistant_answers(world: &mut TinmanWorld, answer: String) {
     let reply = tinman::assistant::model_reply_answering(&answer);
     let provider = support::LocalProvider::returning(&reply);
+    world.provider_answer = Some(answer);
     use_provider(world, provider);
 }
 

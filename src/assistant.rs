@@ -7,7 +7,7 @@
 //! shell.
 
 use crate::cli::parse_command_line;
-use crate::inference::Settings;
+use crate::inference::{Exchange, Settings};
 
 /// The marker a proposing reply opens with. A reply carrying it names a Tinman
 /// command; any other reply is prose the operator reads.
@@ -140,6 +140,9 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(200);
 struct Pending {
     started: std::time::Instant,
     replies: std::sync::mpsc::Receiver<Response>,
+    /// The question this call put to the model, held so the exchange can join
+    /// the session's history once the reply arrives.
+    asked: String,
 }
 
 /// The row the box reports a pending call on: the seconds already spent, which
@@ -152,23 +155,25 @@ fn waiting_line(seconds: u64) -> String {
     format!("waiting for an answer, {seconds}s")
 }
 
-/// Put `question` to the model on a thread of its own and report where its reply
-/// will arrive, so the box keeps drawing while the call is pending. A reply the
-/// operator has abandoned is dropped where it lands, the receiver having gone
-/// with the abandoned call.
+/// Put `question` to the model on a thread of its own, carrying `history`
+/// ahead of it, and report where its reply will arrive, so the box keeps
+/// drawing while the call is pending. A reply the operator has abandoned is
+/// dropped where it lands, the receiver having gone with the abandoned call.
 ///
 /// @planks("the operator types {string} at the assistant prompt")
 /// @planks("the operator presses {string} at the assistant prompt")
-fn call(settings: &Settings, question: &str) -> Pending {
+fn call(settings: &Settings, history: Vec<Exchange>, question: &str) -> Pending {
     let (replied, replies) = std::sync::mpsc::channel();
     let settings = settings.clone();
-    let question = question.to_string();
+    let asked = question.to_string();
+    let thread_question = asked.clone();
     std::thread::spawn(move || {
-        let _ = replied.send(ask(&settings, &question));
+        let _ = replied.send(ask_with_history(&settings, &history, &thread_question));
     });
     Pending {
         started: std::time::Instant::now(),
         replies,
+        asked,
     }
 }
 
@@ -222,7 +227,7 @@ pub fn converse(settings: &Settings) {
     crossterm::terminal::enable_raw_mode().expect("the terminal enters raw mode");
     draw(
         &mut out,
-        &box_lines(width, title, &[&question, keys], coloured),
+        &box_lines(width, title, &question, keys, coloured),
         true,
         cursor_column(&question),
     );
@@ -249,6 +254,7 @@ pub fn converse(settings: &Settings) {
     // until they spell one, and the character is shown as the operator typed it.
     let mut partial: Vec<u8> = Vec::new();
     let mut pending: Option<Pending> = None;
+    let mut history: Vec<Exchange> = Vec::new();
     loop {
         // Idle, the loop waits on the operator. With a call pending it wakes on
         // a tick as well, so the seconds the box reports advance while nothing
@@ -274,7 +280,7 @@ pub fn converse(settings: &Settings) {
                 }
                 draw(
                     &mut out,
-                    &box_lines(width, title, &[&question, keys], coloured),
+                    &box_lines(width, title, &question, keys, coloured),
                     false,
                     cursor_column(&question),
                 );
@@ -290,7 +296,7 @@ pub fn converse(settings: &Settings) {
                     // empty for the next one, and the answer follows it above
                     // the box when the model replies.
                     let asked = std::mem::take(&mut question);
-                    let empty = box_lines(width, title, &[&question, keys], coloured);
+                    let empty = box_lines(width, title, &question, keys, coloured);
                     transcribe(
                         &mut out,
                         &asked,
@@ -299,7 +305,7 @@ pub fn converse(settings: &Settings) {
                         &empty,
                         cursor_column(&question),
                     );
-                    pending = Some(call(settings, &asked));
+                    pending = Some(call(settings, history.clone(), &asked));
                 } else {
                     if byte == BACKSPACE {
                         question.pop();
@@ -312,7 +318,7 @@ pub fn converse(settings: &Settings) {
                     }
                     draw(
                         &mut out,
-                        &box_lines(width, title, &[&question, keys], coloured),
+                        &box_lines(width, title, &question, keys, coloured),
                         false,
                         cursor_column(&question),
                     );
@@ -327,15 +333,16 @@ pub fn converse(settings: &Settings) {
                         &replied,
                         ANSWER_COLOUR,
                         coloured,
-                        &box_lines(width, title, &[&question, keys], coloured),
+                        &box_lines(width, title, &question, keys, coloured),
                         cursor_column(&question),
                     );
+                    history.push(Exchange::new(&waiting.asked, &replied));
                     pending = None;
                 }
                 Ok(_) => {
                     draw(
                         &mut out,
-                        &box_lines(width, title, &[&question, keys], coloured),
+                        &box_lines(width, title, &question, keys, coloured),
                         false,
                         cursor_column(&question),
                     );
@@ -345,7 +352,7 @@ pub fn converse(settings: &Settings) {
                     let waited = waiting_line(waiting.started.elapsed().as_secs());
                     draw(
                         &mut out,
-                        &box_lines(width, title, &[&waited, PENDING_KEYS], coloured),
+                        &box_lines(width, title, &waited, PENDING_KEYS, coloured),
                         false,
                         cursor_column(&question),
                     );
@@ -394,31 +401,30 @@ fn transcribe(
 }
 
 /// The lines the box is drawn from, each `width` cells wide: a top border
-/// carrying the title, one line for each body row, and a bottom border. A row
-/// wider than the box is cut to it, so the border stands whatever the operator
-/// types. A coloured box carries the colour escapes inside each line, so the
-/// cells the box claims are the only ones drawn in it.
+/// carrying the title, one body row carrying `content`, and a bottom border
+/// carrying `hint`, read the same way the top border's title is read, as the
+/// standing terminal idiom for a pane's key hints. A row wider than the box is
+/// cut to it, so the border stands whatever the operator types. A coloured box
+/// carries the colour escapes inside each line, so the cells the box claims are
+/// the only ones drawn in it.
 ///
 /// @planks("a bordered region titled {string} is drawn beneath it")
 /// @planks("the region titled {string} shows {string}")
 /// @planks("the region titled {string} has the corner glyph {string}")
 /// @planks("the region titled {string} is drawn in a colour other than the default foreground")
 /// @planks("no cell is drawn in a colour other than the default foreground")
-fn box_lines(width: usize, title: &str, body: &[&str], coloured: bool) -> Vec<String> {
+fn box_lines(width: usize, title: &str, content: &str, hint: &str, coloured: bool) -> Vec<String> {
     let inner = width - 2;
-    let mut lines = Vec::with_capacity(body.len() + 2);
+    let mut lines = Vec::with_capacity(3);
     let named = cut(title, inner);
     let rule = HORIZONTAL.repeat(inner - named.chars().count());
     lines.push(format!("{TOP_LEFT}{named}{rule}{TOP_RIGHT}"));
-    for row in body {
-        let shown = cut(row, inner);
-        let padding = " ".repeat(inner - shown.chars().count());
-        lines.push(format!("{VERTICAL}{shown}{padding}{VERTICAL}"));
-    }
-    lines.push(format!(
-        "{BOTTOM_LEFT}{}{BOTTOM_RIGHT}",
-        HORIZONTAL.repeat(inner)
-    ));
+    let shown = cut(content, inner);
+    let padding = " ".repeat(inner - shown.chars().count());
+    lines.push(format!("{VERTICAL}{shown}{padding}{VERTICAL}"));
+    let shown_hint = cut(hint, inner);
+    let rule = HORIZONTAL.repeat(inner - shown_hint.chars().count());
+    lines.push(format!("{BOTTOM_LEFT}{shown_hint}{rule}{BOTTOM_RIGHT}"));
     if coloured {
         lines = lines
             .iter()
@@ -485,7 +491,14 @@ fn draw(out: &mut impl std::io::Write, lines: &[String], first: bool, column: us
 ///
 /// @planks("the operator asks {string}")
 pub fn ask(settings: &Settings, question: &str) -> Response {
-    let reply = crate::inference::assistant_completion(settings, question)
+    ask_with_history(settings, &[], question)
+}
+
+/// `ask`, carrying `history`'s compacted transcript ahead of `question`.
+///
+/// @planks("the operator asks {string}")
+fn ask_with_history(settings: &Settings, history: &[Exchange], question: &str) -> Response {
+    let reply = crate::inference::assistant_completion_for_turn(settings, history, question)
         .expect("the configured provider answers the assistant");
     let reply = reply.trim();
     match reply.strip_prefix(PROPOSAL_MARKER) {

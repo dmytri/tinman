@@ -53,6 +53,14 @@ Feature: terminal object model
     When the terminal object model is built
     Then the model contains a region with the role "button" named "Save"
 
+  Rule: a pane's bottom border carries text as often as its top border does, and the model reads only the top. Hints and status lines drawn into the lower border are a standing terminal idiom, and dropping them loses the part of a pane that says what to do next. It reads as a status region inside the pane it belongs to, the same role the screen's own bottom line takes, because that is what it is to a reader who cannot see it.
+
+  Scenario: text in a pane's bottom border becomes a status region inside it
+    Given a virtual screen showing a bordered pane titled "Ask Tinman" whose bottom border reads "enter to send | esc to leave"
+    When the terminal object model is inferred
+    Then the region named "Ask Tinman" contains a region with the role "status"
+    And that status region shows "enter to send | esc to leave"
+
   Rule: a bordered pane holding the cursor is where typing goes, so it reads as a textbox rather than as a list of its own lines. The cursor is the only signal on a rendered screen that distinguishes a field being edited from a panel being displayed, and it is available to the deterministic pass, so no inference is needed to tell them apart. The distinction is not cosmetic: a reader who cannot see the screen is told to type into a list, and a plan addressing the region by role binds the wrong thing.
 
   Scenario: a bordered pane holding the cursor becomes a textbox

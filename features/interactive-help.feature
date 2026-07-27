@@ -61,6 +61,47 @@ Feature: interactive help
     Then "Record captures a live session into an editable plan." appears above the region titled "Ask Tinman"
     And the region titled "Ask Tinman" is the lowest region on the screen
 
+  Rule: the assistant remembers the session it is having. A question is rarely the whole question: an operator asks what a command does and then asks about the thing they were actually trying to do, and an assistant that forgets the first makes them restate it every turn.
+
+  Rule: the session compacts continuously rather than dropping turns at a limit. Context spent on old turns is context and latency spent on every later turn, and this path already waits tens of seconds, so the transcript is kept small from the first turn rather than allowed to grow until a threshold trips. The seventeen most recent exchanges are carried whole, within a transcript budget of 120000 characters. Older ones keep their question and lose their answer, which holds what the session was about while shedding most of what it cost. Only when the transcript still exceeds that budget does the oldest question go, so forgetting is the last resort rather than the mechanism. The budget covers the transcript alone: the bundled skill is fixed and dwarfs it, so budgeting the whole request would be budgeting a constant.
+
+  Rule: compaction is mechanical, never a second model call. Summarising a transcript with the provider would double the latency of the slowest thing Tinman does, on every turn, to save tokens on a request that is mostly the bundled skill anyway. Dropping an answer and keeping its question needs no model and cannot fail.
+
+  Rule: the assertions below read the request Tinman builds, not the reply a model gives. Whether the model uses what it was sent is the model's behaviour, and the @inference tier never asserts that; whether Tinman sent it is Tinman's seam and is checked without spending a call.
+
+  Scenario: a new session carries no earlier exchange
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "what does record do" at the assistant prompt
+    Then the assistant request carries no earlier exchange
+
+  Scenario: a follow-up question carries the exchange before it
+    Given inference is available
+    And the assistant answers "Record captures a live session into an editable plan."
+    And the operator runs "tinman --help" in an interactive terminal
+    And the operator types "what does record do" at the assistant prompt
+    When the operator types "and how do I run the plan it wrote" at the assistant prompt
+    Then the assistant request carries the earlier question "what does record do"
+    And the assistant request carries the earlier answer "Record captures a live session into an editable plan."
+
+  Scenario: an exchange past the whole window keeps its question and loses its answer
+    Given inference is available
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    And the operator has asked "first question" and seventeen questions since
+    When the operator types "the nineteenth question" at the assistant prompt
+    Then the assistant request carries the question "first question"
+    And the assistant request carries no answer for "first question"
+    And the assistant request carries seventeen whole exchanges
+
+  Scenario: one question sends exactly one request
+    Given inference is available
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    And the operator types "what does record do" at the assistant prompt
+    When the operator types "and how do I run the plan it wrote" at the assistant prompt
+    Then the provider received exactly two assistant requests
+
   Rule: the cursor sits where the next character will land. A cursor parked outside the box, or left behind while the text grows, tells the operator the program is not listening to them; it is the first thing an operator checks and the last thing a screenshot shows.
 
   Scenario: the cursor follows what the operator types

@@ -53,7 +53,8 @@
       "required": [
         "role",
         "name",
-        "rect"
+        "rect",
+        "children"
       ],
       "properties": {
         "role": {
@@ -78,6 +79,22 @@
             "height": {
               "type": "integer",
               "minimum": 3
+            }
+          }
+        },
+        "children": {
+          "description": "The box carries its key hints as a status region, read from its bottom border. Requiring it here is what stops the hint being drawn from a constant that has drifted from the asset the copy lives in.",
+          "type": "array",
+          "minItems": 1,
+          "contains": {
+            "type": "object",
+            "required": [
+              "role"
+            ],
+            "properties": {
+              "role": {
+                "const": "status"
+              }
             }
           }
         }

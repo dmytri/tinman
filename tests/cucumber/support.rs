@@ -673,7 +673,7 @@ pub enum ProviderReply {
 pub struct LocalProvider {
     base_url: String,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    received: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    received: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -709,7 +709,7 @@ impl LocalProvider {
 
         let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop = std::sync::Arc::clone(&shutdown);
-        let received = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let arrived = std::sync::Arc::clone(&received);
 
         let handle = std::thread::spawn(move || {
@@ -748,7 +748,10 @@ impl LocalProvider {
                         // The readiness probe connects and sends nothing, so a
                         // request is what a read line reports, not an accept.
                         if saw_request {
-                            arrived.store(true, Ordering::Relaxed);
+                            arrived
+                                .lock()
+                                .expect("the received request log is readable")
+                                .push(String::from_utf8_lossy(&body).into_owned());
                         }
                         if matches!(reply, ProviderReply::Stall) {
                             held.push(stream);
@@ -802,7 +805,42 @@ impl LocalProvider {
     /// Whether a request has reached this provider. The readiness probe sends
     /// nothing, so this reports a real request rather than a connection.
     pub fn received_request(&self) -> bool {
-        self.received.load(std::sync::atomic::Ordering::Relaxed)
+        !self.received_bodies().is_empty()
+    }
+
+    /// The body of each request that reached this provider, in arrival order.
+    pub fn received_bodies(&self) -> Vec<String> {
+        self.received
+            .lock()
+            .expect("the received request log is readable")
+            .clone()
+    }
+
+    /// The chat messages of each request that reached this provider, one
+    /// `(role, content)` list per request, read from the real body the client
+    /// sent rather than from anything the client reports about itself.
+    pub fn received_messages(&self) -> Vec<Vec<(String, String)>> {
+        self.received_bodies()
+            .iter()
+            .map(|body| {
+                let value: serde_json::Value = serde_json::from_str(body).unwrap_or_else(|e| {
+                    panic!("the request body is not JSON: {e}\nit reads:\n{body}")
+                });
+                value["messages"]
+                    .as_array()
+                    .unwrap_or_else(|| {
+                        panic!("the request body carries no messages array:\n{body}")
+                    })
+                    .iter()
+                    .map(|message| {
+                        (
+                            message["role"].as_str().unwrap_or_default().to_string(),
+                            message["content"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     /// Poll the listening port until it observably accepts a connection, so no
@@ -1134,6 +1172,41 @@ pub fn bordered_pane_screen_with_cursor_at(
 ) -> tinman::screen::VirtualScreen {
     let mut out = bordered_pane_text(title, items, None);
     out.push_str(&format!("\x1b[{row};{col}H"));
+    tinman::screen::VirtualScreen::from_text(&out)
+}
+
+/// Draw a bordered pane carrying `title` in its top border and `hint` in its
+/// bottom border, the way a program draws a key hint into the lower rule of the
+/// box it belongs to. The pane is widened to whichever of the title, the hint,
+/// and the standard width is longest, so the hint reaches the screen whole
+/// rather than clipped by the fixture.
+pub fn bordered_pane_screen_with_bottom_border(
+    title: &str,
+    items: &[String],
+    hint: &str,
+) -> tinman::screen::VirtualScreen {
+    let width = PANE_WIDTH
+        .max(title.chars().count())
+        .max(hint.chars().count());
+    let mut out = String::new();
+    out.push('\u{250c}');
+    out.push_str(title);
+    out.push_str(&"\u{2500}".repeat(width - title.chars().count()));
+    out.push('\u{2510}');
+    out.push_str("\r\n");
+    for item in items {
+        let pad = " ".repeat(width.saturating_sub(item.chars().count()));
+        out.push('\u{2502}');
+        out.push_str(item);
+        out.push_str(&pad);
+        out.push('\u{2502}');
+        out.push_str("\r\n");
+    }
+    out.push('\u{2514}');
+    out.push_str(hint);
+    out.push_str(&"\u{2500}".repeat(width - hint.chars().count()));
+    out.push('\u{2518}');
+    out.push_str("\r\n");
     tinman::screen::VirtualScreen::from_text(&out)
 }
 

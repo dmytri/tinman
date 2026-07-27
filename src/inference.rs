@@ -122,6 +122,38 @@ impl Settings {
     }
 }
 
+/// The most recent exchanges the compacted transcript carries whole, both
+/// question and answer, before an older one keeps only its question.
+const WHOLE_WINDOW: usize = 17;
+
+/// The character ceiling the compacted transcript is kept under. The bundled
+/// skill is fixed and dwarfs it, so this budget covers the transcript alone.
+const TRANSCRIPT_BUDGET: usize = 120_000;
+
+/// One turn already put to the model in the current session: the question
+/// asked and, while the compacted transcript still carries it, the answer
+/// received.
+#[derive(Debug, Clone)]
+pub struct Exchange {
+    /// The question this turn asked.
+    pub question: String,
+    /// The answer this turn received, absent once compaction has dropped it.
+    pub answer: Option<String>,
+}
+
+impl Exchange {
+    /// An exchange carrying `question` and the `answer` it received.
+    ///
+    /// @planks("the assistant request carries the earlier question {string}")
+    /// @planks("the assistant request carries the earlier answer {string}")
+    pub fn new(question: &str, answer: &str) -> Exchange {
+        Exchange {
+            question: question.to_string(),
+            answer: Some(answer.to_string()),
+        }
+    }
+}
+
 /// One chat-completions request: where it goes, which model answers it, how it
 /// samples and what it asks.
 ///
@@ -132,7 +164,7 @@ pub struct Request {
     model: String,
     authorization: Option<String>,
     temperature: f64,
-    prompt: String,
+    messages: Vec<(String, String)>,
 }
 
 impl Request {
@@ -184,13 +216,12 @@ impl serde::Serialize for Request {
         wire.serialize_field("authorization", &self.authorization)?;
         wire.serialize_field("model", &self.model)?;
         wire.serialize_field("temperature", &self.temperature)?;
-        wire.serialize_field(
-            "messages",
-            &[WireMessage {
-                role: "user",
-                content: &self.prompt,
-            }],
-        )?;
+        let wire_messages: Vec<WireMessage> = self
+            .messages
+            .iter()
+            .map(|(role, content)| WireMessage { role, content })
+            .collect();
+        wire.serialize_field("messages", &wire_messages)?;
         wire.end()
     }
 }
@@ -218,42 +249,122 @@ pub fn acronym_request(settings: &Settings) -> Request {
 }
 
 /// The assistant request: the whole bundled skill body and the operator's
-/// question, sampled at a low temperature.
+/// question, sampled at a low temperature, with no earlier exchange ahead of
+/// it.
 ///
 /// @planks("the assistant request is built")
 /// @planks("the acronym request and the assistant request are built")
 pub fn assistant_request(settings: &Settings, question: &str) -> Request {
-    let prompt = format!("{}\n{question}", crate::skill::assistant_context());
-    request(settings, ASSISTANT_TEMPERATURE, prompt)
+    assistant_turn_request(settings, &[], question)
 }
 
-/// Build a request against the configured settings. The credential becomes a
-/// bearer token, absent when no credential is configured.
+/// The assistant request for `question`, carrying the session's compacted
+/// transcript ahead of it. The seventeen most recent exchanges are carried
+/// whole; older ones keep their question and lose their answer; and when the
+/// transcript still exceeds the character budget after that, the oldest
+/// question goes too, so forgetting is the last resort rather than the
+/// mechanism. The bundled skill body is attached once, to the earliest
+/// message the compacted transcript still carries.
+///
+/// @planks("the assistant request carries no earlier exchange")
+/// @planks("the assistant request carries the earlier question {string}")
+/// @planks("the assistant request carries the earlier answer {string}")
+/// @planks("the assistant request carries the question {string}")
+/// @planks("the assistant request carries no answer for {string}")
+/// @planks("the assistant request carries seventeen whole exchanges")
+pub fn assistant_turn_request(
+    settings: &Settings,
+    history: &[Exchange],
+    question: &str,
+) -> Request {
+    let mut messages: Vec<(String, String)> = Vec::new();
+    for exchange in compact(history) {
+        let content = if messages.is_empty() {
+            format!(
+                "{}\n{}",
+                crate::skill::assistant_context(),
+                exchange.question
+            )
+        } else {
+            exchange.question
+        };
+        messages.push(("user".to_string(), content));
+        if let Some(answer) = exchange.answer {
+            messages.push(("assistant".to_string(), answer));
+        }
+    }
+    let content = if messages.is_empty() {
+        format!("{}\n{question}", crate::skill::assistant_context())
+    } else {
+        question.to_string()
+    };
+    messages.push(("user".to_string(), content));
+    request_from_messages(settings, ASSISTANT_TEMPERATURE, messages)
+}
+
+/// `history`, with the seventeen most recent exchanges kept whole, older ones
+/// stripped to their question, and the oldest question dropped in turn while
+/// the remaining transcript still exceeds the character budget.
+fn compact(history: &[Exchange]) -> Vec<Exchange> {
+    let boundary = history.len().saturating_sub(WHOLE_WINDOW);
+    let mut compacted: Vec<Exchange> = history
+        .iter()
+        .enumerate()
+        .map(|(index, exchange)| Exchange {
+            question: exchange.question.clone(),
+            answer: if index < boundary {
+                None
+            } else {
+                exchange.answer.clone()
+            },
+        })
+        .collect();
+    while transcript_len(&compacted) > TRANSCRIPT_BUDGET && !compacted.is_empty() {
+        compacted.remove(0);
+    }
+    compacted
+}
+
+/// The character count `exchanges` spends, the quantity the transcript budget
+/// bounds.
+fn transcript_len(exchanges: &[Exchange]) -> usize {
+    exchanges
+        .iter()
+        .map(|exchange| exchange.question.len() + exchange.answer.as_deref().map_or(0, str::len))
+        .sum()
+}
+
+/// Build a single-message request against the configured settings. The
+/// credential becomes a bearer token, absent when no credential is
+/// configured.
 ///
 /// @planks("the request carries the authorization header {string}")
 /// @planks("the request carries no authorization header")
 fn request(settings: &Settings, temperature: f64, prompt: String) -> Request {
+    request_from_messages(settings, temperature, vec![("user".to_string(), prompt)])
+}
+
+/// Build a request carrying `messages` against the configured settings. The
+/// credential becomes a bearer token, absent when no credential is
+/// configured.
+fn request_from_messages(
+    settings: &Settings,
+    temperature: f64,
+    messages: Vec<(String, String)>,
+) -> Request {
     Request {
         base_url: settings.base_url.clone(),
         model: settings.model.clone(),
         authorization: settings.api_key.as_ref().map(|key| format!("Bearer {key}")),
         temperature,
-        prompt,
+        messages,
     }
 }
 
-/// The acronym expansion the configured provider generated, absent when no
-/// credential is configured, when the provider cannot be reached, when it
-/// rejects the credential, or when it generates nothing.
-///
-/// @planks("an acronym expansion is generated by the configured engine")
-pub fn expansion(settings: &Settings) -> Option<String> {
-    generated_expansion(settings, GENERATION_CEILING)
-}
-
 /// The acronym expansion an interactive help fills its tagline with, absent
-/// under the same conditions as `expansion` and when the provider has answered
-/// nothing within the tagline ceiling.
+/// when no credential is configured, when the provider cannot be reached,
+/// when it rejects the credential, when it generates nothing, or when it has
+/// answered nothing within the tagline ceiling.
 ///
 /// @planks("the operator runs {string} in an interactive terminal")
 pub fn tagline_expansion(settings: &Settings) -> Option<String> {
@@ -261,7 +372,8 @@ pub fn tagline_expansion(settings: &Settings) -> Option<String> {
 }
 
 /// The acronym expansion the configured provider generated within `ceiling`,
-/// absent under the same conditions as `expansion`.
+/// absent when no credential is configured, when the provider cannot be
+/// reached, when it rejects the credential, or when it generates nothing.
 fn generated_expansion(settings: &Settings, ceiling: std::time::Duration) -> Option<String> {
     settings.api_key.as_ref()?;
     let generated = complete(&acronym_request(settings), ceiling)?;
@@ -279,7 +391,22 @@ fn generated_expansion(settings: &Settings, ceiling: std::time::Duration) -> Opt
 ///
 /// @planks("the operator asks {string}")
 pub fn assistant_completion(settings: &Settings, question: &str) -> Option<String> {
-    complete(&assistant_request(settings, question), GENERATION_CEILING)
+    assistant_completion_for_turn(settings, &[], question)
+}
+
+/// `assistant_completion`, carrying `history`'s compacted transcript ahead of
+/// `question`.
+///
+/// @planks("the operator asks {string}")
+pub fn assistant_completion_for_turn(
+    settings: &Settings,
+    history: &[Exchange],
+    question: &str,
+) -> Option<String> {
+    complete(
+        &assistant_turn_request(settings, history, question),
+        GENERATION_CEILING,
+    )
 }
 
 /// The terminal object model the configured provider read from the screen it
@@ -309,11 +436,22 @@ pub fn is_available(settings: &Settings) -> bool {
 /// or answers with nothing.
 fn complete(request: &Request, ceiling: std::time::Duration) -> Option<String> {
     let url = request.url();
+    let messages: Vec<String> = request
+        .messages
+        .iter()
+        .map(|(role, content)| {
+            format!(
+                r#"{{"role":{},"content":{}}}"#,
+                json_string(role),
+                json_string(content)
+            )
+        })
+        .collect();
     let body = format!(
-        r#"{{"model":{},"temperature":{},"messages":[{{"role":"user","content":{}}}]}}"#,
+        r#"{{"model":{},"temperature":{},"messages":[{}]}}"#,
         json_string(&request.model),
         request.temperature,
-        json_string(&request.prompt)
+        messages.join(",")
     );
     let mut call = ureq::post(&url)
         .config()
