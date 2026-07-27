@@ -22,13 +22,32 @@ Everything else is a default, not a wall: write scopes, which role owns which fi
 
 **A recorded departure is one sentence naming what and why.** Not three paragraphs of self-audit.
 
+## FIRST: Tinman executes targets outside the sandbox. Security defect, blocks 0.2.0.
+
+**`record` and `inspect` both launch the target program with the operator's real home, environment, PATH and network.** Established by command, not by reading prose:
+
+- `src/inspect.rs:20` calls `capture_interactive` on a `PreparedProcess` it constructs itself.
+- `src/record.rs:195` launches `/bin/sh -c <command>` on a directly constructed `PreparedProcess`. It imports `SandboxSpec` only to write one **into the recorded plan**, so the plan describes a sandbox the recording session never ran in.
+- `src/flow.rs:103` and `src/driver.rs:213` are correct: they take a prepared process from elsewhere.
+- `grep -rn "PreparedProcess {" src/` names the three construction sites; only `src/bwrap.rs:186` is legitimate.
+
+**`AGENTS.md`'s claim that "tinman record launches its target inside a sandbox" is false today.** It reads as shorthand for a general policy and is in fact a statement about one command that is not true of it. No scenario pins isolation for either command: `features/inspect-command.feature` has three scenarios, none about containment, and `features/sandboxed-launch.feature` does not cover them.
+
+**User ruling, 2026-07-27: Tinman never executes a CLI or TUI outside the sandbox, for any command.**
+
+**The structural fix, and it is the one that cannot rot: only the sandbox backend may construct a `PreparedProcess`.** One invariant catches both bypasses and every future one. The existing reference-boundary branch of `scantlings/proof-contract.schema.json` is per-module, so guarding it that way means remembering to add a contract for each new module, which is the failure mode this project keeps paying for. It wants **a new construction-boundary branch: a named type, and the modules permitted to construct it.** Whole tree, one contract, and a new module that bypasses isolation reddens without anyone having thought to guard it.
+
+**And it needs the negative-control shape.** Asserting a launch ran under bwrap proves plumbing. Proving containment means a target that tries to touch a sentinel outside the sandbox, with the scenario asserting the sentinel does not exist, per the `pty::launch` lesson recorded below.
+
 ## Deck state, 2026-07-27
 
-Committed through `ff81628`, seven commits ahead of `origin/main` and unpushed. Voyages 4 through 8 are closed: the `cwd` divergence finally pinned by a proof contract, `replay` struck from parser, help asset and skill, dispatch completeness handed to rustc by banning the wildcard match arm, the inference ceiling split into probe and generation bounds, a bounded retry for real-service transients, and the assistant grown from a bare `Ask Tinman:` line into a ratatui box with a scrollback transcript. Confirm all of it with commands; this paragraph is a summary, not evidence.
+Committed through `8b830b3`, **nine commits ahead of `origin/main` and unpushed**. Voyages 4 through 9 are closed. The assistant now draws a rounded ratatui box capped at 80 columns, writes both halves of each exchange into scrollback above it, carries the session forward with continuous compaction at seventeen whole exchanges inside a 120000-character budget, reports elapsed seconds on a pending call, and cancels on escape. `@logic` 167 scenarios, `@sandbox` 36, both green at custody.
 
-Voyage 9 is in flight at dispatch time: session memory with continuous compaction, a bottom-border status rule for the terminal object model, and the removal of the caller-less `inference::expansion`.
+**Safe to play with: `tinman --help`, which executes nothing. Not safe on untrusted input: `record` and `inspect`, per the section above.**
 
-**Verify before trusting anything below.** `git log --oneline -12`, `git status --porcelain`, `git rev-list --left-right --count origin/main...HEAD`, and the three `broad-*` commands from `RIGGING.md`.
+**Verify before trusting any of this.** `git log --oneline -12`, `git status --porcelain`, `git rev-list --left-right --count origin/main...HEAD`, and the three `broad-*` commands from `RIGGING.md`.
+
+**Two roles mischaracterised the rule set this voyage.** Boatswain twice called `scantlings/verification-conformance` a three-rule set covering plank form, quiescence and forbidden doubles, and once concluded from that that no check covers seam-plank presence. `ls scantlings/verification-conformance` reports **four**, and `plank-presence` is what reddened on the unplanked `Exchange::new` earlier in the same voyage. Count the directory rather than trusting a report's prose.
 
 ## The assistant. The direction, user-confirmed 2026-07-27.
 
@@ -85,6 +104,23 @@ Every item below is user-confirmed and owes scenarios.
 **This is a product feature, not internal plumbing.** "Test the examples in your own README" is a real capability for a testing tool, on the same discoverable subcommand surface as everything else.
 
 **mdbook: no, and the testing rationale specifically fails.** `mdbook test` compiles Rust doctests; it cannot run a Tinman plan or check a command line, so the extractor is ours to write either way. What it would buy is a website, against a 207-line total doc surface, plus a second outbound target with its own verification obligation and a fourth surface to drift on. Revisit as a marketing call when there is prose to warrant a book, not as a testing one.
+
+## inspect, and the discoverability surface. User-confirmed 2026-07-27.
+
+**`inspect` must work for plain CLIs, not only TUIs**, per the standing preference that Tinman stays useful for plain command-line testing.
+
+- **A program that exits on its own is read as a stream**, its complete output, unbounded by terminal height. **A program still running is read as a screen.** Exiting is observable, so the rule needs no flag and no guessing. Reading a plain CLI as a screen would let output longer than the terminal scroll off, making assertions depend on terminal height, which is the same quiet-wrong-answer class as the `cwd` bug.
+- **Undecided, Captain owes the user an answer:** roles for stream output. Either lines become `listitem`s in a `list`, good for `ls`-shaped output and wrong for prose, or blank-line blocks become `article`s in a `log`, reusing the rule that already exists and coarse for line-per-item.
+- **`--help` is ground truth**, from the binary being tested, at the installed version, inside the sandbox. **`man` opportunistically**, absent from a minimal bwrap sandbox because we do not bind `/usr/share/man`, and widening the sandbox to read documentation is not worth it. **tldr, including `tlrc`, as hints only**, never as the basis for an assertion: a tldr page describes some version of a program the way our help text described a parser it had drifted from.
+- **Captain was wrong about the network objection to tldr, and the user caught it.** Network is denied to the *target*, not to Tinman: the inference call is already made by Tinman outside the sandbox. A tldr fetch would be the same shape, same tier, capture-time only. What survives is the drift argument alone.
+
+**Discoverability: one surface, three consumers, everything derived from one clap definition and one prose file.**
+
+- **`tinman man`** emits roff via `clap_mangen` 0.3.0, and **`tinman completions <shell>`** emits a script via `clap_complete` 4.6.7, both **at runtime rather than committed**. Nothing generated sits in the tree, so nothing can drift and no conformance check is owed to keep it current. It also works after `cargo install`, which a shipped man page does not, and packagers pipe the output into their build.
+- **The named-commands floor moves to seven**: `record`, `test`, `inspect`, `driver`, `help`, `man`, `completions`. That floor existing is what makes adding commands safe.
+- **`SKILL.md` stays the one prose source**, read directly by agents and rendered for humans by `tinman help <topic>` through the `tui-markdown` renderer the assistant already needs. **`mandown` was declined**: rendering the skill as roff puts it on the drift-prone side, where today it is checked against the parser.
+- **The skill and the man page are not one document.** A man page is exhaustive reference, a skill is teaching material. What unifies is the sources: the CLI surface from clap, the concepts from prose.
+- **A clap-derived machine-readable manifest is still missing**, and it is what an external coding agent should read instead of parsing prose help. Undecided whether to write it before the subcommands exist to describe.
 
 ## Scheduled work
 
@@ -147,6 +183,10 @@ Fifteenth, 2026-07-26, and Captain wrote it into a scenario Captain never opened
 - **An absence assertion disarmed by a change to the asset it names.** `features/inference-availability.feature:degraded help omits the assistant prompt` asserted the help output does not contain the body of `assets/help/assistant-prompt.txt`, as a contiguous string. Captain grew that asset from one line to two and drew it in a ratatui box, where line one becomes a border title and line two a bordered row. The contiguous two-line body can therefore never appear, whether the assistant opened or not, so the scenario passes with the `expansion.is_some()` gate in `src/main.rs` present **or removed**. Boatswain established the mechanism from the diff and labelled the conclusion unverified, wanting the planted red QM owes at adoption. Rewritten to assert against the terminal object model, the same place its positive twin already asserts.
 
 **The lesson is the standing corollary, paid for a second time in one session:** a change to a definition narrows what every scenario counting on it may claim, so re-read them in the same pass. Captain re-read the scenarios that assert the box's **presence** and never the one that asserts its **absence**. Absence assertions are the ones that go quiet, because nothing about their output changes when they stop testing.
+
+Seventeenth, found by Boatswain 2026-07-27, and this one is in the tooling rather than a spec:
+
+- **A focused run against a scenario name that no longer exists selects zero scenarios and exits green.** `the implementation carries no standing perturbation` was folded into `the verification-conformance rule set reports no match`. Any role reaching for the old name by memory gets a clean bill from a run that checked nothing. Same shape as the gplint glob reading zero files. `ast-grep scan` is the command that actually answers quiescence. **A focused run reporting `0 scenarios` is a failed selection, never a pass.**
 
 **The test: when a scenario goes green early and cheaply, ask what it would take to make it red. If nothing would, the scenario is the defect.**
 
