@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/assistant-ui.schema.json",
   "title": "Tinman assistant interface",
-  "description": "The terminal object model Tinman's own interactive assistant must produce. Tinman's user interface is specified in the model Tinman derives from every other program it drives, so the shape of its own screen is checked the way a test author checks theirs. This is a constraint on the model, not a recorded copy of it: it names the region that must exist and the bounds it must respect, and says nothing about the rest of the screen. Two things follow. A role verifying this interface validates one document against one schema rather than writing a bespoke assertion per property, so a change to the interface is an edit here rather than an edit to verification support. And a property this schema cannot express is a property the terminal object model cannot carry, which is a finding about the model rather than a gap to work around; colour and cursor position are the current examples, and they are asserted by their own scenarios. Referenced by features/interactive-help.feature.",
+  "description": "The terminal object model Tinman's own interactive assistant must produce. Tinman's user interface is specified in the model Tinman derives from every other program it drives, so the shape of its own screen is checked the way a test author checks theirs. This is a constraint on the model, not a recorded copy of it: it names the regions that must exist and the bounds and presentation they must respect, and says nothing about the rest of the screen. A role verifying this interface validates one document against one schema rather than writing a bespoke assertion per property, so a change to the interface is an edit here rather than an edit to verification support. This is the terminal answer to a web interface's stylesheet: the model carries structure and computed presentation together, so layout, measure, colour and the cursor are all constrained in one contract rather than split between a schema and a pile of prose assertions. What stays outside is behaviour over time, such as whether a reported wait advances or whether escape abandons a call, which no single screen can show. Referenced by features/interactive-help.feature.",
   "type": "object",
   "required": [
     "rows",
     "cols",
-    "root"
+    "root",
+    "cursor"
   ],
   "properties": {
     "cols": {
@@ -17,6 +18,14 @@
     "rows": {
       "type": "integer",
       "minimum": 1
+    },
+    "cursor": {
+      "description": "The assistant takes input on every screen it draws, so the cursor is always somewhere the operator can see it. Required here rather than left optional: an optional property is an attestation that cannot fail, and a model that stopped reporting the cursor would validate against a schema that merely permits one.",
+      "type": "object",
+      "required": [
+        "row",
+        "column"
+      ]
     },
     "root": {
       "description": "The assistant's input box must appear somewhere in the tree beneath the root.",
@@ -54,6 +63,7 @@
         "role",
         "name",
         "rect",
+        "style",
         "children"
       ],
       "properties": {
@@ -64,7 +74,7 @@
           "const": "Ask Tinman"
         },
         "rect": {
-          "description": "Bounded rather than stretched. Eighty columns is the cap on a wide terminal; a narrower terminal is honoured by the model's own cols, which the checker compares against.",
+          "description": "Bounded rather than stretched, and bounded to the same measure the transcript is wrapped to, so the answer, the question and the box form one column of text. Seventy-two columns is the cap on a wide terminal; a narrower terminal is honoured by the model's own cols, which the checker compares against.",
           "type": "object",
           "required": [
             "width",
@@ -74,13 +84,23 @@
             "width": {
               "type": "integer",
               "minimum": 3,
-              "maximum": 80
+              "maximum": 72
             },
             "height": {
               "type": "integer",
               "minimum": 3
             }
           }
+        },
+        "style": {
+          "description": "The box is drawn one way throughout. Requiring a style here is what makes the box's presentation checkable at all: a region whose cells disagree carries no style, so a border drawn half in one colour would fail this rather than validate as a box with no opinion. Which colour it carries is left to the two scenarios that pin it, because the answer differs between a terminal that takes colour and one honouring NO_COLOR, and a contract that named one of them would be false on the other.",
+          "type": "object",
+          "required": [
+            "foreground",
+            "background",
+            "bold",
+            "reverse"
+          ]
         },
         "children": {
           "description": "The box carries its key hints as a status region, read from its bottom border. Requiring it here is what stops the hint being drawn from a constant that has drifted from the asset the copy lives in.",

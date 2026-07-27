@@ -30,6 +30,10 @@ struct TinmanWorld {
     spec: Option<SandboxSpec>,
     launch_error: Option<String>,
     sentinel: Option<std::path::PathBuf>,
+    // the directory the sentinel path sits in, held so a sentinel a breached
+    // sandbox managed to write is reclaimed with it rather than left in the
+    // temp directory
+    sentinel_dir: Option<support::ScratchDir>,
     // bwrap argument generation
     generated_args: Option<Vec<String>>,
     network_denied: bool,
@@ -151,6 +155,12 @@ struct TinmanWorld {
     parse_error: Option<String>,
     // terminal object model
     pane: Option<(String, Vec<String>)>,
+    // the text a scenario placed on the screen and where it placed it, so a
+    // later step redraws the same screen with the cursor moved or hidden
+    placed_text: Option<(String, u16, u16)>,
+    // the region a presentation assertion last found, so a following step
+    // reading "that region" reads the one just named
+    styled_region: Option<serde_json::Value>,
     tom: Option<tinman::tom::Model>,
     found_region: Option<tinman::tom::Region>,
     tom_resolution: Option<tinman::tom::Resolution>,
@@ -419,6 +429,33 @@ async fn launching_fails_unavailable(world: &mut TinmanWorld) {
     );
 }
 
+/// A path a sandboxed program can name but must not be able to write: it sits
+/// in a scratch directory of its own, outside the workspace a sandbox binds, so
+/// nothing but a breach puts a file there. The directory is held by the world,
+/// so a sentinel a breach did write is reclaimed with it.
+#[given("a sentinel path outside the sandbox where no file exists")]
+async fn a_sentinel_path_outside_the_sandbox(world: &mut TinmanWorld) {
+    let dir = support::ScratchDir::new("sentinel");
+    let sentinel = dir.path().join("breached");
+    assert!(
+        !sentinel.exists(),
+        "the sentinel {} already exists",
+        sentinel.display()
+    );
+    world.sentinel = Some(sentinel);
+    world.sentinel_dir = Some(dir);
+}
+
+#[then("no file exists at the sentinel path")]
+async fn no_file_exists_at_the_sentinel_path(world: &mut TinmanWorld) {
+    let sentinel = world.sentinel.as_ref().expect("a sentinel path was given");
+    assert!(
+        !sentinel.exists(),
+        "a file exists at the sentinel path {}: the launched program wrote outside the sandbox",
+        sentinel.display()
+    );
+}
+
 #[then("no unsandboxed process is started")]
 async fn no_unsandboxed_process(world: &mut TinmanWorld) {
     let sentinel = world.sentinel.as_ref().expect("a sentinel path was set");
@@ -485,6 +522,19 @@ async fn pty_runner_source(_world: &mut TinmanWorld) {
 async fn verifier_checks_boundary(world: &mut TinmanWorld) {
     world.boundary_counterexamples = Some(support::check_boundary(
         "scantlings/pty-sandbox-boundary.json",
+    ));
+}
+
+#[given("the implementation sources")]
+async fn the_implementation_sources(_world: &mut TinmanWorld) {
+    // The construction boundary contract names the search paths; nothing to
+    // stage here.
+}
+
+#[when("the verifier checks the prepared-process construction boundary")]
+async fn verifier_checks_construction_boundary(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_construction_boundary(
+        "scantlings/prepared-process-construction-boundary.json",
     ));
 }
 
@@ -1016,45 +1066,84 @@ fn skill_from_file(world: &TinmanWorld) -> tinman::skill::Skill {
         .unwrap_or_else(|e| panic!("bundled skill {path} did not parse: {e}"))
 }
 
-#[given(expr = "the command lines in the asset at {string}")]
-async fn the_command_lines_in_the_asset(world: &mut TinmanWorld, path: String) {
-    let asset =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("asset {path} unreadable: {e}"));
-    world.named_command_lines = Some(support::named_command_lines(&asset));
+/// The single-column rows of a step's data table, the header row dropped.
+fn table_column(step: &cucumber::gherkin::Step) -> Vec<String> {
+    step.table
+        .as_ref()
+        .expect("the step carries a data table")
+        .rows
+        .iter()
+        .skip(1)
+        .map(|row| {
+            row.first()
+                .expect("each table row carries a cell")
+                .trim()
+                .to_string()
+        })
+        .collect()
 }
 
-#[when("each named command is passed to the command parser")]
-async fn each_named_command_is_passed_to_the_parser(world: &mut TinmanWorld) {
-    let lines = world
-        .named_command_lines
-        .as_ref()
-        .expect("the asset's command lines were read");
-    let mut rejections = Vec::new();
-    for line in lines {
-        if let Err(e) = tinman::cli::parse_command_line(line) {
-            rejections.push(format!("{line:?} refused: {e}"));
-        }
+#[given("the Tinman command lines in the fenced blocks of these documents")]
+async fn the_command_lines_in_these_documents(
+    world: &mut TinmanWorld,
+    step: &cucumber::gherkin::Step,
+) {
+    let mut lines = Vec::new();
+    for document in table_column(step) {
+        let text = std::fs::read_to_string(&document)
+            .unwrap_or_else(|e| panic!("document {document} unreadable: {e}"));
+        lines.extend(support::named_command_lines(&text));
     }
-    world.command_line_rejections = Some(rejections);
+    world.named_command_lines = Some(lines);
 }
 
-#[then("the parser accepts every command the skill names")]
-async fn the_parser_accepts_every_command_the_skill_names(world: &mut TinmanWorld) {
-    let lines = world
-        .named_command_lines
+#[given("the commands Tinman names")]
+async fn the_commands_tinman_names(world: &mut TinmanWorld, step: &cucumber::gherkin::Step) {
+    world.read_command_set = Some(table_column(step));
+}
+
+#[then("the parser accepts every one")]
+async fn the_parser_accepts_every_one(world: &mut TinmanWorld) {
+    let commands = world
+        .read_command_set
         .as_ref()
-        .expect("the asset's command lines were read");
+        .expect("the named commands were read");
     assert!(
-        !lines.is_empty(),
-        "the skill names no command line, so this scenario would assert nothing"
+        !commands.is_empty(),
+        "no command was named, so this scenario would assert nothing"
     );
+    let rejected = world
+        .command_line_rejections
+        .as_ref()
+        .expect("the commands were passed to the parser");
+    assert!(
+        rejected.is_empty(),
+        "commands Tinman names but the parser refuses: {rejected:?}"
+    );
+}
+
+#[then("the parser accepts every command line")]
+async fn the_parser_accepts_every_command_line(world: &mut TinmanWorld) {
     let rejected = world
         .command_line_rejections
         .as_ref()
         .expect("the command lines were passed to the parser");
     assert!(
         rejected.is_empty(),
-        "command lines the skill names but the parser refuses: {rejected:?}"
+        "command lines the documents name but the parser refuses: {rejected:?}"
+    );
+}
+
+#[then("the command lines read are not empty")]
+async fn the_command_lines_read_are_not_empty(world: &mut TinmanWorld) {
+    let lines = world
+        .named_command_lines
+        .as_ref()
+        .expect("the documents' command lines were read");
+    assert!(
+        !lines.is_empty(),
+        "no Tinman command line was read from the documents, \
+         so this scenario would assert nothing"
     );
 }
 
@@ -1176,6 +1265,64 @@ async fn operator_executes(world: &mut TinmanWorld, line: String) {
     world.run_elapsed = Some(started.elapsed());
     world.run_stdout = Some(outcome.stdout);
     world.run_status = Some(outcome.status);
+}
+
+#[then(expr = "the output begins with a roff title macro naming {string}")]
+async fn the_output_begins_with_a_roff_title_macro(world: &mut TinmanWorld, name: String) {
+    let output = run_output(world);
+    let first = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| panic!("the command wrote nothing"));
+    assert!(
+        first.starts_with(".TH"),
+        "the output opens with {first:?} rather than a roff title macro"
+    );
+    assert!(
+        first.to_lowercase().contains(&name.to_lowercase()),
+        "the roff title macro {first:?} does not name {name:?}"
+    );
+}
+
+#[then("the output names every command the parser accepts")]
+async fn the_output_names_every_command(world: &mut TinmanWorld) {
+    let output = run_output(world);
+    let accepted = tinman::cli::accepted_commands();
+    assert!(
+        !accepted.is_empty(),
+        "the parser accepts no command, so this scenario would assert nothing"
+    );
+    let missing: Vec<&String> = accepted
+        .iter()
+        .filter(|command| !output.contains(command.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the output names no {missing:?}, though the parser accepts them; it reads:\n{output}"
+    );
+}
+
+#[then(expr = "the output is a completion script naming {string}")]
+async fn the_output_is_a_completion_script(world: &mut TinmanWorld, name: String) {
+    let output = run_output(world);
+    assert!(
+        output.contains(&name),
+        "the output names no {name:?}; it reads:\n{output}"
+    );
+    // A completion script is a shell program that registers a completion for the
+    // program it names, so the registration is what separates it from any other
+    // output that happens to carry the name.
+    assert!(
+        output.contains("complete"),
+        "the output registers no completion, so it is not a completion script; it reads:\n{output}"
+    );
+}
+
+#[then("the command exits with a non-zero status")]
+async fn the_command_exits_non_zero(world: &mut TinmanWorld) {
+    let status = world.run_status.expect("a command was run");
+    let output = run_output(world);
+    assert_ne!(status, 0, "the command exited successfully:\n{output}");
 }
 
 #[then(expr = "the help output is the asset at {string} with the tagline line removed")]
@@ -1302,25 +1449,49 @@ async fn the_options_the_asset_advertises(world: &mut TinmanWorld, path: String)
 #[when("each is passed to the command parser")]
 async fn each_is_passed_to_the_command_parser(world: &mut TinmanWorld) {
     use clap::Parser;
-    let options = world
-        .advertised_options
-        .as_ref()
-        .expect("the help asset's options were read");
-    let mut rejected = Vec::new();
-    for option in options {
-        if let Err(e) = tinman::cli::Cli::try_parse_from(["tinman", option]) {
-            // Clap reports a help or version flag as a display request rather
-            // than a parse failure: the parser took the option and asked to
-            // print. Every other error is the parser refusing the option.
-            if !matches!(
-                e.kind(),
-                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
-            ) {
-                rejected.push(format!("{option} refused as {:?}", e.kind()));
+    // Three scenarios stage three different collections and pass each through
+    // the same parser. A scenario stages exactly one, so the collection in hand
+    // is what this step passes.
+    if let Some(options) = world.advertised_options.clone() {
+        let mut rejected = Vec::new();
+        for option in &options {
+            if let Err(e) = tinman::cli::Cli::try_parse_from(["tinman", option]) {
+                // Clap reports a help or version flag as a display request
+                // rather than a parse failure: the parser took the option and
+                // asked to print. Every other error is the parser refusing it.
+                if !matches!(
+                    e.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                ) {
+                    rejected.push(format!("{option} refused as {:?}", e.kind()));
+                }
             }
         }
+        world.option_rejections = Some(rejected);
+        return;
     }
-    world.option_rejections = Some(rejected);
+    if let Some(lines) = world.named_command_lines.clone() {
+        let mut rejected = Vec::new();
+        for line in &lines {
+            if let Err(e) = tinman::cli::parse_command_line(line) {
+                rejected.push(format!("{line:?} refused: {e}"));
+            }
+        }
+        world.command_line_rejections = Some(rejected);
+        return;
+    }
+    let commands = world
+        .read_command_set
+        .clone()
+        .expect("a collection was staged for the parser");
+    let accepted = tinman::cli::accepted_commands();
+    world.command_line_rejections = Some(
+        commands
+            .iter()
+            .filter(|command| !accepted.contains(command))
+            .map(|command| format!("{command:?} is not a command the parser accepts"))
+            .collect(),
+    );
 }
 
 #[then("the parser accepts every advertised option")]
@@ -2027,8 +2198,8 @@ fn conventional_help_lines() -> Vec<String> {
         .collect()
 }
 
-#[then("the conventional help is still on the screen")]
-async fn the_conventional_help_is_still_on_the_screen(world: &mut TinmanWorld) {
+#[then("the conventional help is on the screen")]
+async fn the_conventional_help_is_on_the_screen(world: &mut TinmanWorld) {
     let output = world.run_stdout.as_ref().expect("the help output was read");
     for line in conventional_help_lines() {
         assert!(
@@ -2038,28 +2209,13 @@ async fn the_conventional_help_is_still_on_the_screen(world: &mut TinmanWorld) {
     }
 }
 
-#[then(expr = "a bordered region titled {string} is drawn beneath it")]
-async fn a_bordered_region_is_drawn_beneath_it(world: &mut TinmanWorld, title: String) {
-    let output = world.run_stdout.as_ref().expect("the help output was read");
-    let last_help_line = conventional_help_lines()
-        .pop()
-        .expect("the conventional help carries a line");
-    let help_ends = output
-        .rfind(&last_help_line)
-        .map(|at| at + last_help_line.len())
-        .unwrap_or_else(|| {
-            panic!("the conventional help is not on the terminal; output:\n{output}")
-        });
-    let titled_at = output.rfind(&title).unwrap_or_else(|| {
-        panic!("nothing on the terminal is titled {title:?}; output:\n{output}")
-    });
-    assert!(
-        titled_at > help_ends,
-        "the region titled {title:?} is drawn above the conventional help rather than beneath it; \
-         output:\n{output}"
-    );
-    // The box must be legible to Tinman's own model, so it is read back through
-    // the same virtual screen a captured program goes through.
+#[then(expr = "a bordered region titled {string} is drawn")]
+async fn a_bordered_region_is_drawn(world: &mut TinmanWorld, title: String) {
+    // Read through the same virtual screen the negative assertion uses: the
+    // title sits on the top border row and the body rows below, so no run of
+    // the region's text appears contiguously in the bytes and a search of the
+    // raw output would report the box present whether or not it was drawn as a
+    // region.
     let raw = world
         .run_raw
         .as_ref()
@@ -4293,19 +4449,169 @@ fn run_output(world: &TinmanWorld) -> &str {
 
 #[when("the operator inspects the fixture terminal program")]
 async fn the_operator_inspects_the_fixture(world: &mut TinmanWorld) {
-    let program = support::fixture_terminal_program();
-    run_tinman_command(world, &["inspect", &program.to_string_lossy()]);
+    // Inspection launches its target inside the sandbox, which binds the
+    // workspace and nothing else, so the fixture is staged there and named
+    // relatively rather than by an absolute path the sandbox cannot reach.
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    run_tinman_command(world, &["inspect", &program]);
 }
 
 #[when("the operator inspects the fixture terminal program as JSON")]
 async fn the_operator_inspects_the_fixture_as_json(world: &mut TinmanWorld) {
-    let program = support::fixture_terminal_program();
-    run_tinman_command(world, &["inspect", &program.to_string_lossy(), "--json"]);
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    run_tinman_command(world, &["inspect", &program, "--json"]);
 }
 
 #[when(expr = "the operator inspects the command {string}")]
 async fn the_operator_inspects_the_command(world: &mut TinmanWorld, command: String) {
     run_tinman_command(world, &["inspect", &command]);
+}
+
+#[when(
+    expr = "the operator inspects a command that writes to the sentinel path and prints {string}"
+)]
+async fn the_operator_inspects_a_command_writing_the_sentinel(
+    world: &mut TinmanWorld,
+    text: String,
+) {
+    let sentinel = world
+        .sentinel
+        .clone()
+        .expect("a sentinel path was given")
+        .display()
+        .to_string();
+    // The sandbox carries no /dev/null, so stderr is closed rather than
+    // redirected: the refusal the sandbox issues must not be drawn on the
+    // screen the assertion below reads.
+    let command = format!("exec 2>&-; touch {sentinel}; printf {text}");
+    run_tinman_command(world, &["inspect", &command]);
+}
+
+/// One line of the inspect listing, read as the depth it is indented to, the
+/// role it names, and the accessible name it carries. The listing renders a
+/// region as its role followed by its name in quotes, indented two spaces per
+/// level, so the rendered text is parsed back into the tree it describes.
+fn listing_rows(output: &str) -> Vec<(usize, String, Option<String>)> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let depth = (line.len() - line.trim_start().len()) / 2;
+            let body = line.trim_start();
+            match body.split_once(" \"") {
+                Some((role, rest)) => (
+                    depth,
+                    role.to_string(),
+                    Some(rest.trim_end_matches('"').to_string()),
+                ),
+                None => (depth, body.to_string(), None),
+            }
+        })
+        .collect()
+}
+
+#[when("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")]
+async fn the_operator_inspects_200_numbered_lines(world: &mut TinmanWorld) {
+    // The PTY inspection opens is 24 rows high, so 200 lines is far more than
+    // one screenful: only a reading of the whole stream carries the first line.
+    let command = "i=1; while [ $i -le 200 ]; do printf 'line %s\\n' \"$i\"; i=$((i+1)); done";
+    run_tinman_command(world, &["inspect", command]);
+}
+
+#[then(expr = "the inspect output carries the line numbered {int}")]
+async fn the_inspect_output_carries_the_line_numbered(world: &mut TinmanWorld, number: u32) {
+    let output = run_output(world);
+    let expected = format!("{:?}", format!("line {number}"));
+    assert!(
+        output.contains(&expected),
+        "the inspect output carries no line numbered {number}; it reads:\n{output}"
+    );
+}
+
+#[when(
+    expr = "the operator inspects a command printing {string}, {string} and {string} on their own lines"
+)]
+async fn the_operator_inspects_three_lines(
+    world: &mut TinmanWorld,
+    first: String,
+    second: String,
+    third: String,
+) {
+    let command = format!("printf '{first}\\n{second}\\n{third}\\n'");
+    run_tinman_command(world, &["inspect", &command]);
+}
+
+#[when("the operator inspects a command printing two two-line blocks separated by a blank line")]
+async fn the_operator_inspects_two_blocks(world: &mut TinmanWorld) {
+    let command = "printf 'build started\\nat 10:00\\n\\nbuild finished\\nat 10:05\\n'";
+    run_tinman_command(world, &["inspect", command]);
+}
+
+#[when(expr = "the operator inspects a command printing {string}, a blank line and {string}")]
+async fn the_operator_inspects_two_lines_apart(
+    world: &mut TinmanWorld,
+    first: String,
+    second: String,
+) {
+    let command = format!("printf '{first}\\n\\n{second}\\n'");
+    run_tinman_command(world, &["inspect", &command]);
+}
+
+#[then(expr = "the inspect output lists a {string} holding {int} {string} regions")]
+async fn the_inspect_output_lists_holding(
+    world: &mut TinmanWorld,
+    role: String,
+    count: usize,
+    child_role: String,
+) {
+    let output = run_output(world);
+    let rows = listing_rows(output);
+    let found = rows.iter().enumerate().any(|(index, (depth, listed, _))| {
+        listed == &role
+            && rows[index + 1..]
+                .iter()
+                .take_while(|(child_depth, _, _)| child_depth > depth)
+                .filter(|(child_depth, child, _)| *child_depth == depth + 1 && child == &child_role)
+                .count()
+                == count
+    });
+    assert!(
+        found,
+        "the inspect output lists no {role:?} holding {count} {child_role:?} regions; it reads:\n{output}"
+    );
+}
+
+#[when(expr = "the operator inspects a command that prints {string} in red")]
+async fn the_operator_inspects_a_command_printing_in_red(world: &mut TinmanWorld, text: String) {
+    // A real SGR sequence sets the colour and clears it after, so the sandboxed
+    // program draws the attribute rather than the fixture asserting one.
+    let command = format!("printf '\\033[31m{text}\\033[0m'");
+    run_tinman_command(world, &["inspect", &command]);
+}
+
+#[then(expr = "the inspect output reports that region is drawn in red")]
+async fn the_inspect_output_reports_that_region_is_red(world: &mut TinmanWorld) {
+    let output = run_output(world);
+    assert!(
+        output.contains("red"),
+        "the inspect output names no colour for the region it lists:\n{output}"
+    );
+}
+
+#[then(expr = "the inspect output lists a region named {string}")]
+async fn the_inspect_output_lists_a_region_named(world: &mut TinmanWorld, name: String) {
+    let output = run_output(world);
+    // The listing renders a named region as its role followed by the name in
+    // quotes, so the quoted form is what distinguishes a named region from a
+    // line that merely carries the text.
+    let quoted = format!("{name:?}");
+    let listed = output.lines().any(|line| line.contains(&quoted));
+    assert!(
+        listed,
+        "no line of the inspect output lists a region named {name:?}:\n{output}"
+    );
 }
 
 #[then(expr = "the inspect output lists a {string} named {string}")]
@@ -4550,11 +4856,11 @@ async fn the_operator_records_the_fixture(world: &mut TinmanWorld) {
 
 #[given("a fixture terminal program whose pane titles change between draws")]
 async fn a_fixture_whose_titles_change(world: &mut TinmanWorld) {
-    world.record_program = Some(
-        support::unstable_fixture_terminal_program()
-            .to_string_lossy()
-            .into_owned(),
-    );
+    // Recording launches its target inside the sandbox, which binds the
+    // workspace and nothing else, so the fixture is staged there and named
+    // relatively rather than by an absolute path the sandbox cannot reach.
+    let workspace = working_dir(world);
+    world.record_program = Some(support::stage_unstable_fixture_in(&workspace));
 }
 
 #[when("the operator records that program")]
@@ -4573,6 +4879,78 @@ async fn the_operator_records_the_command_with(
     options: String,
 ) {
     run_record_with_options(world, &command, &options, &[]);
+}
+
+/// Stage `body` as an executable shell program in the scenario's workspace and
+/// return the relative name a recording addresses it by. A recorded plan replays
+/// inside a sandbox binding the workspace, so the program is staged there and
+/// named relatively, as an operator's own project program is.
+fn stage_recorded_program(world: &mut TinmanWorld, name: &str, body: &str) -> String {
+    let path = working_dir(world).join(name);
+    std::fs::write(&path, body)
+        .unwrap_or_else(|e| panic!("the program {} was not written: {e}", path.display()));
+    support::set_executable(&path);
+    format!("./{name}")
+}
+
+#[when(
+    expr = "the operator records a command that writes to the sentinel path and prints {string}"
+)]
+async fn the_operator_records_a_command_writing_the_sentinel(
+    world: &mut TinmanWorld,
+    text: String,
+) {
+    let sentinel = world
+        .sentinel
+        .clone()
+        .expect("a sentinel path was given")
+        .display()
+        .to_string();
+    let program = stage_recorded_program(
+        world,
+        "writes-sentinel",
+        &format!("#!/bin/sh\nexec 2>&-\ntouch {sentinel}\nprintf {text}\n"),
+    );
+    run_record(world, &program, &[]);
+}
+
+#[when(expr = "the operator records a command that prints {string} and the value of {string}")]
+async fn the_operator_records_a_command_printing_the_secret(
+    world: &mut TinmanWorld,
+    text: String,
+    name: String,
+) {
+    let program = stage_recorded_program(
+        world,
+        "prints-secret",
+        &format!("#!/bin/sh\nprintf '{text} %s' \"${name}\"\n"),
+    );
+    run_record(world, &program, &[]);
+}
+
+#[then(expr = "the recorded snapshots show the text {string}")]
+async fn the_recorded_snapshots_show_the_text(world: &mut TinmanWorld, expected: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    let plan = written_plan(world, "tinman.yaml");
+    let snapshots: Vec<String> = plan
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => Some(expectation.text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        snapshots
+            .iter()
+            .any(|snapshot| snapshot.contains(&expected)),
+        "the recorded snapshots {snapshots:?} do not show the text {expected:?}; \
+         the plan reads:\n{text}"
+    );
 }
 
 #[then(expr = "the written plan names the command {string}")]
@@ -4851,6 +5229,54 @@ async fn a_screen_whose_bottom_line_reads(world: &mut TinmanWorld, text: String)
     world.screen = Some(support::bottom_line_screen(&text));
 }
 
+#[given(expr = "a virtual screen whose bottom line reads {string} in red")]
+async fn a_screen_whose_bottom_line_reads_in_red(world: &mut TinmanWorld, text: String) {
+    world.screen = Some(support::bottom_line_screen_in_red(&text));
+}
+
+#[given(expr = "a virtual screen whose bottom line reads {string} in no colour of its own")]
+async fn a_screen_whose_bottom_line_reads_plainly(world: &mut TinmanWorld, text: String) {
+    world.screen = Some(support::bottom_line_screen(&text));
+}
+
+#[given(expr = "the line {string} is rendered in red while the rest of the pane is drawn plainly")]
+async fn the_line_is_rendered_in_red(world: &mut TinmanWorld, line: String) {
+    let (title, items) = world
+        .pane
+        .as_ref()
+        .expect("a bordered pane was drawn")
+        .clone();
+    assert!(
+        items.contains(&line),
+        "the pane lists {items:?}, so it has no line {line:?} to draw in red"
+    );
+    world.screen = Some(support::bordered_pane_screen_with_line_in_red(
+        &title, &items, &line,
+    ));
+}
+
+#[given(expr = "the cursor rests at row {int} column {int}")]
+async fn the_cursor_rests_at(world: &mut TinmanWorld, row: u16, column: u16) {
+    let (text, at_row, at_col) = world
+        .placed_text
+        .clone()
+        .expect("text was placed on the screen");
+    world.screen = Some(support::text_at_screen_with_cursor_at(
+        &text, at_row, at_col, row, column,
+    ));
+}
+
+#[given("the program has hidden the cursor")]
+async fn the_program_has_hidden_the_cursor(world: &mut TinmanWorld) {
+    let (text, at_row, at_col) = world
+        .placed_text
+        .clone()
+        .expect("text was placed on the screen");
+    world.screen = Some(support::text_at_screen_with_cursor_hidden(
+        &text, at_row, at_col,
+    ));
+}
+
 #[given(expr = "a virtual screen whose top line reads {string}")]
 async fn a_screen_whose_top_line_reads(world: &mut TinmanWorld, text: String) {
     world.screen = Some(support::top_line_screen(&text));
@@ -4858,6 +5284,7 @@ async fn a_screen_whose_top_line_reads(world: &mut TinmanWorld, text: String) {
 
 #[given(expr = "a virtual screen showing {string} at row {int} column {int}")]
 async fn a_screen_showing_text_at(world: &mut TinmanWorld, text: String, row: u16, col: u16) {
+    world.placed_text = Some((text.clone(), row, col));
     world.screen = Some(support::text_at_screen(&text, row, col));
 }
 
@@ -4898,6 +5325,164 @@ async fn the_first_child_covers_columns(world: &mut TinmanWorld, first: u16, las
         child.rect.x + child.rect.width - 1,
         last,
         "last column of the first child region"
+    );
+}
+
+/// The model the scenario built, as the JSON its scantling describes. The
+/// serialized model is the published contract consumers read, so a presentation
+/// assertion reads that shape rather than a private field.
+fn tom_json(world: &TinmanWorld) -> serde_json::Value {
+    let model = world
+        .tom
+        .as_ref()
+        .expect("the terminal object model was built");
+    serde_json::to_value(model).expect("the terminal object model serializes")
+}
+
+/// The first region of the serialized model that `matches`, searched from the
+/// root down.
+fn find_region_json<'a>(
+    node: &'a serde_json::Value,
+    matches: &impl Fn(&serde_json::Value) -> bool,
+) -> Option<&'a serde_json::Value> {
+    if matches(node) {
+        return Some(node);
+    }
+    node.get("children")?
+        .as_array()?
+        .iter()
+        .find_map(|child| find_region_json(child, matches))
+}
+
+/// The region of the serialized model carrying `role`, or a panic naming what
+/// the model does carry.
+fn region_json_with_role(world: &TinmanWorld, role: &str) -> serde_json::Value {
+    let model = tom_json(world);
+    let root = model.get("root").expect("the model carries a root region");
+    find_region_json(root, &|region| {
+        region.get("role").and_then(|r| r.as_str()) == Some(role)
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "the model carries no region with the role {role:?}; it reads:\n{}",
+            serde_json::to_string_pretty(&model).expect("the model prints")
+        )
+    })
+    .clone()
+}
+
+/// Assert the region is drawn in `expected` on the named channel. A region whose
+/// cells disagree carries no style at all, which is reported as the absence it
+/// is rather than as a mismatch.
+fn assert_drawn_in(region: &serde_json::Value, channel: &str, expected: &str) {
+    let style = region
+        .get("style")
+        .filter(|style| !style.is_null())
+        .unwrap_or_else(|| {
+            panic!(
+                "the region carries no style, so it reports no {channel} colour; it reads:\n{}",
+                serde_json::to_string_pretty(region).expect("the region prints")
+            )
+        });
+    let drawn = style
+        .get(channel)
+        .unwrap_or_else(|| panic!("the region's style names no {channel}: {style}"));
+    assert_eq!(
+        drawn,
+        &serde_json::Value::String(expected.to_string()),
+        "the region is drawn in the {channel} colour {drawn}, not {expected:?}"
+    );
+}
+
+#[then(expr = "the region with the role {string} is drawn in the foreground colour {string}")]
+async fn the_region_with_role_is_drawn_in_foreground(
+    world: &mut TinmanWorld,
+    role: String,
+    colour: String,
+) {
+    let region = region_json_with_role(world, &role);
+    assert_drawn_in(&region, "foreground", &colour);
+    world.styled_region = Some(region);
+}
+
+#[then(expr = "that region is drawn in the background colour {string}")]
+async fn that_region_is_drawn_in_background(world: &mut TinmanWorld, colour: String) {
+    let region = world
+        .styled_region
+        .clone()
+        .expect("a region's foreground was read");
+    assert_drawn_in(&region, "background", &colour);
+}
+
+#[then(expr = "the region named {string} carries no style")]
+async fn the_region_named_carries_no_style(world: &mut TinmanWorld, name: String) {
+    let model = tom_json(world);
+    let root = model.get("root").expect("the model carries a root region");
+    let region = find_region_json(root, &|region| {
+        region.get("name").and_then(|n| n.as_str()) == Some(name.as_str())
+    })
+    .unwrap_or_else(|| panic!("the model carries no region named {name:?}"));
+    let style = region.get("style");
+    assert!(
+        style.is_none() || style == Some(&serde_json::Value::Null),
+        "the region named {name:?} carries the style {}, but its cells are drawn differently",
+        style.expect("a style was found")
+    );
+}
+
+#[then(expr = "the child region showing {string} is drawn in the foreground colour {string}")]
+async fn the_child_region_showing_is_drawn_in_foreground(
+    world: &mut TinmanWorld,
+    text: String,
+    colour: String,
+) {
+    let model = tom_json(world);
+    let root = model.get("root").expect("the model carries a root region");
+    let region = find_region_json(root, &|region| {
+        region.get("text").and_then(|t| t.as_str()) == Some(text.as_str())
+            || region.get("name").and_then(|n| n.as_str()) == Some(text.as_str())
+    })
+    .unwrap_or_else(|| {
+        panic!(
+            "the model carries no region showing {text:?}; it reads:\n{}",
+            serde_json::to_string_pretty(&model).expect("the model prints")
+        )
+    });
+    assert_drawn_in(region, "foreground", &colour);
+}
+
+#[then(expr = "the model's cursor is at row {int} column {int}")]
+async fn the_models_cursor_is_at(world: &mut TinmanWorld, row: u64, column: u64) {
+    let model = tom_json(world);
+    let cursor = model
+        .get("cursor")
+        .filter(|cursor| !cursor.is_null())
+        .unwrap_or_else(|| {
+            panic!(
+                "the model carries no cursor; it reads:\n{}",
+                serde_json::to_string_pretty(&model).expect("the model prints")
+            )
+        });
+    assert_eq!(
+        cursor.get("row").and_then(|r| r.as_u64()),
+        Some(row),
+        "the model's cursor reads {cursor}, so it is not at row {row}"
+    );
+    assert_eq!(
+        cursor.get("column").and_then(|c| c.as_u64()),
+        Some(column),
+        "the model's cursor reads {cursor}, so it is not at column {column}"
+    );
+}
+
+#[then("the model carries no cursor")]
+async fn the_model_carries_no_cursor(world: &mut TinmanWorld) {
+    let model = tom_json(world);
+    let cursor = model.get("cursor");
+    assert!(
+        cursor.is_none() || cursor == Some(&serde_json::Value::Null),
+        "the model reports the cursor at {}, but the program hid it",
+        cursor.expect("a cursor was found")
     );
 }
 
@@ -6240,8 +6825,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all fifteen name that version")]
-async fn all_fifteen_name_that_version(world: &mut TinmanWorld) {
+#[then("all sixteen name that version")]
+async fn all_sixteen_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -6252,8 +6837,8 @@ async fn all_fifteen_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        15,
-        "fifteen schema URIs are published, found {}: {}",
+        16,
+        "sixteen schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -6278,7 +6863,7 @@ async fn all_fifteen_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the four scantlings that declare no JSON Schema dialect")]
+#[given("the five scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -6304,16 +6889,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all four validate")]
-async fn all_four_validate(world: &mut TinmanWorld) {
+#[then("all five validate")]
+async fn all_five_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        4,
-        "four scantlings declare no dialect, found {}: {}",
+        5,
+        "five scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

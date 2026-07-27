@@ -3,8 +3,8 @@
 //! collects key presses and screen snapshots into a constrained interaction
 //! log.
 
+use crate::bwrap::BubblewrapBackend;
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
-use crate::process::PreparedProcess;
 use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
@@ -186,22 +186,27 @@ impl Default for RecordingSession {
 /// @planks("the written plan carries an expectation on the text {string}")
 /// @planks("the plan is written to {string}")
 /// @planks("recording fails and reports the file already exists")
+/// @planks("the operator records a command that writes to the sentinel path and prints {string}")
+/// @planks("the operator records a command that prints {string} and the value of {string}")
 pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> Result<(), String> {
     let path = workspace.join(output.unwrap_or(DEFAULT_PLAN));
     if path.exists() {
         return Err(format!("{} already exists", path.display()));
     }
-    crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
-    let mut capture = capture_interactive_at(
-        &PreparedProcess {
+    // The recorded program is the operator's target rather than a program this
+    // project wrote, so it is launched through the sandbox backend, with the
+    // workspace as its home, exactly as replaying the written plan launches it.
+    let prepared = BubblewrapBackend::new().prepare_with_home(
+        &SandboxSpec::default_for_record(),
+        &CommandSpec {
             program: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), command_line(command)],
-            env: Vec::new(),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            cleanup: Vec::new(),
         },
+        Some(workspace),
         None,
     )?;
+    crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    let mut capture = capture_interactive_at(&prepared, None)?;
     let (opening, opening_view) = opening_screen(&mut capture);
     let mut session = RecordingSession::for_command(command.clone());
 

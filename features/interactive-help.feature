@@ -5,23 +5,87 @@ Feature: interactive help
 
   Rule: the assistant has a deliberately narrow scope. It answers questions about Tinman and proposes Tinman commands. Every action it proposes runs through Tinman's normal command parser, so it can never become a general-purpose shell.
 
-  Rule: the assistant draws an inline box rather than taking the screen. A full-screen prompt would clear the conventional help the operator just asked for, and scroll it out of reach; an inline viewport leaves that output in the scrollback and claims only the rows beneath it. The box is the same shape Tinman reads in the programs it drives, a bordered region carrying a title, so the assistant is legible to Tinman's own model.
+  Rule: a tool that reads terminal programs for structure, naming and presentation, and then ships a prompt with none of them, has argued against itself. Tinman's own interface is therefore held to the standard the tool exists to measure, and held to it by the same instrument: the terminal object model Tinman derives from every other program it drives. What follows is that standard made falsifiable, in place of a claim about taste.
 
-  Scenario: the assistant box is drawn beneath the conventional help
+  Rule: meaning carried in colour alone is the accessibility failure a terminal interface can readily commit, and the one an operator cannot work around. Contrast belongs to the terminal's theme and wording to the copy, but a distinction drawn only in colour is the program's own doing. The reader the scenarios below are written for is on a monochrome terminal, honouring NO_COLOR, or unable to tell the chosen colours apart.
+
+  Scenario: every region of the assistant interface that needs a name has one
+    Given inference is available
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "what does inspect do" at the assistant prompt
+    Then every region whose role requires an accessible name carries one
+    And the regions read are not empty
+
+  Rule: a colour escape in a pipe is corruption of somebody's data, and the conventional help is compared against its asset byte for byte. The discipline behind every styling decision here is being deliberate about which stream it reaches, rather than spraying it at all of them.
+
+  Scenario: redirected help carries no styling
+    Given inference is available
+    When the operator runs "tinman --help" with stdout redirected to a file
+    Then the help output carries no escape sequence
+
+  Rule: the usual reason to leave the assistant is to run the command it just gave, so an exit that takes the session with it loses the one line the operator was there for. Drawing the session into the main screen instead would scroll the output they asked for out of reach while it runs. The alternate screen answers both at once: the session's redrawing stays off the scrollback, and the transcript joins it once, at the end, as ordinary terminal output.
+
+  Scenario: the assistant box is drawn when help is asked for interactively
     Given inference is available
     When the operator runs "tinman --help" in an interactive terminal
-    Then the conventional help is still on the screen
-    And a bordered region titled "Ask Tinman" is drawn beneath it
+    Then a bordered region titled "Ask Tinman" is drawn
+
+  Scenario: the conventional help is back on the screen when the assistant leaves
+    Given inference is available
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator presses "esc" at the assistant prompt
+    Then the conventional help is on the screen
+
+  Scenario: the transcript is written into the scrollback when the assistant leaves
+    Given inference is available
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    And the operator types "what does inspect do" at the assistant prompt
+    When the operator presses "esc" at the assistant prompt
+    Then "what does inspect do" is on the screen
+    And "Inspect prints the terminal object model of a running program." is on the screen
+
+  Rule: an operator who types the program's name with nothing after it is asking what it does, and the assistant is the thing that answers that. What decides whether answering it is safe is the shape of the invocation and the streams around it, and stdin is the condition that earns its place: "tinman < plan.yaml" is a file being handed to a program, not an operator waiting at a prompt.
+
+  Scenario: bare tinman opens the assistant
+    Given inference is available
+    When the operator runs "tinman" in an interactive terminal
+    Then a bordered region titled "Ask Tinman" is drawn
+
+  Scenario: bare tinman does not list the commands
+    Given inference is available
+    When the operator runs "tinman" in an interactive terminal
+    Then the screen does not carry the Commands block of the asset at "assets/help/tinman.txt"
+    And a bordered region titled "Ask Tinman" is drawn
+
+  Scenario: tinman with stdin redirected renders the conventional help
+    Given inference is available
+    When the operator runs "tinman" in an interactive terminal with stdin redirected from a file
+    Then the conventional help is on the screen
+    And no bordered region titled "Ask Tinman" is drawn
+
+  Scenario: tinman with stdout redirected renders the conventional help
+    Given inference is available
+    When the operator runs "tinman" with stdout redirected to a file
+    Then the help output is the asset at "assets/help/tinman.txt" with the tagline line removed
+
+  Rule: the name and the tagline are the program saying what it is, and the block beneath them is reference material. Run together in one colour, the operator reads the whole screen to find where the reference starts.
+
+  Scenario: the name and tagline are drawn apart from the help text
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the name "tinman" is drawn in a colour other than the default foreground
+    And the tagline is drawn in a colour other than the default foreground
+    And the Commands block is drawn in the default foreground
+
+  Rule: the transcript scrolls and the input box stays put. Both halves of the exchange are written above the box, the question as it was sent and then the answer, the way a coding agent writes its turns. The box holds only what is being typed: a reply written into the field being edited leaves the operator unable to tell their draft from the program's output, and makes the next keystroke ambiguous.
 
   Scenario: what the operator types is shown in the box
     Given inference is available
     And the operator runs "tinman --help" in an interactive terminal
     When the operator types "how do I record a session" at the assistant prompt without sending
     Then the region titled "Ask Tinman" shows "how do I record a session"
-
-  Rule: the transcript scrolls and the input box stays put. Both halves of the exchange are written into the terminal's own scrollback above the box, the question as it was sent and then the answer, the way a coding agent writes its turns. The exchange accumulates where an operator already knows how to scroll and search, and it survives the session as ordinary terminal output. The box holds only what is being typed: a reply written into the field being edited leaves the operator unable to tell their draft from the program's output, and makes the next keystroke ambiguous.
-
-  Rule: the question is styled apart from the answer. A transcript of alternating turns in one uniform style makes the operator re-read each line to learn whose it is, and the answer is the half they came for. Style carries no meaning here beyond authorship, so a terminal without colour loses only the convenience.
 
   Scenario: a sent question is written above the input box
     Given inference is available
@@ -36,13 +100,6 @@ Feature: interactive help
     And the operator runs "tinman --help" in an interactive terminal
     When the operator types "what does inspect do" at the assistant prompt
     Then the region titled "Ask Tinman" shows ""
-
-  Scenario: a question is drawn in a different colour from its answer
-    Given inference is available
-    And the assistant answers "Inspect prints the terminal object model of a running program."
-    And the operator runs "tinman --help" in an interactive terminal
-    When the operator types "what does inspect do" at the assistant prompt
-    Then "what does inspect do" is drawn in a different colour from "Inspect prints the terminal object model of a running program."
 
   Scenario: an answer is written above the input box rather than into it
     Given inference is available
@@ -61,11 +118,77 @@ Feature: interactive help
     Then "Record captures a live session into an editable plan." appears above the region titled "Ask Tinman"
     And the region titled "Ask Tinman" is the lowest region on the screen
 
+  Rule: a line of prose drawn the full width of a wide terminal is hard to read back, and it leaves the start of the next line a long way from the end of the last; it is the reason a book is not typeset across a table. A transcript wrapped at the terminal beside a box capped somewhere else gives one screen two measures, which is the same fault a second time.
+
+  Scenario: the box is no wider than the measure on a wide terminal
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal 120 columns wide
+    Then the region titled "Ask Tinman" is at most 72 columns wide
+
+  Scenario: an answer wider than the measure is wrapped to it
+    Given inference is available
+    And the assistant answers a single line of 200 characters
+    And the operator runs "tinman --help" in an interactive terminal 120 columns wide
+    When the operator types "what does inspect do" at the assistant prompt
+    Then the answer is drawn on more than one line
+    And no line of the answer is wider than 72 columns
+
+  Rule: colour laid on the words themselves reads as a highlighter smear over them, where a background running the whole measure reads as a block, and a block is what tells the operator at a glance where their own turn started. Colour carries authorship here and nothing besides. Coloured text degrades to text when colour is off, but a background block degrades to no structure at all, so the uncoloured rendering has to find the boundary somewhere other than colour.
+
+  Scenario: a sent question is drawn as a background block
+    Given inference is available
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "what does inspect do" at the assistant prompt
+    Then "what does inspect do" is drawn on a background other than the default background
+    And that background runs the full measure of the transcript
+    And "Inspect prints the terminal object model of a running program." is drawn on the default background
+
+  Scenario: NO_COLOR marks the question with a leading marker instead
+    Given inference is available
+    And the environment sets "NO_COLOR" to "1"
+    And the assistant answers "Inspect prints the terminal object model of a running program."
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "what does inspect do" at the assistant prompt
+    Then the question is drawn with the leading marker "> "
+    And no cell is drawn on a background other than the default background
+
+  Rule: the model writes a command line as a fenced block, because that is how a command line is written down. A raw fence is three backticks the operator reads past on the line they came for, and the block inside it is the one thing on the screen they are going to copy.
+
+  Scenario: a fenced block in an answer is rendered rather than printed
+    Given inference is available
+    And the assistant answers:
+      """
+      Record it:
+
+      ```
+      tinman record opencode
+      ```
+      """
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "how do I record opencode" at the assistant prompt
+    Then "tinman record opencode" appears above the region titled "Ask Tinman"
+    And no line on the screen carries a fence marker
+
+  Scenario: a fenced block is drawn apart from the prose around it
+    Given inference is available
+    And the assistant answers:
+      """
+      Record it:
+
+      ```
+      tinman record opencode
+      ```
+      """
+    And the operator runs "tinman --help" in an interactive terminal
+    When the operator types "how do I record opencode" at the assistant prompt
+    Then "tinman record opencode" is drawn in a different colour from "Record it:"
+
   Rule: the assistant remembers the session it is having. A question is rarely the whole question: an operator asks what a command does and then asks about the thing they were actually trying to do, and an assistant that forgets the first makes them restate it every turn.
 
-  Rule: the session compacts continuously rather than dropping turns at a limit. Context spent on old turns is context and latency spent on every later turn, and this path already waits tens of seconds, so the transcript is kept small from the first turn rather than allowed to grow until a threshold trips. The seventeen most recent exchanges are carried whole, within a transcript budget of 120000 characters. Older ones keep their question and lose their answer, which holds what the session was about while shedding most of what it cost. Only when the transcript still exceeds that budget does the oldest question go, so forgetting is the last resort rather than the mechanism. The budget covers the transcript alone: the bundled skill is fixed and dwarfs it, so budgeting the whole request would be budgeting a constant.
+  Rule: the session compacts continuously rather than dropping turns at a limit. Context spent on old turns is context and latency spent on every later turn, and this path already waits tens of seconds, so the transcript is kept small from the first turn rather than allowed to grow until a threshold trips. The seventeen most recent exchanges are carried whole, within a transcript budget of 120000 characters. Older ones keep their question and lose their answer, which holds what the session was about while shedding most of what it cost. Only when the transcript still exceeds that budget does the oldest question go, so forgetting is the last resort rather than the mechanism. The budget covers the transcript alone: the bundled context is fixed and dwarfs it, so budgeting the whole request would be budgeting a constant.
 
-  Rule: compaction is mechanical, never a second model call. Summarising a transcript with the provider would double the latency of the slowest thing Tinman does, on every turn, to save tokens on a request that is mostly the bundled skill anyway. Dropping an answer and keeping its question needs no model and cannot fail.
+  Rule: compaction is mechanical, never a second model call. Summarising a transcript with the provider would double the latency of the slowest thing Tinman does, on every turn, to save tokens on a request that is mostly bundled context anyway. Dropping an answer and keeping its question needs no model and cannot fail.
 
   Rule: the assertions below read the request Tinman builds, not the reply a model gives. Whether the model uses what it was sent is the model's behaviour, and the @inference tier never asserts that; whether Tinman sent it is Tinman's seam and is checked without spending a call.
 
@@ -145,7 +268,7 @@ Feature: interactive help
     When the operator types "café" at the assistant prompt without sending
     Then the region titled "Ask Tinman" shows "café"
 
-  Rule: the box is bounded rather than stretched, and the bounds are a scantling rather than prose. A prompt spanning a wide terminal puts the text the operator is reading and the cursor they are typing at opposite ends of the screen, and a border drawn edge to edge reads as a rule across the terminal rather than as a box. Tinman's own interface is declared in the terminal object model Tinman builds from every program it drives, so the assistant is checked exactly as a test author checks their own program, and the model is exercised against a real screen on every run. A property the model cannot carry is a finding about the model, not a gap to route around, which is why colour and cursor position keep their own scenarios below.
+  Rule: declaring the interface in the terminal object model means the assistant is checked exactly as a test author checks their own program, and the model is exercised against a real screen on every run. Because the model carries presentation beside structure, one scantling serves as this interface's stylesheet and its markup at once, covering layout, measure, the cursor and the box's own styling. What a single screen cannot show stays in scenarios: behaviour over time, such as whether a reported wait advances, and the two colour renderings, since a contract naming one of them would be false under the other.
 
   @contract
   Scenario: the assistant interface conforms to its terminal object model contract
@@ -187,7 +310,7 @@ Feature: interactive help
     Given inference is available
     And the environment sets "NO_COLOR" to "1"
     When the operator runs "tinman --help" in an interactive terminal
-    Then a bordered region titled "Ask Tinman" is drawn beneath it
+    Then a bordered region titled "Ask Tinman" is drawn
     And no cell is drawn in a colour other than the default foreground
 
   Rule: the prompt names the keys that work it, because an operator dropped into a prompt has no other way to learn them and a terminal offers no menu to discover. The keys are asserted by name here rather than only through the asset body, since a scenario comparing output to an asset passes just as well when the asset loses the line.
@@ -209,6 +332,21 @@ Feature: interactive help
     And the operator runs "tinman --help" in an interactive terminal
     When the operator presses "esc" at the assistant prompt
     Then the command exits with status 0
+
+  Rule: a reply reaches the propose-confirm path only by carrying the marker, and the instruction asset never named it, so every reply the model wrote fell through to prose and the whole path was unreachable in the shipped program. Two lists, one in code and one in copy, is the fault this project keeps paying for, and a reader is not what joins them.
+
+  Scenario: the instruction asset teaches the marker the assistant reads
+    Given the proposal marker the assistant reads
+    When the asset at "assets/help/assistant-instruction.txt" is searched for it
+    Then the instruction asset carries that marker
+
+  Rule: the marker was read as a prefix of the whole reply, so a reply was entirely a proposal or entirely prose, and the model could not say what a command does and then offer it. Reading a marked line out of the reply leaves the security boundary where it was: whatever follows the marker still reaches the operating system only through Tinman's own parser.
+
+  Scenario: a reply that answers and then proposes carries both
+    Given the assistant replies with the answer "Record captures a live session." and the command "tinman record opencode"
+    When the operator asks "how do I record opencode"
+    Then the assistant displays the answer "Record captures a live session."
+    And the assistant displays the proposed command "tinman record opencode"
 
   Scenario: a proposed command is displayed before it runs
     Given the assistant infers the command "tinman record opencode"

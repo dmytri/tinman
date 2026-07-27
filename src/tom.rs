@@ -9,7 +9,7 @@
 //! second producer of the same shape, used at capture time only.
 
 use crate::inference::Settings;
-use crate::screen::VirtualScreen;
+use crate::screen::{Colour, Style, VirtualScreen};
 use serde::{Deserialize, Serialize};
 
 /// The characters a bordered pane is drawn with. A corner is drawn square or
@@ -111,6 +111,8 @@ impl Role {
 ///
 /// @planks("the model contains a region named {string}")
 /// @planks("the terminal object model is built")
+/// @planks("the region with the role {string} is drawn in the foreground colour {string}")
+/// @planks("the region named {string} carries no style")
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Region {
@@ -118,6 +120,8 @@ pub struct Region {
     pub name: Option<String>,
     pub text: Option<String>,
     pub selected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style: Option<Style>,
     pub rect: Rect,
     pub children: Vec<Region>,
     #[serde(skip)]
@@ -137,6 +141,7 @@ impl Region {
             selected: false,
             rect,
             children: Vec::new(),
+            style: None,
             cells: Vec::new(),
         }
     }
@@ -153,6 +158,7 @@ impl Region {
             selected: false,
             rect,
             children,
+            style: None,
             cells: Vec::new(),
         }
     }
@@ -163,6 +169,18 @@ impl Region {
     /// @planks("that region has {int} child regions with the role {string}")
     pub fn role(&self) -> &str {
         self.role.as_str()
+    }
+
+    /// The colour this region is drawn in, where it carries one of its own. A
+    /// region drawn in the terminal's own colours carries none, so a listing of
+    /// an ordinary screen names no colour anywhere.
+    ///
+    /// @planks("the operator inspects a command that prints {string} in red")
+    pub fn colour(&self) -> Option<&str> {
+        match &self.style.as_ref()?.foreground {
+            Colour::Name(name) if name != "default" => Some(name),
+            _ => None,
+        }
     }
 
     /// The child region that is the selected one among its siblings.
@@ -212,12 +230,29 @@ impl Region {
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the terminal object model is serialized")
+/// @planks("the model's cursor is at row {int} column {int}")
+/// @planks("the model carries no cursor")
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Model {
     pub rows: u16,
     pub cols: u16,
     pub root: Region,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<Cursor>,
+}
+
+/// Where the terminal's cursor stands, counted from the top left of the screen.
+/// A program that hides the cursor leaves none, which is itself the observable
+/// difference between a screen that takes input and one that does not.
+///
+/// @planks("the model's cursor is at row {int} column {int}")
+/// @planks("the model carries no cursor")
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Cursor {
+    pub row: u16,
+    pub column: u16,
 }
 
 impl Model {
@@ -230,6 +265,7 @@ impl Model {
         Model {
             rows,
             cols,
+            cursor: None,
             root: Region {
                 role: Role::Application,
                 name: None,
@@ -242,6 +278,7 @@ impl Model {
                     height: rows,
                 },
                 children,
+                style: None,
                 cells: Vec::new(),
             },
         }
@@ -298,19 +335,238 @@ pub fn build(screen: &VirtualScreen) -> Model {
         width: cols,
         height: rows,
     };
+    let mut root = Region {
+        role: Role::Application,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children,
+        style: None,
+        cells: cells_of(grid, rect),
+    };
+    read_style(&mut root, screen);
     Model {
         rows,
         cols,
-        root: Region {
-            role: Role::Application,
-            name: None,
-            text: None,
-            selected: false,
-            rect,
-            children,
-            cells: cells_of(grid, rect),
-        },
+        root,
+        cursor: cursor_of(screen),
     }
+}
+
+/// Read everything a finished program wrote into a terminal object model. A
+/// program that has exited has finished speaking, so every line it wrote is read
+/// rather than the last screenful alone.
+///
+/// The shape of the stream decides how it reads. Blank lines separate the output
+/// into blocks, and a stream of several blocks one of which runs to more than a
+/// line is a log, each block an article. Everything else is a list, one item per
+/// line, so a listing of filenames stays a listing whether or not a blank line
+/// fell between two of them.
+///
+/// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
+/// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
+/// @planks("the operator inspects a command printing {string}, a blank line and {string}")
+/// @planks("the operator inspects a command that prints {string} in red")
+/// @planks("the operator inspects a command that writes to the sentinel path and prints {string}")
+pub fn read_stream(screen: &VirtualScreen) -> Model {
+    let grid = screen.rows();
+    let rows = grid.len() as u16;
+    let cols = grid[0].len() as u16;
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width: cols,
+        height: rows,
+    };
+    let blocks = blocks_of(grid);
+    let children = if blocks.is_empty() {
+        Vec::new()
+    } else if blocks.len() > 1 && blocks.iter().any(|block| block.len() > 1) {
+        vec![stream_log(grid, cols, rect, &blocks)]
+    } else {
+        vec![stream_list(grid, cols, rect, &blocks.concat())]
+    };
+    let mut root = Region {
+        role: Role::Application,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children,
+        style: None,
+        cells: cells_of(grid, rect),
+    };
+    read_style(&mut root, screen);
+    Model {
+        rows,
+        cols,
+        root,
+        cursor: cursor_of(screen),
+    }
+}
+
+/// The runs of drawn lines `grid` carries, each run the rows of one block: a
+/// blank line ends the block above it and begins the one below.
+///
+/// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
+/// @planks("the operator inspects a command printing {string}, a blank line and {string}")
+fn blocks_of(grid: &[Vec<String>]) -> Vec<Vec<usize>> {
+    let mut blocks = Vec::new();
+    let mut block = Vec::new();
+    for (row, cells) in grid.iter().enumerate() {
+        if cells.concat().trim().is_empty() {
+            if !block.is_empty() {
+                blocks.push(std::mem::take(&mut block));
+            }
+            continue;
+        }
+        block.push(row);
+    }
+    if !block.is_empty() {
+        blocks.push(block);
+    }
+    blocks
+}
+
+/// The stream read as a log: one article per block, carrying the lines that
+/// block shows.
+///
+/// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
+fn stream_log(grid: &[Vec<String>], cols: u16, rect: Rect, blocks: &[Vec<usize>]) -> Region {
+    let articles = blocks
+        .iter()
+        .map(|block| {
+            let text = block
+                .iter()
+                .map(|&row| stream_line(grid, row))
+                .collect::<Vec<String>>()
+                .join("\n");
+            let article = Rect {
+                x: 0,
+                y: block[0] as u16,
+                width: cols,
+                height: block.len() as u16,
+            };
+            stream_region(grid, Role::Article, text, article)
+        })
+        .collect();
+    Region {
+        role: Role::Log,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children: articles,
+        style: None,
+        cells: cells_of(grid, rect),
+    }
+}
+
+/// The stream read as a list: one item per drawn line.
+///
+/// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
+/// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command that prints {string} in red")
+/// @planks("the operator inspects a command that writes to the sentinel path and prints {string}")
+fn stream_list(grid: &[Vec<String>], cols: u16, rect: Rect, lines: &[usize]) -> Region {
+    let items = lines
+        .iter()
+        .map(|&row| {
+            let item = Rect {
+                x: 0,
+                y: row as u16,
+                width: cols,
+                height: 1,
+            };
+            stream_region(grid, Role::Listitem, stream_line(grid, row), item)
+        })
+        .collect();
+    Region {
+        role: Role::List,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children: items,
+        style: None,
+        cells: cells_of(grid, rect),
+    }
+}
+
+/// One entry of a stream: the text it shows is both the text it carries and the
+/// name a locator matches it by.
+///
+/// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
+fn stream_region(grid: &[Vec<String>], role: Role, text: String, rect: Rect) -> Region {
+    Region {
+        role,
+        name: Some(text.clone()),
+        text: Some(text),
+        selected: false,
+        rect,
+        children: Vec::new(),
+        style: None,
+        cells: cells_of(grid, rect),
+    }
+}
+
+/// The text row `row` of `grid` shows, with the blank cells beyond it dropped.
+///
+/// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
+fn stream_line(grid: &[Vec<String>], row: usize) -> String {
+    grid[row].concat().trim_end().to_string()
+}
+
+/// Read the presentation `region` and everything nested inside it is drawn with.
+/// The regions are read after they are found, so a region reports the colours
+/// its own rectangle carries whichever pass built it.
+///
+/// @planks("the region with the role {string} is drawn in the foreground colour {string}")
+/// @planks("the region named {string} carries no style")
+fn read_style(region: &mut Region, screen: &VirtualScreen) {
+    region.style = style_of(screen, region.rect);
+    for child in &mut region.children {
+        read_style(child, screen);
+    }
+}
+
+/// The presentation every drawn cell of `rect` shares, or none where they
+/// disagree. A blank cell shows no colour an operator can read, so the style is
+/// the style of the cells carrying ink, and a region whose cells are drawn
+/// differently carries no style at all.
+///
+/// @planks("the region with the role {string} is drawn in the foreground colour {string}")
+/// @planks("that region is drawn in the background colour {string}")
+/// @planks("the child region showing {string} is drawn in the foreground colour {string}")
+/// @planks("the region named {string} carries no style")
+fn style_of(screen: &VirtualScreen, rect: Rect) -> Option<Style> {
+    let mut drawn = (rect.y..rect.y + rect.height)
+        .flat_map(|row| (rect.x..rect.x + rect.width).map(move |col| (row, col)))
+        .filter(|&(row, col)| !screen.cell(row + 1, col + 1).trim().is_empty())
+        .filter_map(|(row, col)| screen.style(row + 1, col + 1));
+    let first = drawn.next()?;
+    drawn.all(|style| style == first).then_some(first)
+}
+
+/// Where the cursor stands on `screen`, counted from the top left. The screen
+/// reports it on the 1-based grid the terminal addresses, and the model counts
+/// its rectangles from zero, so the position is converted. A program that has
+/// hidden the cursor leaves none.
+///
+/// @planks("the model's cursor is at row {int} column {int}")
+/// @planks("the model carries no cursor")
+fn cursor_of(screen: &VirtualScreen) -> Option<Cursor> {
+    if !screen.cursor_shown() {
+        return None;
+    }
+    let (row, column) = screen.cursor();
+    Some(Cursor {
+        row: row - 1,
+        column: column - 1,
+    })
 }
 
 /// Read `screen` into a model, enriched by the configured engine. The
@@ -412,6 +668,7 @@ fn pane_region(
             selected: false,
             rect,
             children,
+            style: None,
             cells: cells_of(grid, rect),
         };
     }
@@ -441,6 +698,7 @@ fn pane_region(
             selected: false,
             rect,
             children: articles,
+            style: None,
             cells: cells_of(grid, rect),
         };
     }
@@ -461,6 +719,7 @@ fn pane_region(
             selected,
             rect: item,
             children: Vec::new(),
+            style: None,
             cells: cells_of(grid, item),
         });
     }
@@ -474,6 +733,7 @@ fn pane_region(
         selected: false,
         rect,
         children: items,
+        style: None,
         cells: cells_of(grid, rect),
     }
 }
@@ -510,6 +770,7 @@ fn bottom_border_status(
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     })
 }
@@ -545,6 +806,7 @@ fn article_region(grid: &[Vec<String>], x: usize, right: usize, rows: &[usize]) 
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     }
 }
@@ -576,6 +838,7 @@ fn plain_region(grid: &[Vec<String>], x: u16, width: u16, rows: u16) -> Region {
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     }
 }
@@ -601,6 +864,7 @@ fn status_bar(grid: &[Vec<String>], rows: u16, cols: u16) -> Option<Region> {
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     })
 }
@@ -639,6 +903,7 @@ fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<R
                 selected,
                 rect: item,
                 children: Vec::new(),
+                style: None,
                 cells: cells_of(grid, item),
             }
         })
@@ -656,6 +921,7 @@ fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<R
         selected: false,
         rect,
         children: items,
+        style: None,
         cells: cells_of(grid, rect),
     })
 }
@@ -723,6 +989,7 @@ fn button(grid: &[Vec<String>], row: &[String], y: usize) -> Option<Region> {
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     })
 }
@@ -751,6 +1018,7 @@ fn textbox(grid: &[Vec<String>], row: &[String], y: usize) -> Option<Region> {
         selected: false,
         rect,
         children: Vec::new(),
+        style: None,
         cells: cells_of(grid, rect),
     })
 }

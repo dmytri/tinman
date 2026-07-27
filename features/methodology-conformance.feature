@@ -14,7 +14,7 @@ Feature: methodology conformance
     Then no rule in the set reports a match
     And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules
 
-  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; four scantlings carry no dialect because they are proof contracts discharged by their own checkers.
+  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; five scantlings carry no dialect because they are proof contracts discharged by their own checkers.
 
   @conformance
   Scenario: every scantling declaring a dialect satisfies it
@@ -26,7 +26,7 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all fifteen name that version
+    Then all sixteen name that version
 
   Rule: the plank joins below need two sources joined, the plank inventory and the step-usage pattern set, so their logic lives in step definitions rather than in an ast-grep rule. The pattern set comes from the derived step-usage command, which reports each step-definition pattern literal untruncated; the join is exact string membership, with no normalization on either side.
 
@@ -70,11 +70,11 @@ Feature: methodology conformance
     Then no tier's most recent sweep exceeds its budget
     And every tier declaring a budget has a sweep command that records its wall clock
 
-  Rule: four scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
+  Rule: five scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the four scantlings that declare no JSON Schema dialect
+    Given the five scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all four validate
+    Then all five validate
     And the meta-schema forbids a property it does not name

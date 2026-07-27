@@ -1,0 +1,13 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/prepared-process-construction-boundary.json",
+  "title": "Prepared process construction boundary",
+  "description": "Only a sandbox backend constructs a prepared process. A prepared process is the sole input the PTY runner launches, so whoever constructs one decides what isolation the launched program gets, and a construction outside a sandbox backend is a program launched with the operator's real home, environment, path and network. Discharged by the prepared-process-construction-boundary checker in verification support, which scans the implementation tree for construction expressions naming the type and reports any outside the permitted set. Attested by the @contract scenario in features/sandboxed-launch.feature.",
+  "constructedType": "PreparedProcess",
+  "permittedModules": [
+    "src/bwrap.rs"
+  ],
+  "searchPaths": [
+    "src"
+  ],
+  "rationale": "Tinman never executes a CLI or TUI outside the sandbox, for any command. Isolation was written as a property of the Bubblewrap backend and then asserted by scenarios that prepared their own process, so record and inspect each constructed a prepared process directly and launched the operator's shell with everything inherited, while every sandboxed-launch scenario stayed green and the project's own AGENTS.md claimed record sandboxes its target. A per-module reference contract would not have caught it: the modules that bypassed the backend were the modules nobody had written a contract for, which is the failure mode this project keeps paying for. Bounding construction of the one type the runner accepts closes both bypasses and every future one with a contract nobody has to remember to extend, because the guard is over the tree rather than over a list of modules."
+}

@@ -86,6 +86,42 @@ Feature: terminal object model
     Then the region named "Output" has the role "log"
     And that region has 2 child regions with the role "article"
 
+  Rule: colour is meaning on a terminal screen. An error line is red, a disabled item is dim, a selected row is reversed, and a test author asserting any of that is asking about the screen rather than about the program's internals. Tinman already reads an attributed cell grid and already derives roles from those attributes, so the attributes are in hand, and dropping them only moves every presentation assertion into a bespoke check against raw cells. This is the split a browser makes between the element tree and the computed style beside it.
+
+  Scenario: a region drawn in a colour reports that colour
+    Given a virtual screen whose bottom line reads "disk full" in red
+    When the terminal object model is built
+    Then the region with the role "status" is drawn in the foreground colour "red"
+
+  Scenario: a region drawn plainly reports the terminal's own colours
+    Given a virtual screen whose bottom line reads "ready" in no colour of its own
+    When the terminal object model is built
+    Then the region with the role "status" is drawn in the foreground colour "default"
+    And that region is drawn in the background colour "default"
+
+  Rule: a single computed style for a region drawn two ways would be a summary of the screen rather than a reading of it, and a test author asserting against a summary is asserting against Tinman rather than against their own program. An absence is the more honest answer, and a scenario reading it learns something true.
+
+  Scenario: a region whose cells are drawn differently carries no style
+    Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And the line "tests" is rendered in red while the rest of the pane is drawn plainly
+    When the terminal object model is built
+    Then the region named "Files" carries no style
+    And the child region showing "tests" is drawn in the foreground colour "red"
+
+  Rule: the cursor is what tells an operator the program is listening and where the next character will land, and it is already the signal the model uses to tell a field being edited from a panel being displayed. A program that hides it has said something observable, and a reported position nobody can see would be a fiction.
+
+  Scenario: the model reports the cursor position
+    Given a virtual screen showing "Username: ________" at row 3 column 1
+    And the cursor rests at row 2 column 20
+    When the terminal object model is built
+    Then the model's cursor is at row 2 column 20
+
+  Scenario: the model reports no cursor where the program has hidden it
+    Given a virtual screen showing "Username: ________" at row 3 column 1
+    And the program has hidden the cursor
+    When the terminal object model is built
+    Then the model carries no cursor
+
   @contract
   Scenario: the terminal object model conforms to its schema
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"

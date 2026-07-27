@@ -18,6 +18,9 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects the fixture terminal program as JSON")
 /// @planks("the operator inspects the command {string}")
+/// @planks("the operator inspects a command that writes to the sentinel path and prints {string}")
+/// @planks("the operator records a command that writes to the sentinel path and prints {string}")
+/// @planks("the operator records a command that prints {string} and the value of {string}")
 /// @planks("the operator records the command {string} and presses {string}")
 /// @planks("the operator records the command {string}")
 /// @planks("the operator records the command {string} with {string}")
@@ -63,7 +66,8 @@ fn main() {
             }
         }
         Some(Command::Inspect { command, json }) => {
-            let model = tinman::inspect::model(&command)
+            let workspace = std::env::current_dir().expect("the working directory is read");
+            let model = tinman::inspect::model(&command, &workspace)
                 .unwrap_or_else(|e| panic!("the inspected command did not run: {e}"));
             if json {
                 println!(

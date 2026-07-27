@@ -8,15 +8,30 @@ Usage:
   tinman <COMMAND>
 
 Commands:
-  record     Capture a live session into an editable plan
-  test       Run a plan and report whether it passed
-  inspect    Print the terminal object model of a running program
-  driver     Speak the JSON driver protocol on stdin and stdout
-  help       Show this help
+  record         Capture a live session into an editable plan
+  test           Run a plan and report whether it passed
+  inspect        Print the terminal object model of a running program
+  driver         Speak the JSON driver protocol on stdin and stdout
+  man            Write Tinman's manual page as roff
+  completions    Write a shell completion script
+  help           Show this help
 
 Options:
   -h, --help       Show this help
   -V, --version    Show the version
+
+Examples:
+  Read the structure of a program you have not seen before:
+    tinman inspect opencode
+
+  Capture a live session into a plan you can edit:
+    tinman record opencode
+
+  Replay that plan with no model and no network:
+    tinman test tinman.yaml
+
+  Write the manual page so man can find it:
+    tinman man
 
 Tinman drives real terminal programs through a sandboxed PTY. Capture time may
 infer; replay time is deterministic, with no model invocation and no network.

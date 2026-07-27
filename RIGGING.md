@@ -62,6 +62,10 @@
 - dependency: cargo-llvm-cov
 - dependency: ast-grep
 - dependency: gplint
+- dependency: mandoc
+- dependency: tui-markdown
+- dependency: clap_mangen
+- dependency: clap_complete
 
 ## Outbound
 - outbound: crates.io

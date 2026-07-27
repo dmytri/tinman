@@ -24,10 +24,26 @@ Feature: conventional help
     When each is looked for in the Commands block of the asset at "assets/help/tinman.txt"
     Then every accepted command is listed in the Commands block
 
+  Rule: the check above reads one direction only, and the other direction is where `replay` did its damage. A command listed in the block and missing from the parser is a command the help text tells an operator to run and Tinman refuses, which is the same broken promise as a command the parser accepts and the help omits. One direction was checked for a year while the other was the one that shipped.
+
+  Scenario: every command the help text's Commands block lists is accepted by the parser
+    Given the commands listed in the Commands block of the asset at "assets/help/tinman.txt"
+    When each is passed to the command parser
+    Then the parser accepts every listed command
+    And the commands read are not empty
+
   Scenario: every option the help text advertises is accepted by the parser
     Given the options the asset at "assets/help/tinman.txt" advertises
     When each is passed to the command parser
     Then the parser accepts every advertised option
+
+  Rule: an example is the part of a help text a reader actually types, so it is the part that costs them most when it has drifted. The Commands block is checked in both directions and an example line escapes both, because it carries flags, arguments and a subcommand together in the one form the parser will really be handed. The tldr-pages style guide is the source for the shape: simplest invocation first, complexity introduced gradually, and around five of them.
+
+  Scenario: every example the help text carries is accepted by the parser
+    Given the Tinman command lines in the Examples block of the asset at "assets/help/tinman.txt"
+    When each is passed to the command parser
+    Then the parser accepts every command line
+    And the command lines read are not empty
 
   Scenario: the help text carries exactly one tagline placeholder
     Given the asset at "assets/help/tinman.txt"

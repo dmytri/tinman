@@ -1,0 +1,130 @@
+{
+  "watch1": {
+    "scenarios": [
+      "features/sandboxed-launch.feature:only the sandbox backend constructs a prepared process",
+      "features/sandboxed-launch.feature:inspect cannot write outside the sandbox",
+      "features/sandboxed-launch.feature:record cannot write outside the sandbox",
+      "features/record-command.feature:record launches its target inside the sandbox",
+      "features/methodology-conformance.feature:every proof contract satisfies the proof-contract meta-schema",
+      "features/methodology-conformance.feature:every published schema URI names the packaged version"
+    ]
+  },
+  "watch2": {
+    "scenarios": [
+      "features/terminal-object-model.feature:a region drawn in a colour reports that colour",
+      "features/terminal-object-model.feature:a region drawn plainly reports the terminal's own colours",
+      "features/terminal-object-model.feature:a region whose cells are drawn differently carries no style",
+      "features/terminal-object-model.feature:the model reports the cursor position",
+      "features/terminal-object-model.feature:the model reports no cursor where the program has hidden it",
+      "features/inspect-command.feature:the listing reports the colour a region is drawn in"
+    ]
+  },
+  "watch3": {
+    "scenarios": [
+      "features/interactive-help.feature:the instruction asset teaches the marker the assistant reads",
+      "features/interactive-help.feature:a reply that answers and then proposes carries both"
+    ]
+  },
+  "watch4": {
+    "scenarios": [
+      "features/command-surface.feature:man emits a roff man page for tinman",
+      "features/command-surface.feature:completions emits a script for the shell named",
+      "features/command-surface.feature:completions refuses a shell it cannot emit for",
+      "features/command-surface.feature:the parser accepts at least the seven named commands",
+      "features/conventional-help.feature:every command the help text's Commands block lists is accepted by the parser",
+      "features/command-surface.feature:every Tinman command line in shipped markdown is accepted by the parser",
+      "features/bundled-skill.feature:every role the bundled skill names is a role the model produces",
+      "features/bundled-skill.feature:every driver message in the bundled skill conforms to the protocol",
+      "features/bundled-skill.feature:every plan in the bundled skill conforms to the plan schema"
+    ]
+  },
+  "watch5": {
+    "scenarios": [
+      "features/bundled-skill.feature:the assistant context carries every user-facing scantling",
+      "features/bundled-skill.feature:the assistant context carries no specification"
+    ]
+  },
+  "watch6": {
+    "scenarios": [
+      "features/interactive-help.feature:the assistant box is drawn when help is asked for interactively",
+      "features/interactive-help.feature:the conventional help is back on the screen when the assistant leaves",
+      "features/interactive-help.feature:the transcript is written into the scrollback when the assistant leaves",
+      "features/interactive-help.feature:bare tinman opens the assistant",
+      "features/interactive-help.feature:bare tinman does not list the commands",
+      "features/interactive-help.feature:tinman with stdin redirected renders the conventional help",
+      "features/interactive-help.feature:tinman with stdout redirected renders the conventional help"
+    ]
+  },
+  "watch7": {
+    "scenarios": [
+      "features/interactive-help.feature:the box is no wider than the measure on a wide terminal",
+      "features/interactive-help.feature:an answer wider than the measure is wrapped to it",
+      "features/interactive-help.feature:a sent question is drawn as a background block",
+      "features/interactive-help.feature:NO_COLOR marks the question with a leading marker instead",
+      "features/interactive-help.feature:the name and tagline are drawn apart from the help text",
+      "features/interactive-help.feature:redirected help carries no styling"
+    ]
+  },
+  "watch8": {
+    "scenarios": [
+      "features/interactive-help.feature:a fenced block in an answer is rendered rather than printed",
+      "features/interactive-help.feature:a fenced block is drawn apart from the prose around it"
+    ]
+  },
+  "watch9": {
+    "scenarios": [
+      "features/interactive-help.feature:every region of the assistant interface that needs a name has one",
+      "features/interactive-help.feature:the assistant interface conforms to its terminal object model contract",
+      "features/interactive-help.feature:the assistant interface conforms to its contract on a narrow terminal"
+    ]
+  },
+  "watch10": {
+    "scenarios": [
+      "features/tom-inference.feature:the naming context carries a tldr page for the program being inferred",
+      "features/tom-inference.feature:inference proceeds where no tldr page is available",
+      "features/tom-inference.feature:a name only the tldr page carries is rejected like any other",
+      "features/tom-inference.feature:a plan whose naming read a tldr page credits the project",
+      "features/tom-inference.feature:a plan whose naming read no tldr page credits nothing"
+    ]
+  },
+  "watch11": {
+    "scenarios": [
+      "features/inspect-command.feature:output longer than the terminal is read whole",
+      "features/inspect-command.feature:one item per line is read as a list",
+      "features/inspect-command.feature:blank-line separated multi-line blocks are read as a log of articles",
+      "features/inspect-command.feature:a blank line between single lines leaves a listing a list"
+    ]
+  },
+  "watch12": {
+    "scenarios": [
+      "features/inspect-command.feature:inspection runs the examples the program's own help carries",
+      "features/inspect-command.feature:inspection runs the examples its tldr page carries",
+      "features/inspect-command.feature:the binary's own help outranks its tldr page where they disagree",
+      "features/inspect-command.feature:a documented example the program refuses is reported as an unhonoured claim",
+      "features/inspect-command.feature:a documented example cannot write outside the sandbox"
+    ]
+  },
+  "watch13": {
+    "scenarios": [
+      "features/inspect-command.feature:probing a program's documentation writes a replayable plan",
+      "features/inspect-command.feature:a refused example is reported rather than written as an expectation"
+    ]
+  },
+  "watch14": {
+    "scenarios": [
+      "features/command-surface.feature:the emitted man page is valid roff",
+      "features/inspect-command.feature:a placeholder Tinman can fill is filled before the example runs",
+      "features/inspect-command.feature:the plan records the line Tinman ran and the example it came from",
+      "features/inspect-command.feature:a placeholder Tinman cannot fill leaves the example untestable as written",
+      "features/inspect-command.feature:a plan whose examples came from a tldr page credits the project",
+      "features/inspect-command.feature:a plan whose examples came only from the binary credits no page"
+    ]
+  },
+  "watch15": {
+    "scenarios": [
+      "features/conventional-help.feature:every example the help text carries is accepted by the parser",
+      "features/inspect-command.feature:a documented keypress example is written as a key step",
+      "features/inspect-command.feature:a keypress notation Tinman cannot send is reported as untestable"
+    ]
+  }
+}

@@ -194,7 +194,7 @@ fn call(settings: &Settings, history: Vec<Exchange>, question: &str) -> Pending 
 /// @planks("{string} is drawn in a different colour from {string}")
 /// @planks("the operator presses {string} at the assistant prompt")
 /// @planks("the operator ends the input")
-/// @planks("a bordered region titled {string} is drawn beneath it")
+/// @planks("a bordered region titled {string} is drawn")
 /// @planks("the region titled {string} shows {string}")
 /// @planks("the assistant prompt names {string} as the key that sends")
 /// @planks("the assistant prompt names {string} as the key that leaves")
@@ -408,7 +408,7 @@ fn transcribe(
 /// carries the colour escapes inside each line, so the cells the box claims are
 /// the only ones drawn in it.
 ///
-/// @planks("a bordered region titled {string} is drawn beneath it")
+/// @planks("a bordered region titled {string} is drawn")
 /// @planks("the region titled {string} shows {string}")
 /// @planks("the region titled {string} has the corner glyph {string}")
 /// @planks("the region titled {string} is drawn in a colour other than the default foreground")
@@ -436,7 +436,7 @@ fn box_lines(width: usize, title: &str, content: &str, hint: &str, coloured: boo
 
 /// `text` cut to the first `cells` characters.
 ///
-/// @planks("a bordered region titled {string} is drawn beneath it")
+/// @planks("a bordered region titled {string} is drawn")
 fn cut(text: &str, cells: usize) -> String {
     text.chars().take(cells).collect()
 }

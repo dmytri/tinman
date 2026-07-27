@@ -75,6 +75,48 @@ Feature: terminal object model inference
     When the terminal object model is inferred
     Then the region named "Files" has the role "list"
 
+  Rule: tldr pages describe what a command is for in the words its own community chose, and that is the vocabulary a good name comes from. The engine is naming regions of a program it has never seen, so a page describing that program is worth carrying. A page also describes some version of a program, and the drift between it and the binary on this machine is the drift that made Tinman's own help text describe a parser it had diverged from; carried into naming, a stale page costs a worse suggestion, where taken as the basis for an assertion it would write a claim about a program nobody ran. The network objection was Captain's error and the user caught it: network is denied to the target, never to Tinman, which already calls a provider from outside the sandbox.
+
+  Rule: the tldr-pages project keeps a public list of projects that take its pages, run them through a language model and publish the result without crediting it, describing that output as inaccurate and riddled with hallucinations. Feeding a page to an inference engine and emitting names from it is that shape exactly, so what keeps Tinman off the list has to be structural rather than well meant. Two things do. The pages are licensed CC-BY-4.0, so credit is a licence term and not a courtesy, and it belongs in the artifact the operator commits rather than on a screen they saw once. And no text from a page reaches a Tinman artifact on the page's authority alone: the deterministic pass refuses any name the screen does not independently carry, which is the refusal every other inferred name already meets.
+
+  Rule: Tinman is not a tldr client and does not intend to become one. The client specification carries its own required flags, platform resolution, language handling and cache maintenance, all of it off Tinman's mission, and a second copy of somebody else's pages is a second thing to serve stale. The operator's own installed client already holds their cache, their language and their platform, so that is what Tinman asks.
+
+  Scenario: the naming context carries a tldr page for the program being inferred
+    Given the operator's tldr client has a page for "git"
+    And a virtual screen showing an unbordered pane whose first line reads "Recent files"
+    When the terminal object model of "git" is inferred
+    Then the page is read by invoking the operator's tldr client
+    And the inference request carries the tldr page for "git"
+
+  Scenario: inference proceeds where no tldr page is available
+    Given the operator's tldr client has no page for "obscurecmd"
+    And a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    When the terminal object model of "obscurecmd" is inferred
+    Then the inference request carries no tldr page
+    And the region named "Files" has the role "list"
+
+  Scenario: a name only the tldr page carries is rejected like any other
+    Given the operator's tldr client has a page for "git"
+    And a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
+    And an engine that names the pane "repository browser"
+    When the inferred locator is round-tripped against the deterministic model
+    Then the locator is rejected as unbindable
+
+  Scenario: a plan whose naming read a tldr page credits the project
+    Given the operator's tldr client has a page for "git"
+    And a virtual screen showing an unbordered pane whose first line reads "Recent files"
+    And an engine that names that region "Recent files"
+    When the plan for "git" is written
+    Then the plan credits the tldr-pages project for the page it read
+    And the plan names "CC-BY-4.0" as that page's licence
+
+  Scenario: a plan whose naming read no tldr page credits nothing
+    Given the operator's tldr client has no page for "obscurecmd"
+    And a virtual screen showing an unbordered pane whose first line reads "Recent files"
+    And an engine that names that region "Recent files"
+    When the plan for "obscurecmd" is written
+    Then the plan credits no page
+
   Rule: an @inference scenario asserts Tinman's seam and never the provider's latency. The seam is the request Tinman builds, the call it makes and the reply it parses; how long a third party takes to answer is that party's behaviour, the same class as whether it obeys an instruction. A single real call returning nothing inside its ceiling is a transient of a hosted service, so the step retries toward a deadline rather than failing on one slow answer. The cost of getting this wrong is measured rather than argued: with production byte-identical across two custody attempts, the tier sweep moved from 85s green to 159s red, and a ceiling sized off a 76s observed tail was exceeded within a day of being set. Chasing that tail with a larger constant buys the next reprieve and no more.
 
   @inference

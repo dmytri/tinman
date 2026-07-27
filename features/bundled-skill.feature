@@ -11,13 +11,6 @@ Feature: bundled skill
     When the skill front matter is parsed
     Then it conforms to the "skill" schema in "scantlings/skill.schema.json"
 
-  Rule: the bundled skill is the whole context the assistant answers from, so a command line it names is a command an operator will be told to run. The skill and the parser are the same two-list problem the help text has, one list further from the code, and the skill ships to coding agents rather than to a reader who can check. A command struck from the parser stayed in this asset through the voyage that struck it, and nothing reddened.
-
-  Scenario: every command the bundled skill names is a command the parser accepts
-    Given the command lines in the asset at "assets/skill/SKILL.md"
-    When each named command is passed to the command parser
-    Then the parser accepts every command the skill names
-
   Scenario: Tinman loads the skill it ships
     Given the bundled skill at "assets/skill/SKILL.md"
     When Tinman loads its bundled skill
@@ -40,3 +33,43 @@ Feature: bundled skill
     Given the bundled skill at "assets/skill/SKILL.md"
     When the assistant context is built
     Then the context contains the skill body
+
+  Rule: a scantling is the exact shape a plan, a protocol message or a model document must take, which is the thing an operator gets wrong. It also cannot drift from the product, because a @contract scenario pins each one, where the skill can drift and has. The specs are the other candidate: implementer-facing, half of them attesting the project's own method rather than the product, and four times the size of the scantlings on a path that already waits tens of seconds a turn.
+
+  Scenario: the assistant context carries every user-facing scantling
+    Given the bundled skill at "assets/skill/SKILL.md"
+    When the assistant context is built
+    Then the context carries the body of each of these scantlings
+      | scantling                              |
+      | scantlings/harness-plan.schema.json    |
+      | scantlings/sandbox-spec.schema.json    |
+      | scantlings/tom.schema.json             |
+      | scantlings/driver-protocol.schema.json |
+      | scantlings/interaction-log.schema.json |
+      | scantlings/skill.schema.json           |
+
+  Scenario: the assistant context carries no specification
+    Given the scenario names in the specs
+    When the assistant context is built
+    Then the context carries no scenario name from the specs
+    And the scenario names read are not empty
+
+  Rule: the skill teaches by example, and it is the one document an external coding agent reads to learn Tinman. An example that no longer holds is worse than no example, because the agent writes what it was shown and the failure surfaces in their project rather than in ours. This is not hypothetical: the skill named nine roles the model has never produced and a wire shape the driver has never spoken, and both survived every green run this suite has ever had. Checking the examples against the scantlings they claim to illustrate is the same join the parser check makes for command lines, over the other two things the skill teaches.
+
+  Scenario: every role the bundled skill names is a role the model produces
+    Given the roles the asset at "assets/skill/SKILL.md" names
+    When each is matched against the roles the "tom" schema declares
+    Then every role the skill names is a role the model produces
+    And the roles read are not empty
+
+  Scenario: every driver message in the bundled skill conforms to the protocol
+    Given the JSON messages in the fenced blocks of the asset at "assets/skill/SKILL.md"
+    When each is checked against the "driver-protocol" schema in "scantlings/driver-protocol.schema.json"
+    Then every message conforms
+    And the messages read are not empty
+
+  Scenario: every plan in the bundled skill conforms to the plan schema
+    Given the YAML plans in the fenced blocks of the asset at "assets/skill/SKILL.md"
+    When each is checked against the "harness-plan" schema in "scantlings/harness-plan.schema.json"
+    Then every plan conforms
+    And the plans read are not empty

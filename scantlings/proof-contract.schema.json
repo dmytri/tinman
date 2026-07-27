@@ -79,6 +79,36 @@
         },
         "rationale": { "type": "string", "minLength": 1 }
       }
+    },
+    {
+      "title": "Construction boundary contract",
+      "description": "Constrains construction of one named type to a named set of modules, over a whole search tree rather than one module. The reference boundary branch above names the module it guards, so guarding a tree that way means remembering to add a contract for each module added to it, and the module nobody remembered is exactly the one that bypasses the invariant. This branch inverts that: the search paths are scanned whole, and any construction outside the permitted set is a counterexample, so a new module is guarded the day it is written by a contract nobody edited.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$id", "title", "description", "constructedType", "permittedModules", "searchPaths"],
+      "properties": {
+        "$id": { "type": "string", "format": "uri" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "constructedType": {
+          "description": "The type whose construction is bounded, named as the source names it. The checker matches a construction expression rather than the bare token, so the type's own declaration is not a counterexample and neither is a mention in a comment or an import.",
+          "type": "string",
+          "minLength": 1
+        },
+        "permittedModules": {
+          "description": "The modules allowed to construct the type, each a repository-relative source path. An empty list would forbid construction everywhere, including where the value has to come from, so the list carries at least one entry.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "searchPaths": {
+          "description": "The roots scanned for construction, each a repository-relative path. Named here rather than taken from the project's tooling configuration so the contract states its own scope: a checker that silently scanned nothing would report a clean bill, and the floor the checker asserts is that these paths were read and were not empty.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
     }
   ]
 }

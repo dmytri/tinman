@@ -199,4 +199,18 @@ impl InteractiveCapture {
         let output = self.output.lock().unwrap();
         VirtualScreen::from_pty_output_at(&output, self.columns)
     }
+
+    /// Everything the program wrote, read at a height that holds all of it, so
+    /// a program that wrote more than a screenful is read whole. The reader is
+    /// joined first: a program's exit is observed before the last bytes it wrote
+    /// have necessarily been read.
+    ///
+    /// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
+    pub fn stream(&mut self) -> VirtualScreen {
+        if let Some(drain) = self.reader.take() {
+            drain.join().expect("join the PTY output reader");
+        }
+        let output = self.output.lock().unwrap();
+        VirtualScreen::from_pty_stream(&output, self.columns)
+    }
 }

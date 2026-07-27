@@ -50,6 +50,19 @@ pub struct BoundaryPolicy {
     pub required_references: Vec<String>,
 }
 
+/// A construction boundary contract: the type whose construction is bounded,
+/// the modules allowed to construct it, and the roots scanned for construction.
+/// `scantlings/prepared-process-construction-boundary.json` is read into this
+/// shape. The contract bounds a whole tree rather than one module, so a module
+/// added later is guarded by a contract nobody edited.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstructionBoundary {
+    pub constructed_type: String,
+    pub permitted_modules: Vec<String>,
+    pub search_paths: Vec<String>,
+}
+
 fn read_policy<T: for<'de> Deserialize<'de>>(path: &str) -> T {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("policy file {path} unreadable: {e}"));
@@ -380,6 +393,18 @@ pub fn stage_fixture_in(workspace: &std::path::Path) -> String {
     "./fixture-tui".to_string()
 }
 
+/// Stage the fixture terminal program whose pane titles change between draws in
+/// `workspace` and return the relative name a launch addresses it by. A launch
+/// binds the workspace and nothing else, so a fixture named by an absolute path
+/// under the shared fixture directory is unreachable from inside the sandbox.
+pub fn stage_unstable_fixture_in(workspace: &std::path::Path) -> String {
+    let program = workspace.join("fixture-tui-unstable");
+    std::fs::write(&program, FIXTURE_TUI_UNSTABLE)
+        .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
+    set_executable(&program);
+    "./fixture-tui-unstable".to_string()
+}
+
 /// The source of the fixture terminal program that ignores directional keys.
 pub fn fixture_ignoring_directional_keys_source() -> &'static str {
     FIXTURE_TUI_NO_ARROWS
@@ -436,20 +461,6 @@ pub fn fixture_terminal_source() -> &'static str {
     FIXTURE_TUI
 }
 
-/// The path of the fixture terminal program whose pane titles change between
-/// draws, provisioned once per run and shared, like the stable fixture.
-pub fn unstable_fixture_terminal_program() -> std::path::PathBuf {
-    let stable = fixture_terminal_program();
-    let dir = stable.parent().expect("the fixture directory");
-    let program = dir.join("fixture-tui-unstable");
-    if !program.exists() {
-        std::fs::write(&program, FIXTURE_TUI_UNSTABLE)
-            .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
-        set_executable(&program);
-    }
-    program
-}
-
 /// Remove fixture directories an earlier run left behind, so a crashed run does
 /// not leak them. A directory belonging to a process still alive is left alone.
 fn reclaim_stale_fixture_dirs() {
@@ -473,7 +484,7 @@ fn reclaim_stale_fixture_dirs() {
 }
 
 /// Give `path` the owner execute bit, so the shell can launch it as a program.
-fn set_executable(path: &std::path::Path) {
+pub fn set_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let mut permissions = std::fs::metadata(path)
         .unwrap_or_else(|e| panic!("fixture program {} unreadable: {e}", path.display()))
@@ -1291,6 +1302,77 @@ pub fn bottom_line_screen(text: &str) -> tinman::screen::VirtualScreen {
     tinman::screen::VirtualScreen::from_text(&format!("\x1b[24;1H{text}"))
 }
 
+/// Draw a screen whose bottom row carries `text` in the named foreground
+/// colour, set with a real SGR sequence and cleared after, so the grid carries
+/// the attribute the program set rather than a flag the fixture invented.
+pub fn bottom_line_screen_in_red(text: &str) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_text(&format!("\x1b[24;1H\x1b[31m{text}\x1b[0m"))
+}
+
+/// Draw the bordered pane with `line` rendered in red and every other line drawn
+/// plainly, so the pane's own cells disagree on colour while its neighbours
+/// agree.
+pub fn bordered_pane_screen_with_line_in_red(
+    title: &str,
+    items: &[String],
+    line: &str,
+) -> tinman::screen::VirtualScreen {
+    let mut out = String::new();
+    let title_width = title.chars().count();
+    out.push('\u{250c}');
+    out.push_str(title);
+    out.push_str(&"\u{2500}".repeat(PANE_WIDTH.saturating_sub(title_width)));
+    out.push('\u{2510}');
+    out.push_str("\r\n");
+    for item in items {
+        let pad = " ".repeat(PANE_WIDTH.saturating_sub(item.chars().count()));
+        out.push('\u{2502}');
+        if item == line {
+            out.push_str("\x1b[31m");
+            out.push_str(item);
+            out.push_str(&pad);
+            out.push_str("\x1b[0m");
+        } else {
+            out.push_str(item);
+            out.push_str(&pad);
+        }
+        out.push('\u{2502}');
+        out.push_str("\r\n");
+    }
+    out.push('\u{2514}');
+    out.push_str(&"\u{2500}".repeat(PANE_WIDTH));
+    out.push('\u{2518}');
+    out.push_str("\r\n");
+    tinman::screen::VirtualScreen::from_text(&out)
+}
+
+/// Draw `text` at the 1-based `row` and `col` and leave the cursor at the
+/// 0-based `cursor_row` and `cursor_column`, addressed with a real ANSI
+/// positioning sequence.
+pub fn text_at_screen_with_cursor_at(
+    text: &str,
+    row: u16,
+    col: u16,
+    cursor_row: u16,
+    cursor_column: u16,
+) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_text(&format!(
+        "\x1b[{row};{col}H{text}\x1b[{};{}H",
+        cursor_row + 1,
+        cursor_column + 1
+    ))
+}
+
+/// Draw `text` at the 1-based `row` and `col` with the cursor hidden, using the
+/// real DECTCEM sequence a program hides it with.
+pub fn text_at_screen_with_cursor_hidden(
+    text: &str,
+    row: u16,
+    col: u16,
+) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_text(&format!("\x1b[{row};{col}H{text}\x1b[?25l"))
+}
+
 /// Draw a screen whose top row carries `text`.
 pub fn top_line_screen(text: &str) -> tinman::screen::VirtualScreen {
     tinman::screen::VirtualScreen::from_text(&format!("\x1b[1;1H{text}"))
@@ -2073,6 +2155,47 @@ pub fn check_boundary(policy_path: &str) -> Vec<String> {
     bad
 }
 
+/// Check every construction of the bounded type against the contract's
+/// permitted set. Returns counterexamples; an empty list means every
+/// construction of the type sits in a permitted module.
+///
+/// The scan matches a construction expression rather than the bare token, so the
+/// type's own declaration is not a counterexample and neither is an import or a
+/// mention in a comment. A scan that reached nothing would report a clean bill,
+/// so the floor is asserted here: the search paths carry at least one
+/// construction, and a contract that found none is itself a counterexample.
+pub fn check_construction_boundary(contract_path: &str) -> Vec<String> {
+    let contract: ConstructionBoundary = read_policy(contract_path);
+    let rule = format!(
+        r#"{{id: construction, language: rust, rule: {{pattern: "{} {{ $$$FIELDS }}"}}}}"#,
+        contract.constructed_type
+    );
+    let mut bad = Vec::new();
+    let mut found = 0usize;
+    for scope in &contract.search_paths {
+        for hit in run_inline_scan(&rule, scope) {
+            found += 1;
+            if !contract.permitted_modules.contains(&hit.file) {
+                bad.push(format!(
+                    "{}:{} constructs {}, which only {} may construct",
+                    hit.file,
+                    hit.range.start.line + 1,
+                    contract.constructed_type,
+                    contract.permitted_modules.join(", ")
+                ));
+            }
+        }
+    }
+    if found == 0 {
+        bad.push(format!(
+            "no construction of {} was found under {}, so the scan asserted nothing",
+            contract.constructed_type,
+            contract.search_paths.join(", ")
+        ));
+    }
+    bad
+}
+
 /// One match an `ast-grep` scan reports, in the shape the derived
 /// `plank-inventory` and `step-usage` commands emit.
 #[derive(Debug, Deserialize)]
@@ -2702,7 +2825,7 @@ where
 /// the reason it is out of the join's reach. A scantling enumeration named
 /// neither here nor in the join below is unclassified, and reading the pairs
 /// fails rather than passing over it.
-const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 6] = [
+const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 7] = [
     (
         "scantlings/inference-request.schema.json",
         "/properties/messages/items/properties/role",
@@ -2732,6 +2855,11 @@ const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 6] = [
         "scantlings/harness-plan.schema.json",
         "/$defs/locator/properties/binding",
         "the plan carries the binding as a string; tinman::tom::Binding names it through as_str rather than through serialization",
+    ),
+    (
+        "scantlings/tom.schema.json",
+        "/$defs/colour/oneOf/1",
+        "the screen carries a cell colour as a string, so no production enumeration carries the set",
     ),
 ];
 

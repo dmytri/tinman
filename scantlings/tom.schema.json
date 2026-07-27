@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/tom.schema.json",
   "title": "Tinman terminal object model",
-  "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names and text. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
+  "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names, text and the presentation they were drawn with. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Structure and presentation are both carried, for the same reason a browser exposes a computed style beside the element tree: a test author asserting that a warning line is drawn in red is asking about the screen, not about the program's internals, and a model that drops the cell attributes cannot answer them. Tinman reads an attributed cell grid and derives roles from those attributes, so the attributes are already in hand; carrying them costs nothing and withholding them pushes every presentation assertion into a bespoke check against the raw grid. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,9 +23,125 @@
     },
     "root": {
       "$ref": "#/$defs/region"
+    },
+    "cursor": {
+      "description": "Where the terminal's cursor stands, the model's equivalent of the browser's caret. A program that is taking input puts the cursor where the next character will land, and an operator reads that position to learn whether the program is listening; a model that omits it cannot answer the first question anyone asks of an input. Absent only where the program has hidden the cursor, which is itself the observable difference between a screen that takes input and one that does not.",
+      "$ref": "#/$defs/cursor"
     }
   },
   "$defs": {
+    "cursor": {
+      "description": "A cell position on the screen, counted from the top left.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "row",
+        "column"
+      ],
+      "properties": {
+        "row": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "colour": {
+      "description": "One cell colour. \"default\" is the terminal's own foreground or background, which is what a program that sets no colour leaves behind, and it is distinct from a named colour that happens to render the same way: a program setting white on a white-on-black terminal has done something the operator can see under a different theme, and the model says so. A named colour is one of the sixteen the terminal palette names. Anything else is reported as the program set it, by palette index or by channel, because Tinman reports what was drawn rather than guessing which name was meant.",
+      "oneOf": [
+        {
+          "const": "default"
+        },
+        {
+          "enum": [
+            "black",
+            "red",
+            "green",
+            "yellow",
+            "blue",
+            "magenta",
+            "cyan",
+            "white",
+            "brightBlack",
+            "brightRed",
+            "brightGreen",
+            "brightYellow",
+            "brightBlue",
+            "brightMagenta",
+            "brightCyan",
+            "brightWhite"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "red",
+            "green",
+            "blue"
+          ],
+          "properties": {
+            "red": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "green": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "blue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        }
+      ]
+    },
+    "style": {
+      "description": "The presentation every cell of a region shares, the terminal's equivalent of a computed style. Every key is stated rather than omitted when it holds its default, so a locator asserting a colour reads one shape whatever the program set: a region drawn plainly reports the default foreground and the default background rather than reporting nothing. A region whose cells disagree carries no style at all, and that absence is the honest answer: a single computed style for a region drawn two ways would be a summary, and a test author asserting against a summary is asserting against Tinman rather than against the screen.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "foreground",
+        "background",
+        "bold",
+        "reverse"
+      ],
+      "properties": {
+        "foreground": {
+          "$ref": "#/$defs/colour"
+        },
+        "background": {
+          "$ref": "#/$defs/colour"
+        },
+        "bold": {
+          "type": "boolean"
+        },
+        "reverse": {
+          "type": "boolean"
+        }
+      }
+    },
     "rect": {
       "description": "A Ratatui-shaped rectangle in screen cells.",
       "type": "object",
@@ -98,6 +214,10 @@
         "selected": {
           "description": "Whether the region is the currently selected or highlighted one among its siblings.",
           "type": "boolean"
+        },
+        "style": {
+          "description": "The presentation the region is drawn with, absent where its cells disagree.",
+          "$ref": "#/$defs/style"
         },
         "rect": {
           "$ref": "#/$defs/rect"
