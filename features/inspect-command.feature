@@ -100,6 +100,7 @@ Feature: inspect command
     Given the fixture terminal program's help carries the example "fixture --menu"
     When the operator inspects the fixture terminal program with its documented examples
     Then the inspect output lists a "menuitem" named "Settings"
+    And the inspect output reports the examples the program's own help carries
 
   @sandbox
   Scenario: inspection runs the examples its tldr page carries
