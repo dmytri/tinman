@@ -52,6 +52,14 @@ Run the Opening retrieval first and believe it over anything here.
 
 **It also answers the outside review's sharpest objection.** A maintained idiom catalogue is what rules produce when they must cover everything, and the answer is not a better catalogue: it is to stop maintaining one wherever inference generalises and a deterministic pass refutes.
 
+## Three findings from QM, 2026-07-28, and the first is Captain's own process fault
+
+**The deck moved under verification for the third time, and Captain caused all three.** Specs were edited while QM was running and then committed mid-run, so its greens for watches 1-16 were measured against text that has since changed and are not evidence for those watches as they now stand. They need re-running on a fresh dispatch. **The operator's rule that an idle deck is worse than a wrong call licenses dispatching promptly; it does not license editing the scope a role is currently measuring.** Author between dispatches, not during them.
+
+**A scenario contradicted a scantling, and the attestation stayed green because nothing tried.** `the tagline request asks the provider not to reason` requires the request to disable reasoning; `inference-request.schema.json` closed to additional properties over exactly `url`, `authorization`, `model`, `temperature` and `messages`, so no wire shape could satisfy both. QM correctly left the step undefined rather than guess. Closed by adding an optional `reasoning` object, proven to admit the disabled form and still reject a bogus field. **Recorded honestly: `reasoning` is OpenRouter's parameter and not a cross-vendor standard, so this is the one place the vendor-neutral claim strains.** An OpenAI-compatible endpoint that does not know it ignores it.
+
+**A fourth schema-against-production mismatch, in `capture`.** The plan schema requires `role`, `items` and `as`; `src/driver.rs` names the pane under `within`. The same shape is spelled two ways in two places, which is the family that already produced `within` against `scope`. The round-trip contract scenario is the check that should catch it once `capture` is exercised.
+
 ## Captain committed the durable artifacts directly, 2026-07-28. A named departure.
 
 **What and why.** Twenty-one durable artifacts carried a full session of specification work with no copy anywhere: eleven `.feature` files, five modified scantlings, two scantlings existing only as untracked files, the watchbill, `RIGGING.md`, `AGENTS.md` and the help asset. Production is regenerable from them and they are regenerable from nothing, so the exposure was the only real risk on the board.
