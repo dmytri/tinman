@@ -1,0 +1,10 @@
+Tinman needs Bubblewrap {{required}} or newer. {{found}}
+
+Tinman never executes a program outside a sandbox, so this is a hard
+requirement rather than an optional feature, and no flag lifts it.
+
+Install instructions, and why the version floor exists:
+https://github.com/dmytri/tinman#requirements
+
+Everything that executes nothing still works: tinman --help, tinman man,
+and tinman completions.
