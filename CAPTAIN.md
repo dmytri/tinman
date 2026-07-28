@@ -558,6 +558,18 @@ The ones still worth reading:
 - **Emulator is `alacritty_terminal` 0.26.0.** `vt100` was unmaintained and failed cell addressing and reverse video. `wezterm-term` is better and disqualified: not on crates.io, and we publish. `alacritty_terminal` is 0.x and breaks across releases; budget for that.
 - **Scantlings go into the assistant context, features do not.** Measured: `features/` 94794 chars, all scantlings 37960, the six user-facing ones 22087, `SKILL.md` 6025. The argument that decides it: a scantling cannot drift, because a `@contract` scenario pins it, while the skill can and did.
 
+## Three doctrine gaps worth raising upstream, found 2026-07-28
+
+**Red-first assumes a dry-run, and says nothing where there is none.** The Verification policy names static discovery as its own shape, the `discover` dry-run listing unimplemented steps and executing nothing. Where a runner offers none, as cucumber-rs does not, every step a role writes must compile at once, and doctrine offers no replacement shape. **This is the load-bearing gap; the other two are consequences.**
+
+**Doctrine governs hand-offs and never mentions transient state within a turn.** A role required to produce a failure it can only produce by breaking the build finds no text saying that is permitted, and correctly declines to invent permission.
+
+**Nothing states that a compile failure naming an absent seam is a production-code failure.** It plainly is, and Crew's dispatch condition is met by it, but a role reading the text conservatively concludes there is no legal ordering.
+
+**Captain's own error here is worth keeping.** Captain asserted that doctrine says a compile error is not a failing target. It says no such thing; the claim was invented and then reasoned from. The operator caught it by asking where it says that. **A rule cited from memory is a claim, and the whole session's discipline says a claim is not evidence until a command answers it.** Checked against the skill text, the only rule is that Crew is dispatched for production-code failures.
+
+Local guidance so this project sails as is now lives in `AGENTS.md` beside the `discover: none` note.
+
 ## Two doctrine gaps worth raising upstream
 
 1. **A release version bump has no owner.** The write-scope list gives Shipwright the manifest for dependency work only, and Shipwright is a harbour role while a release is mid-outbound. Captain bumped `Cargo.toml` to 0.1.2 under Captain's authority at sea, recorded as a departure. Boatswain named the same gap independently.
