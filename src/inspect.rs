@@ -4,6 +4,7 @@
 use crate::bwrap::BubblewrapBackend;
 use crate::pty::capture_interactive;
 use crate::sandbox::{CommandSpec, SandboxSpec};
+use crate::screen::VirtualScreen;
 use crate::tom::{Model, Region, build, read_stream};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -11,16 +12,83 @@ use std::time::{Duration, Instant};
 /// How long a program is given to finish before what it has drawn is read as
 /// the screen it is showing, so a program that keeps running is reported rather
 /// than waited on for ever.
-const EXIT_DEADLINE: Duration = Duration::from_secs(2);
+pub(crate) const EXIT_DEADLINE: Duration = Duration::from_secs(2);
 
-/// Launch `command` through the sandbox backend on a PTY and read the model of
+/// What one sandboxed launch produced: the model of what the program drew, the
+/// screen that model was read from, and whether the program honoured the line
+/// it was given. A program still running has not refused anything yet, so it
+/// counts as honouring the line; one that exited unsuccessfully refused it.
+///
+/// @planks("the operator inspects {string} with its documented examples")
+/// @planks("the inspect output reports the example {string} was refused")
+#[derive(Debug)]
+pub struct Run {
+    pub model: Model,
+    pub screen: VirtualScreen,
+    pub honoured: bool,
+}
+
+/// Launch `command` under `spec` through the sandbox backend on a PTY and read
 /// what it shows. A program that exits on its own has finished speaking, so its
 /// whole output is read; a program still running has not, so what it has drawn
 /// is read as a screen. Exiting is observable, so the reading follows the
-/// program rather than a flag. The inspected command is an unfamiliar program,
+/// program rather than a flag. The launched command is an unfamiliar program,
 /// so it runs isolated over `workspace`, reading that tree through an overlay
 /// whose writes never reach it, and the backend is the only thing that prepares
 /// it.
+///
+/// @planks("the operator inspects {string} with its documented examples")
+/// @planks("the operator inspects {string} with its documented examples and writes a plan")
+/// @planks("the operator inspects the fixture terminal program with its documented examples")
+/// @planks("the operator inspects the fixture terminal program with its documented examples and writes a plan")
+pub fn run(spec: &SandboxSpec, command: &str, workspace: &Path) -> Result<Run, String> {
+    run_program(
+        spec,
+        &CommandSpec {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), command.to_string()],
+        },
+        workspace,
+    )
+}
+
+/// The same launch, given the program to run and its arguments rather than a
+/// command line for a shell to read. A shell answers for a name it carries as a
+/// builtin before it looks for the program of that name, so asking a binary
+/// what it says about itself means running that binary rather than a line about
+/// it.
+///
+/// @planks("the inspect output reports {string} as the ground-truth example")
+/// @planks("the inspect output reports the examples the program's own help carries")
+pub fn run_program(
+    spec: &SandboxSpec,
+    command: &CommandSpec,
+    workspace: &Path,
+) -> Result<Run, String> {
+    let prepared = BubblewrapBackend::new().prepare_over_tree(spec, command, workspace, None)?;
+    let mut session = capture_interactive(&prepared)?;
+    let deadline = Instant::now() + EXIT_DEADLINE;
+    while !session.finished() {
+        if Instant::now() >= deadline {
+            let screen = session.screen();
+            return Ok(Run {
+                model: build(&screen),
+                screen,
+                honoured: true,
+            });
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let honoured = session.exit_status().success();
+    let screen = session.stream();
+    Ok(Run {
+        model: read_stream(&screen),
+        screen,
+        honoured,
+    })
+}
+
+/// The model of what `command` shows, read through the default sandbox.
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects the fixture terminal program as JSON")
@@ -36,31 +104,15 @@ const EXIT_DEADLINE: Duration = Duration::from_secs(2);
 /// @planks("the operator inspects {string}")
 /// @planks("the inspect output names the root region {string}")
 pub fn model(command: &str, workspace: &Path) -> Result<Model, String> {
-    let prepared = BubblewrapBackend::new().prepare_over_tree(
-        &SandboxSpec::default(),
-        &CommandSpec {
-            program: "/bin/sh".to_string(),
-            args: vec!["-c".to_string(), command.to_string()],
-        },
-        workspace,
-        None,
-    )?;
-    let mut session = capture_interactive(&prepared)?;
-    let deadline = Instant::now() + EXIT_DEADLINE;
-    while !session.finished() {
-        if Instant::now() >= deadline {
-            return Ok(named(build(&session.screen()), command));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let launched = run(&SandboxSpec::default(), command, workspace)?;
     // A program that exited unsuccessfully before drawing anything never
     // started, which is a different finding from one that ran and drew an
     // empty screen. Reporting both as "no regions on screen" would send an
     // operator looking for a drawing bug in a program that never launched.
-    if !session.exit_status().success() {
+    if !launched.honoured {
         return Err(format!("the program {command:?} did not start"));
     }
-    Ok(named(read_stream(&session.stream()), command))
+    Ok(named(launched.model, command))
 }
 
 /// Name the root region for the program the operator asked about. The root

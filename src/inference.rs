@@ -26,7 +26,7 @@ const DEFAULT_TLDR_BASE_URL: &str = "https://raw.githubusercontent.com/tldr-page
 /// answer ends the call only on a ceiling, so every call carries one. A probe
 /// asks only whether the provider answers, so it is bounded tightly and a slow
 /// answer counts as no answer.
-const PROBE_CEILING: std::time::Duration = std::time::Duration::from_secs(20);
+pub(crate) const PROBE_CEILING: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The ceiling on a generation call, from connection to the last byte of the
 /// answer. A generation call asks a model to produce a structured document,
@@ -34,7 +34,7 @@ const PROBE_CEILING: std::time::Duration = std::time::Duration::from_secs(20);
 /// truncate real work and report absence where the provider was answering. The
 /// bound clears the slow tail of a real screen reading rather than its median,
 /// because a ceiling sized to the median reports absence on the tail.
-const GENERATION_CEILING: std::time::Duration = std::time::Duration::from_secs(110);
+pub(crate) const GENERATION_CEILING: std::time::Duration = std::time::Duration::from_secs(110);
 
 /// The ceiling on the tagline generation an interactive help waits for. The
 /// expansion is cosmetic, so a provider that has not answered by then is read as
@@ -42,7 +42,7 @@ const GENERATION_CEILING: std::time::Duration = std::time::Duration::from_secs(1
 /// the help and the prompt beneath it, and a real model call takes tens of
 /// seconds, so waiting the generation ceiling out holds a blank terminal in
 /// front of them for the whole of it.
-const TAGLINE_CEILING: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const TAGLINE_CEILING: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The acronym is cosmetic and optimizes for novelty.
 const ACRONYM_TEMPERATURE: f64 = 1.4;
@@ -75,6 +75,16 @@ const TOM_INSTRUCTION: &str = concat!(
     "\"text\", each a string or null; \"selected\", a boolean; \"rect\", with the ",
     "integer keys \"x\", \"y\", \"width\" and \"height\"; and \"children\", an ",
     "array of regions.\n",
+);
+
+/// What the engine is told the page in front of the screen is. A tldr page
+/// describes what a command is for in the words its own community chose, which
+/// is the vocabulary a good name comes from, and it describes some version of
+/// the program rather than the screen in hand.
+const TOM_PAGE_INSTRUCTION: &str = concat!(
+    "The community documentation below describes the program on the screen. ",
+    "Take its vocabulary when naming regions, and name nothing the screen does ",
+    "not itself show.\n",
 );
 
 /// The inference configuration a run resolved.
@@ -540,11 +550,57 @@ pub fn tom_completion(settings: &Settings, screen: &str) -> Option<String> {
     )
 }
 
-/// Whether the configured provider answers, bounded by the probe ceiling.
+/// The request a naming pass over `program` sends: the reading instruction, the
+/// program's tldr page where the configured source carries one, and the screen.
+/// A program the source has no page for is named from the screen alone, which is
+/// the reading every other pass already makes.
+///
+/// @planks("the terminal object model of {string} is inferred")
+/// @planks("the inference request carries the tldr page for {string}")
+/// @planks("the inference request carries no tldr page")
+pub fn tom_request(settings: &Settings, screen: &str, program: &str) -> Request {
+    let prompt = match crate::examples::fetch_page(&settings.tldr_base_url, program) {
+        Some(page) => format!("{TOM_INSTRUCTION}{TOM_PAGE_INSTRUCTION}{page}\n{screen}"),
+        None => format!("{TOM_INSTRUCTION}{screen}"),
+    };
+    request(settings, TOM_TEMPERATURE, prompt)
+}
+
+/// `tom_completion`, naming the program the screen belongs to so the pass reads
+/// its page.
+///
+/// @planks("the terminal object model of {string} is inferred")
+/// @planks("the plan for {string} is written")
+pub fn tom_completion_for(settings: &Settings, screen: &str, program: &str) -> Option<String> {
+    settings.api_key.as_ref()?;
+    complete(&tom_request(settings, screen, program), GENERATION_CEILING)
+}
+
+/// Whether the configured provider answers, bounded by the probe ceiling. The
+/// ceiling is enforced from the outside on a background thread rather than
+/// trusted to the HTTP client's own internal timeout, which the client can
+/// overrun: the wait ends the moment the probe ceiling elapses, whatever the
+/// call beneath it is still doing.
 ///
 /// @planks("Tinman checks whether inference is available")
 pub fn is_available(settings: &Settings) -> bool {
-    generated_expansion(settings, PROBE_CEILING).is_some()
+    is_available_within(settings, PROBE_CEILING)
+}
+
+/// Whether the configured provider answers within `ceiling`. The ceiling is
+/// enforced from the outside on a background thread rather than trusted to the
+/// HTTP client's own internal timeout, which the client can overrun: the wait
+/// ends the moment the ceiling elapses, whatever the call beneath it is still
+/// doing.
+///
+/// @planks("that seam is exercised")
+pub fn is_available_within(settings: &Settings, ceiling: std::time::Duration) -> bool {
+    let settings = settings.clone();
+    let (answered, available) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = answered.send(generated_expansion(&settings, ceiling).is_some());
+    });
+    available.recv_timeout(ceiling).unwrap_or(false)
 }
 
 /// Send a request to the configured provider and return the content it

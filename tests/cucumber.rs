@@ -158,6 +158,9 @@ struct TinmanWorld {
     // flow orchestration
     flow_outcome: Option<tinman::flow::FlowOutcome>,
     flow_error: Option<String>,
+    // the Bubblewrap version a scenario staged on the path, for a refusal that
+    // names what it found beside what it requires
+    staged_bwrap_version: Option<String>,
     // driver protocol
     driver: Option<support::DriverProcess>,
     reply: Option<serde_json::Value>,
@@ -236,6 +239,18 @@ struct TinmanWorld {
     // reads, kept so the step asserting what it resolved to reads the value
     // production returned rather than the environment the scenario set
     page_source: Option<String>,
+    // the parser's answer to one command line a scenario passed it, kept so the
+    // step asserting acceptance reads an outcome rather than an absence
+    parser_outcome: Option<Result<(), String>>,
+    // the pages the scenario's own tldr source carries, program to examples, and
+    // the real loopback source serving them as raw markdown
+    tldr_pages: std::collections::BTreeMap<String, Vec<String>>,
+    tldr_source: Option<support::LocalTldrSource>,
+    // the program whose page a following step appends a further example to
+    last_tldr_program: Option<String>,
+    // the examples a scenario staged into a program's own help, so the step
+    // asserting they were reported reads what the scenario staged
+    staged_help_examples: Vec<String>,
     // inference configuration and requests
     env_vars: std::collections::BTreeMap<String, String>,
     settings: Option<tinman::inference::Settings>,
@@ -252,10 +267,19 @@ struct TinmanWorld {
     // what the scenario's local provider answers with, so a step waiting for a
     // turn to finish ends on the answer reaching the terminal
     provider_answer: Option<String>,
-    // the timed seams the latency contract declares, and what exercising each
-    // one was observed to cost
+    // the timed seams the latency contract declares, and the ceiling production
+    // was read to enforce for each of them
     latency_budgets: Option<Vec<support::LatencyBudget>>,
-    seam_timings: Option<Vec<(support::LatencyBudget, std::time::Duration)>>,
+    enforced_ceilings: Option<Vec<(support::LatencyBudget, Option<std::time::Duration>)>>,
+    // the short ceiling one seam is driven against and how long that wait
+    // lasted, so a ceiling that ends a wait is told from one that never does
+    short_ceiling: Option<std::time::Duration>,
+    short_ceiling_elapsed: Option<std::time::Duration>,
+    // the refusal an unavailable sandbox prints, as the asset carries it, and
+    // the link read out of it, so the step checking where it points reads the
+    // shipped text rather than a copy of it
+    refusal_text: Option<String>,
+    refusal_link: Option<String>,
 }
 
 /// The scenario's working directory: the one a dotenv file is staged in and the
@@ -2099,6 +2123,178 @@ async fn the_output_is_a_completion_script(world: &mut TinmanWorld, name: String
     );
 }
 
+// ---------------------------------------------------------------------------
+// sandbox availability: a version floor refused before anything is executed
+// ---------------------------------------------------------------------------
+
+/// Stage a directory the scenario owns and make it the whole path the launched
+/// Tinman searches, so what a sandbox lookup finds is what the scenario put
+/// there rather than whatever the host happens to carry.
+fn stage_path_dir(world: &mut TinmanWorld, name: &str) -> std::path::PathBuf {
+    let dir = working_dir(world).join(name);
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("the staged path directory was not created: {e}"));
+    world
+        .env_vars
+        .insert("PATH".to_string(), dir.display().to_string());
+    dir
+}
+
+/// The Bubblewrap version this project requires, as `RIGGING.md` declares it
+/// under `## Dependencies`. The floor is a configuration value rather than a
+/// constant restated here, so a refusal and the rigging cannot drift apart.
+fn required_bwrap_version() -> String {
+    let rigging = std::fs::read_to_string("RIGGING.md")
+        .unwrap_or_else(|e| panic!("RIGGING.md unreadable: {e}"));
+    rigging
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("- dependency: bwrap >= "))
+        .map(|version| version.trim().to_string())
+        .expect("RIGGING.md declares a Bubblewrap version floor under ## Dependencies")
+}
+
+#[given("the Bubblewrap binary is not on the path")]
+async fn the_bubblewrap_binary_is_not_on_the_path(world: &mut TinmanWorld) {
+    stage_path_dir(world, "path-without-bwrap");
+}
+
+#[given(expr = "the Bubblewrap binary reports version {string}")]
+async fn the_bubblewrap_binary_reports_version(world: &mut TinmanWorld, version: String) {
+    let dir = stage_path_dir(world, "path-with-old-bwrap");
+    let shim = dir.join("bwrap");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'bubblewrap {version}'\n  exit 0\nfi\nexit 1\n"
+        ),
+    )
+    .unwrap_or_else(|e| panic!("the bwrap shim was not written: {e}"));
+    support::set_executable(&shim);
+    world.staged_bwrap_version = Some(version);
+}
+
+#[then("the failure reports the required Bubblewrap version")]
+async fn the_failure_reports_the_required_version(world: &mut TinmanWorld) {
+    let required = required_bwrap_version();
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&required),
+        "the failure does not name {required:?} as the Bubblewrap version required; it reads:\n{errors}"
+    );
+}
+
+#[then("the failure reports the version found and the version required")]
+async fn the_failure_reports_found_and_required(world: &mut TinmanWorld) {
+    let required = required_bwrap_version();
+    let found = world
+        .staged_bwrap_version
+        .clone()
+        .expect("the scenario staged a Bubblewrap version on the path");
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&found) && errors.contains(&required),
+        "the failure does not name both the {found:?} found and the {required:?} required; \
+         it reads:\n{errors}"
+    );
+}
+
+/// The asset carrying the refusal an unavailable sandbox prints.
+const SANDBOX_REFUSAL_ASSET: &str = "assets/help/sandbox-unavailable.txt";
+
+#[given("the refusal text in the assets")]
+async fn the_refusal_text_in_the_assets(world: &mut TinmanWorld) {
+    world.refusal_text = Some(asset_body(SANDBOX_REFUSAL_ASSET));
+}
+
+#[when("the link it carries is read")]
+async fn the_link_it_carries_is_read(world: &mut TinmanWorld) {
+    let text = world
+        .refusal_text
+        .as_ref()
+        .expect("the refusal text was read from the assets");
+    let link = text
+        .split_whitespace()
+        .find(|word| word.starts_with("https://"))
+        .unwrap_or_else(|| panic!("the refusal text carries no link; it reads:\n{text}"))
+        .trim_end_matches(['.', ','])
+        .to_string();
+    world.refusal_link = Some(link);
+}
+
+#[then(expr = "it names a heading the file at {string} carries")]
+async fn it_names_a_heading_the_file_carries(world: &mut TinmanWorld, path: String) {
+    let link = world
+        .refusal_link
+        .as_ref()
+        .expect("the link was read out of the refusal text");
+    let (_, fragment) = link
+        .split_once('#')
+        .unwrap_or_else(|| panic!("the link {link:?} names no heading at all"));
+    let document = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the file at {path} is unreadable: {e}"));
+    // A heading is addressed by the anchor a rendered document gives it, so the
+    // comparison is against that anchor rather than against the heading text.
+    let anchors: Vec<String> = document
+        .lines()
+        .filter(|line| line.starts_with('#'))
+        .map(|line| heading_anchor(line.trim_start_matches('#').trim()))
+        .collect();
+    assert!(
+        anchors.iter().any(|anchor| anchor == fragment),
+        "the refusal points at {fragment:?}, which is no heading {path} carries; \
+         it carries {anchors:?}"
+    );
+}
+
+/// The anchor a Markdown heading is reached by: its text lowercased, with runs
+/// of space hyphenated and anything neither alphanumeric nor a hyphen dropped.
+fn heading_anchor(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            c if c.is_alphanumeric() => Some(c),
+            ' ' | '-' => Some('-'),
+            _ => None,
+        })
+        .collect()
+}
+
+#[then("no program was executed")]
+async fn no_program_was_executed(world: &mut TinmanWorld) {
+    // A program that ran would have drawn to the screen inspection reads, so a
+    // listing is the observable trace of a launch that happened anyway.
+    let output = run_output(world);
+    assert!(
+        output.trim().is_empty(),
+        "inspection reported a screen, so a program was executed; it reads:\n{output}"
+    );
+}
+
+#[when("the operator starts the driver")]
+async fn the_operator_starts_the_driver(world: &mut TinmanWorld) {
+    let env = configured_env(world);
+    let mut driver = support::DriverProcess::start_with(&env);
+    // A driver that refuses as it starts exits on its own. One that does not
+    // would wait on its input for as long as it stays open, so the input is
+    // closed and the wait ends on the process exit rather than on a clock.
+    driver.close_stdin();
+    let status = driver.wait_for_exit();
+    world.run_status = Some(status.code().unwrap_or(-1));
+    world.run_stdout = Some(String::new());
+    world.driver = Some(driver);
+}
+
+#[then("the driver accepted no connection")]
+async fn the_driver_accepted_no_connection(world: &mut TinmanWorld) {
+    let driver = world.driver.as_ref().expect("the driver was started");
+    let exchanged = driver.exchanged();
+    assert!(
+        exchanged.is_empty(),
+        "the driver exchanged {} message(s) before refusing: {exchanged:?}",
+        exchanged.len()
+    );
+}
+
 #[then("the command exits with a non-zero status")]
 async fn the_command_exits_non_zero(world: &mut TinmanWorld) {
     let status = world.run_status.expect("a command was run");
@@ -2567,128 +2763,110 @@ async fn the_seams_and_ceilings_in(world: &mut TinmanWorld, contract: String) {
     world.latency_budgets = Some(support::latency_budgets(&contract));
 }
 
-/// How many times a real-service seam is asked before the step reports it
-/// answered nothing. Answering nothing is specified behaviour for the tagline
-/// seam rather than a fault: it settles on no expansion when the model's words
-/// do not spell the name inside the ceiling, which
-/// `features/inference-provider.feature` pins in its own scenario. One such
-/// answer is a transient of a hosted service and not a finding, so the ask is
-/// repeated toward a bounded deadline. The ceiling keeps its teeth because each
-/// ask carries its own timer and the answering ask is the one measured, so a
-/// seam that answers slowly still reddens.
-const REAL_SERVICE_ASKS: usize = 3;
-
-/// Drive the named seam for real and report what it cost. A seam the contract
-/// names and no exerciser drives fails here: a ceiling nobody exercises is the
-/// silent guess the contract exists to close, so a line added to the contract
-/// reddens until something drives it.
-fn exercise_timed_seam(world: &mut TinmanWorld, seam: &str) -> std::time::Duration {
-    match seam {
-        "tagline generation" => {
-            let settings = tinman::inference::Settings::from_process();
-            let mut asked = 0;
-            loop {
-                let started = std::time::Instant::now();
-                let expansion = tinman::inference::tagline_expansion(&settings);
-                let elapsed = started.elapsed();
-                asked += 1;
-                if expansion.is_some() {
-                    return elapsed;
-                }
-                assert!(
-                    asked < REAL_SERVICE_ASKS,
-                    "the tagline generation seam produced no expansion in {asked} \
-                     asks, so its ceiling was measured against calls that answered \
-                     nothing; the configured provider reports inference available: {}",
-                    tinman::inference::is_available(&settings)
-                );
-            }
-        }
-        "inference availability probe" => {
-            let settings = tinman::inference::Settings::from_process();
-            let started = std::time::Instant::now();
-            let available = tinman::inference::is_available(&settings);
-            let elapsed = started.elapsed();
-            assert!(
-                available,
-                "the configured provider reported inference unavailable, so the \
-                 availability probe was not observed against a live provider"
-            );
-            elapsed
-        }
-        "assistant answer generation" => {
-            let settings = tinman::inference::Settings::from_process();
-            let started = std::time::Instant::now();
-            let answer = tinman::inference::assistant_completion(
-                &settings,
-                "What does the tinman inspect command do?",
-            );
-            let elapsed = started.elapsed();
-            assert!(
-                answer.is_some(),
-                "the assistant answer seam produced no answer, so its ceiling was \
-                 measured against a call that answered nothing"
-            );
-            elapsed
-        }
-        "inspect exit deadline" => {
-            let started = std::time::Instant::now();
-            run_tinman_command(world, &["inspect", "printf hi"]);
-            let elapsed = started.elapsed();
-            let status = world.run_status.expect("the inspect run reported a status");
-            assert!(
-                status == 0,
-                "inspection did not succeed, so its exit deadline was measured \
-                 against a run that failed:\n{}",
-                run_output(world)
-            );
-            elapsed
-        }
-        other => panic!(
-            "the latency contract names the seam {other:?}, which no exerciser \
-             drives, so its ceiling asserts nothing"
-        ),
-    }
+#[given("a dependency that never answers")]
+async fn a_dependency_that_never_answers(world: &mut TinmanWorld) {
+    // Every inference seam reaches its dependency over the configured endpoint,
+    // so one stalled provider withholds the answer from all of them. It accepts
+    // the connection and holds it, which is the fault only a ceiling ends: a
+    // refused connection would end the wait on its own and time nothing.
+    let provider = support::LocalProvider::stalling();
+    world.provider_answer = None;
+    use_provider(world, provider);
 }
 
-#[when("each seam is exercised and timed")]
-async fn each_seam_is_exercised_and_timed(world: &mut TinmanWorld) {
+/// The ceiling each timed seam enforces, as production reports it. Reading the
+/// enforcement is what makes this deterministic: a wait driven out to its
+/// ceiling measures the ceiling, and driving every seam that way costs the sum
+/// of them on the tier that carries every inner-loop run.
+#[when("the ceiling each seam enforces is read")]
+async fn the_ceiling_each_seam_enforces_is_read(world: &mut TinmanWorld) {
     let budgets = world
         .latency_budgets
         .clone()
         .expect("the latency contract was read");
-    let mut timings = Vec::new();
-    for budget in budgets {
-        let elapsed = exercise_timed_seam(world, &budget.seam);
-        timings.push((budget, elapsed));
-    }
-    world.seam_timings = Some(timings);
+    let read = budgets
+        .into_iter()
+        .map(|budget| {
+            let enforced = tinman::enforced_ceiling(&budget.seam);
+            (budget, enforced)
+        })
+        .collect();
+    world.enforced_ceilings = Some(read);
 }
 
-#[then("no seam exceeds its ceiling")]
-async fn no_seam_exceeds_its_ceiling(world: &mut TinmanWorld) {
-    let timings = world
-        .seam_timings
+#[then("every seam enforces the ceiling declared for it")]
+async fn every_seam_enforces_the_ceiling_declared_for_it(world: &mut TinmanWorld) {
+    let read = world
+        .enforced_ceilings
         .as_ref()
-        .expect("each seam was exercised and timed");
-    let over: Vec<String> = timings
+        .expect("the ceiling each seam enforces was read");
+    let wrong: Vec<String> = read
         .iter()
-        .filter(|(budget, elapsed)| elapsed.as_millis() as u64 > budget.ceiling_ms)
-        .map(|(budget, elapsed)| {
-            format!(
-                "{} on the {} tier was observed at {}ms against its {}ms ceiling",
-                budget.seam,
-                budget.tier,
-                elapsed.as_millis(),
-                budget.ceiling_ms
-            )
+        .filter_map(|(budget, enforced)| match enforced {
+            None => Some(format!(
+                "{} on the {} tier declares a {}ms ceiling and no seam of that \
+                 name enforces one, so its ceiling is a number nothing reads",
+                budget.seam, budget.tier, budget.ceiling_ms
+            )),
+            Some(enforced) if enforced.as_millis() != u128::from(budget.ceiling_ms) => {
+                Some(format!(
+                    "{} on the {} tier enforces {}ms against the {}ms its contract \
+                     declares",
+                    budget.seam,
+                    budget.tier,
+                    enforced.as_millis(),
+                    budget.ceiling_ms
+                ))
+            }
+            Some(_) => None,
         })
         .collect();
     assert!(
-        over.is_empty(),
-        "{} timed seam(s) exceeded their ceiling:\n{}",
-        over.len(),
-        over.join("\n")
+        wrong.is_empty(),
+        "{} timed seam(s) do not enforce the ceiling declared for them:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// How far past a short ceiling an observation may land and still read as the
+/// wait ending there. What is timed carries building the request and reaching
+/// the stalled provider, and no ceiling governs those, so a margin is owed
+/// above the ceiling and none below it.
+const SHORT_CEILING_MARGIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[given(expr = "a seam whose ceiling is {int} milliseconds")]
+async fn a_seam_whose_ceiling_is_milliseconds(world: &mut TinmanWorld, ceiling_ms: u64) {
+    world.short_ceiling = Some(std::time::Duration::from_millis(ceiling_ms));
+}
+
+/// Drive the enforcement mechanism against the dependency that never answers,
+/// with the short ceiling the scenario named. The seam is asserted to have
+/// answered nothing: a wait that received an answer timed the dependency rather
+/// than the enforcement, so its measurement would say nothing about the ceiling.
+#[when("that seam is exercised")]
+async fn that_seam_is_exercised(world: &mut TinmanWorld) {
+    let ceiling = world.short_ceiling.expect("a seam whose ceiling was named");
+    let settings = resolved_settings(world);
+    let started = std::time::Instant::now();
+    let available = tinman::inference::is_available_within(&settings, ceiling);
+    world.short_ceiling_elapsed = Some(started.elapsed());
+    assert!(
+        !available,
+        "the stalled provider was reported available, so what was timed was an \
+         answer rather than an abandoned wait"
+    );
+}
+
+#[then(expr = "it gave up inside {int} milliseconds")]
+async fn it_gave_up_inside_milliseconds(world: &mut TinmanWorld, ceiling_ms: u64) {
+    let elapsed = world.short_ceiling_elapsed.expect("the seam was exercised");
+    let ceiling = std::time::Duration::from_millis(ceiling_ms);
+    assert!(
+        elapsed <= ceiling + SHORT_CEILING_MARGIN,
+        "the seam waited {}ms against its {ceiling_ms}ms ceiling, so the ceiling \
+         did not end that wait",
+        elapsed.as_millis()
     );
 }
 
@@ -2865,6 +3043,144 @@ async fn it_is_the_tldr_projects_raw_markdown(world: &mut TinmanWorld) {
 #[then(expr = "it is {string}")]
 async fn it_is(world: &mut TinmanWorld, expected: String) {
     assert_eq!(page_source(world), expected, "the page source");
+}
+
+// ---------------------------------------------------------------------------
+// the naming context: the tldr page a pass over a named program carries, and
+// the credit the plan written from it gives that page
+// ---------------------------------------------------------------------------
+
+#[when(expr = "the terminal object model of {string} is inferred")]
+async fn the_model_of_program_is_inferred(world: &mut TinmanWorld, program: String) {
+    let settings = resolved_settings(world);
+    let screen = world.screen.as_ref().expect("a virtual screen").clone();
+    // The request is the seam these scenarios assert on, so it is kept as the
+    // request builder produced it, read later off the wire form the provider
+    // would receive.
+    world.built_requests = vec![tinman::inference::tom_request(
+        &settings,
+        &screen.contents(),
+        &program,
+    )];
+    world.tom = Some(tinman::tom::infer_for(&screen, &settings, &program));
+}
+
+/// The chat message contents one built request carries, read off the wire form
+/// the provider receives rather than off anything the request reports about
+/// itself.
+fn request_contents(world: &TinmanWorld) -> String {
+    built_requests(world)
+        .iter()
+        .map(|request| {
+            let wire = to_json(request);
+            wire["messages"]
+                .as_array()
+                .unwrap_or_else(|| panic!("the request carries no messages array:\n{wire:#}"))
+                .iter()
+                .map(|message| message["content"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<String>>()
+                .join("\n")
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+#[then(expr = "the inference request carries the tldr page for {string}")]
+async fn the_request_carries_the_tldr_page_for(world: &mut TinmanWorld, program: String) {
+    let staged = support::tldr_page(&program, &[]);
+    let carried = request_contents(world);
+    // The page the source served is the page the request must carry, so the
+    // assertion is against that text rather than against the program's name,
+    // which the request names for other reasons.
+    let body: Vec<&str> = staged
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let missing: Vec<&&str> = body
+        .iter()
+        .filter(|line| !carried.contains(**line))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the inference request carries no tldr page for {program:?}; it is missing {missing:?}. \
+         The request reads:\n{carried}"
+    );
+}
+
+#[then("the inference request carries no tldr page")]
+async fn the_request_carries_no_tldr_page(world: &mut TinmanWorld) {
+    let carried = request_contents(world);
+    // A page is recognised by the text the style guide fixes on every one of
+    // them, so the absence asserted here is the absence of a page rather than
+    // the absence of the word the instruction may use for other reasons.
+    let markers = ["> Documentation for", "More information:"];
+    let found: Vec<&&str> = markers
+        .iter()
+        .filter(|marker| carried.contains(**marker))
+        .collect();
+    assert!(
+        found.is_empty(),
+        "the inference request carries a tldr page though the source has none for this program; \
+         it carries {found:?}. The request reads:\n{carried}"
+    );
+}
+
+#[when(expr = "the plan for {string} is written")]
+async fn the_plan_for_program_is_written(world: &mut TinmanWorld, program: String) {
+    let settings = resolved_settings(world);
+    let name = world
+        .proposed_name
+        .clone()
+        .expect("an engine named a region");
+    let screen = world.screen.as_ref().expect("a virtual screen").clone();
+    let inferred = tinman::tom::infer_for(&screen, &settings, &program);
+    let deterministic = tinman::tom::build(&screen);
+    let role = inferred
+        .find_named(&name)
+        .unwrap_or_else(|| panic!("the inferred model carries no region named {name:?}"))
+        .role()
+        .to_string();
+    let plan =
+        tinman::record::plan_expecting_for(&deterministic, &role, &name, &program, &settings)
+            .unwrap_or_else(|e| panic!("no plan was written: {e}"));
+    world.written_plan_source =
+        Some(serde_yaml::to_string(&plan).expect("the plan serializes to YAML"));
+}
+
+/// The plan the scenario wrote, as its YAML source.
+fn written_plan_source(world: &TinmanWorld) -> &str {
+    world
+        .written_plan_source
+        .as_deref()
+        .expect("a plan was written")
+}
+
+#[then("the plan credits the tldr-pages project for the page it read")]
+async fn the_plan_credits_the_tldr_project(world: &mut TinmanWorld) {
+    let source = written_plan_source(world);
+    assert!(
+        source.contains("tldr-pages"),
+        "the plan credits no tldr-pages project for the page it read; it reads:\n{source}"
+    );
+}
+
+#[then(expr = "the plan names {string} as that page's licence")]
+async fn the_plan_names_the_pages_licence(world: &mut TinmanWorld, licence: String) {
+    let source = written_plan_source(world);
+    assert!(
+        source.contains(&licence),
+        "the plan names no {licence:?} as the page's licence; it reads:\n{source}"
+    );
+}
+
+#[then("the plan credits no page")]
+async fn the_plan_credits_no_page(world: &mut TinmanWorld) {
+    let source = written_plan_source(world);
+    assert!(
+        !source.contains("tldr-pages"),
+        "the plan credits the tldr-pages project though it read no page; it reads:\n{source}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -8334,7 +8650,7 @@ async fn the_model_contains_a_region_named(world: &mut TinmanWorld, name: String
     world.found_region = Some(region);
 }
 
-#[then("that region carries the name the deterministic reading gave it")]
+#[then("that region is left as the deterministic reading left it")]
 async fn that_region_keeps_its_deterministic_name(world: &mut TinmanWorld) {
     // The region the engine left unnamed, read from both producers of the same
     // shape and matched by the rect they must agree on, so the assertion is
@@ -9081,30 +9397,34 @@ async fn the_fixture_is_captured_through_a_pty(world: &mut TinmanWorld) {
 
 #[when("the terminal object model is inferred by the configured engine")]
 async fn the_model_is_inferred_by_the_configured_engine(world: &mut TinmanWorld) {
+    // What this scenario asserts on is the model Tinman produces, never the
+    // reply the provider sent, so the inference seam is what runs here rather
+    // than a raw completion call. The seam refuses an enrichment that would not
+    // conform and leaves the deterministic reading standing in its place, which
+    // is the ordinary answer from a real engine rather than an edge.
     let settings = configured_settings();
     let screen = world
         .screen
         .as_ref()
         .expect("a captured virtual screen")
         .clone();
-    let contents = screen.contents();
-    let started = std::time::Instant::now();
-    let inferred = support::within_deadline(
-        "the configured inference engine",
-        PROVIDER_ATTEMPT,
-        PROVIDER_DEADLINE,
-        move || tinman::inference::tom_completion(&settings, &contents),
-    );
-    let elapsed = started.elapsed();
-    let inferred = inferred.unwrap_or_else(|| {
-        panic!(
-            "the configured engine answered with no model, after {:.1}s",
-            elapsed.as_secs_f64()
-        )
-    });
-    let value: serde_json::Value = serde_json::from_str(&inferred)
-        .unwrap_or_else(|e| panic!("the engine's model is not JSON: {e}\nit reads:\n{inferred}"));
-    world.serialized = Some(value);
+    let model = tinman::tom::infer(&screen, &settings);
+    world.serialized = Some(to_json(&model));
+    world.tom = Some(model);
+}
+
+#[then(expr = "the model Tinman produces conforms to the {string} schema in {string}")]
+async fn the_model_tinman_produces_conforms(
+    world: &mut TinmanWorld,
+    _schema_id: String,
+    path: String,
+) {
+    let instance = world
+        .serialized
+        .as_ref()
+        .expect("Tinman produced a model from the captured screen");
+    let bad = support::schema_counterexamples(&path, instance);
+    assert!(bad.is_empty(), "schema violations: {bad:?}");
 }
 
 #[when("the terminal object model is inferred")]
@@ -10364,6 +10684,457 @@ async fn every_variant_is_declared(world: &mut TinmanWorld) {
         "{} production variant(s) are not declared by the scantling that constrains them:\n{}",
         undeclared.len(),
         undeclared.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the command parser, asked about one line at a time
+// ---------------------------------------------------------------------------
+
+#[when(expr = "{string} is passed to the command parser")]
+async fn the_line_is_passed_to_the_command_parser(world: &mut TinmanWorld, line: String) {
+    use clap::Parser;
+    let mut argv = vec!["tinman".to_string()];
+    argv.extend(line.split_whitespace().map(str::to_string));
+    world.parser_outcome = Some(match tinman::cli::Cli::try_parse_from(&argv) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("{:?}: {e}", e.kind())),
+    });
+}
+
+#[then("the parser accepts it")]
+async fn the_parser_accepts_it(world: &mut TinmanWorld) {
+    match world
+        .parser_outcome
+        .as_ref()
+        .expect("a line was passed to the command parser")
+    {
+        Ok(()) => {}
+        Err(refusal) => panic!("the parser refused the line: {refusal}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// documented examples: the tldr page source and the program's own help
+// ---------------------------------------------------------------------------
+
+/// Restart the scenario's own tldr page source over the pages it now carries and
+/// point Tinman at it. One source serves a scenario however many pages it
+/// stages, and the source's own readiness gate means no step reaches it before
+/// it serves.
+fn restage_tldr_source(world: &mut TinmanWorld) {
+    let pages: Vec<(String, String)> = world
+        .tldr_pages
+        .iter()
+        .map(|(program, examples)| {
+            let lines: Vec<&str> = examples.iter().map(String::as_str).collect();
+            (program.clone(), support::tldr_page(program, &lines))
+        })
+        .collect();
+    // The standing source is dropped before the replacement binds, so a scenario
+    // staging several pages leaves one listener rather than one per staging step.
+    world.tldr_source = None;
+    let source = support::LocalTldrSource::serving(&pages);
+    world.env_vars.insert(
+        "TINMAN_TLDR_BASE_URL".to_string(),
+        source.base_url().to_string(),
+    );
+    world.tldr_source = Some(source);
+}
+
+#[given(expr = "the configured tldr page source has a page for {string}")]
+async fn the_page_source_has_a_page_for(world: &mut TinmanWorld, program: String) {
+    world.tldr_pages.entry(program.clone()).or_default();
+    world.last_tldr_program = Some(program);
+    restage_tldr_source(world);
+}
+
+#[given(
+    expr = "the configured tldr page source has a page for {string} carrying the example {string}"
+)]
+async fn the_page_source_has_a_page_carrying(
+    world: &mut TinmanWorld,
+    program: String,
+    example: String,
+) {
+    world
+        .tldr_pages
+        .entry(program.clone())
+        .or_default()
+        .push(example);
+    world.last_tldr_program = Some(program);
+    restage_tldr_source(world);
+}
+
+#[given(expr = "that page also carries the example {string}")]
+async fn that_page_also_carries_the_example(world: &mut TinmanWorld, example: String) {
+    let program = world
+        .last_tldr_program
+        .clone()
+        .expect("a page was staged for a program");
+    world.tldr_pages.entry(program).or_default().push(example);
+    restage_tldr_source(world);
+}
+
+#[given(expr = "the configured tldr page source has no page for {string}")]
+async fn the_page_source_has_no_page_for(world: &mut TinmanWorld, program: String) {
+    world.tldr_pages.remove(&program);
+    restage_tldr_source(world);
+}
+
+#[given("the configured tldr page source has no page for the fixture terminal program")]
+async fn the_page_source_has_no_page_for_the_fixture(world: &mut TinmanWorld) {
+    // The fixture is inspected under the name its help shim is staged as, so
+    // that is the name a page would be looked up by and the name the source is
+    // staged without.
+    world.tldr_pages.remove("fixture");
+    restage_tldr_source(world);
+}
+
+#[given(
+    expr = "the configured tldr page source has a page for {string} carrying an example that writes to the sentinel path and prints {string}"
+)]
+async fn the_page_source_has_a_destructive_example(
+    world: &mut TinmanWorld,
+    program: String,
+    text: String,
+) {
+    let sentinel = world
+        .sentinel
+        .clone()
+        .expect("a sentinel path was given")
+        .display()
+        .to_string();
+    // The sandbox carries no /dev/null, so stderr is closed rather than
+    // redirected: the refusal the sandbox issues must not be drawn on the screen
+    // the assertion reads.
+    let example = format!("{program} -c 'exec 2>&-; touch {sentinel}; printf {text}'");
+    world
+        .tldr_pages
+        .entry(program.clone())
+        .or_default()
+        .push(example);
+    world.last_tldr_program = Some(program);
+    restage_tldr_source(world);
+}
+
+/// Stage an executable named `name` in the scenario's working directory whose
+/// help carries `examples`, and which otherwise runs the real program of that
+/// name. No stock binary carries the example a scenario names, so the program
+/// under inspection is one the scenario built. The help follows the `Examples:`
+/// block convention this project's own help asset uses, a description line above
+/// each indented command line.
+fn stage_help_shim(world: &mut TinmanWorld, name: &str, target: &str, examples: &[String]) {
+    let dir = working_dir(world);
+    let mut help = format!("Usage: {name} [OPTION]...\n\nExamples:\n");
+    for example in examples {
+        help.push_str(&format!("  Documented example:\n    {example}\n\n"));
+    }
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then\ncat <<'TINMAN_HELP'\n{help}TINMAN_HELP\nexit 0\nfi\nexec {target} \"$@\"\n"
+    );
+    let path = dir.join(name);
+    std::fs::write(&path, script)
+        .unwrap_or_else(|e| panic!("the {name} help shim was not written: {e}"));
+    let mut permissions = std::fs::metadata(&path)
+        .unwrap_or_else(|e| panic!("the {name} help shim was not read back: {e}"))
+        .permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+    std::fs::set_permissions(&path, permissions)
+        .unwrap_or_else(|e| panic!("the {name} help shim was not made executable: {e}"));
+}
+
+#[given(expr = "the {string} help carries the example {string}")]
+async fn the_named_help_carries_the_example(
+    world: &mut TinmanWorld,
+    program: String,
+    example: String,
+) {
+    world.staged_help_examples.push(example);
+    let staged = world.staged_help_examples.clone();
+    let target = format!("/usr/bin/{program}");
+    stage_help_shim(world, &program, &target, &staged);
+}
+
+#[given(expr = "the fixture terminal program's help carries the example {string}")]
+async fn the_fixture_help_carries_the_example(world: &mut TinmanWorld, example: String) {
+    let workspace = working_dir(world);
+    let staged = support::stage_fixture_in(&workspace);
+    world.staged_help_examples.push(example);
+    let examples = world.staged_help_examples.clone();
+    stage_help_shim(world, "fixture", &staged, &examples);
+}
+
+#[given(expr = "that help carries the keypress example {string}")]
+async fn that_help_carries_the_keypress_example(world: &mut TinmanWorld, keypress: String) {
+    world.staged_help_examples.push(keypress);
+    let examples = world.staged_help_examples.clone();
+    let workspace = working_dir(world);
+    let staged = support::stage_fixture_in(&workspace);
+    stage_help_shim(world, "fixture", &staged, &examples);
+}
+
+// ---------------------------------------------------------------------------
+// inspection driven by a program's documented examples
+// ---------------------------------------------------------------------------
+
+#[when(expr = "the operator inspects {string} with its documented examples")]
+async fn the_operator_inspects_with_documented_examples(world: &mut TinmanWorld, program: String) {
+    run_tinman_command(world, &["inspect", "--examples", &program]);
+}
+
+#[when(expr = "the operator inspects {string} with its documented examples and writes a plan")]
+async fn the_operator_inspects_with_documented_examples_writing_a_plan(
+    world: &mut TinmanWorld,
+    program: String,
+) {
+    run_tinman_command(
+        world,
+        &["inspect", "--examples", &program, "--output", "tinman.yaml"],
+    );
+}
+
+#[when("the operator inspects the fixture terminal program with its documented examples")]
+async fn the_operator_inspects_the_fixture_with_documented_examples(world: &mut TinmanWorld) {
+    run_tinman_command(world, &["inspect", "--examples", "./fixture"]);
+}
+
+#[when(
+    "the operator inspects the fixture terminal program with its documented examples and writes a plan"
+)]
+async fn the_operator_inspects_the_fixture_with_documented_examples_writing_a_plan(
+    world: &mut TinmanWorld,
+) {
+    run_tinman_command(
+        world,
+        &[
+            "inspect",
+            "--examples",
+            "./fixture",
+            "--output",
+            "tinman.yaml",
+        ],
+    );
+}
+
+/// Whether the inspect output reports `subject` marked as `marker`. The marker is
+/// matched on the line carrying the subject, with case and hyphenation
+/// normalised, so the rendering keeps its latitude while the term the scenario
+/// names is what the assertion pins.
+fn reports_marked(output: &str, subject: &str, marker: &str) -> bool {
+    let wanted = marker.to_lowercase().replace('-', " ");
+    output.lines().any(|line| {
+        line.contains(subject) && line.to_lowercase().replace('-', " ").contains(&wanted)
+    })
+}
+
+#[then("the page is read as raw markdown from the tldr project")]
+async fn the_page_is_read_as_raw_markdown(world: &mut TinmanWorld) {
+    let source = world
+        .tldr_source
+        .as_ref()
+        .expect("the scenario staged a tldr page source");
+    let asked = source.requested_paths();
+    assert!(
+        !asked.is_empty(),
+        "no request reached the tldr page source, so no page was read from it"
+    );
+    // The project serves its pages as raw markdown at `<platform>/<name>.md`, so
+    // a reader asking for that path is reading the page rather than a rendering
+    // of it.
+    assert!(
+        asked.iter().any(|path| path.ends_with(".md")),
+        "the tldr page source was asked for {asked:?}, none of them a raw markdown page"
+    );
+}
+
+#[then(expr = "the inspect output reports {string} as the ground-truth example")]
+async fn the_output_reports_as_ground_truth(world: &mut TinmanWorld, example: String) {
+    let output = run_output(world);
+    assert!(
+        reports_marked(output, &example, "ground truth"),
+        "the inspect output does not report {example:?} as the ground-truth example; it reads:\n{output}"
+    );
+}
+
+#[then(expr = "the inspect output reports {string} as a hint")]
+async fn the_output_reports_as_a_hint(world: &mut TinmanWorld, example: String) {
+    let output = run_output(world);
+    assert!(
+        reports_marked(output, &example, "hint"),
+        "the inspect output does not report {example:?} as a hint; it reads:\n{output}"
+    );
+}
+
+#[then(expr = "the inspect output reports the example {string} was refused")]
+async fn the_output_reports_the_example_refused(world: &mut TinmanWorld, example: String) {
+    let output = run_output(world);
+    assert!(
+        reports_marked(output, &example, "refused"),
+        "the inspect output does not report the example {example:?} was refused; it reads:\n{output}"
+    );
+}
+
+#[then(expr = "the inspect output reports {string} as untestable as written")]
+async fn the_output_reports_untestable_as_written(world: &mut TinmanWorld, example: String) {
+    let output = run_output(world);
+    assert!(
+        reports_marked(output, &example, "untestable as written"),
+        "the inspect output does not report {example:?} as untestable as written; it reads:\n{output}"
+    );
+}
+
+#[then("the inspect output reports no tldr page was read")]
+async fn the_output_reports_no_tldr_page(world: &mut TinmanWorld) {
+    let output = run_output(world);
+    let normalised = output.to_lowercase();
+    assert!(
+        normalised.contains("no tldr page"),
+        "the inspect output does not report that no tldr page was read; it reads:\n{output}"
+    );
+}
+
+#[then("the inspect output reports the examples the program's own help carries")]
+async fn the_output_reports_the_help_examples(world: &mut TinmanWorld) {
+    let staged = world.staged_help_examples.clone();
+    assert!(
+        !staged.is_empty(),
+        "the scenario staged no example into the program's own help, so this step would assert nothing"
+    );
+    let output = run_output(world);
+    let missing: Vec<&String> = staged
+        .iter()
+        .filter(|example| !output.contains(example.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the inspect output reports none of {missing:?} from the program's own help; it reads:\n{output}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the plan a documented-example probe writes
+// ---------------------------------------------------------------------------
+
+/// The tldr-pages project's own name, as a plan crediting it carries it.
+const TLDR_PROJECT: &str = "tldr-pages";
+
+#[then("the written plan is not empty")]
+async fn the_written_plan_is_not_empty(world: &mut TinmanWorld) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    assert!(
+        !text.trim().is_empty(),
+        "the written plan carries nothing at all"
+    );
+}
+
+#[then(expr = "the written plan carries no expectation for {string}")]
+async fn the_written_plan_carries_no_expectation_for(world: &mut TinmanWorld, subject: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    let plan = written_plan(world, "tinman.yaml");
+    let expectations: Vec<String> = plan
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => Some(expectation.text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !expectations.iter().any(|found| found.contains(&subject)),
+        "the written plan carries the expectations {expectations:?}, one of them for {subject:?}; it reads:\n{text}"
+    );
+}
+
+#[then(expr = "the written plan carries a key step sending {string}")]
+async fn the_written_plan_carries_a_key_step(world: &mut TinmanWorld, key: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    let written: serde_yaml::Value =
+        serde_yaml::from_str(&text).expect("the written plan parses as YAML");
+    assert!(
+        records_press(&written, &key),
+        "the written plan carries no key step sending {key:?}; it reads:\n{text}"
+    );
+}
+
+#[then(expr = "the written plan carries no key step for {string}")]
+async fn the_written_plan_carries_no_key_step_for(world: &mut TinmanWorld, notation: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    let written: serde_yaml::Value =
+        serde_yaml::from_str(&text).expect("the written plan parses as YAML");
+    // The notation is what the page wrote; a key step for it would either send
+    // the notation verbatim or send the key it spells, so neither may appear.
+    let spelled = notation.trim_matches(|c| c == '<' || c == '>').to_string();
+    assert!(
+        !records_press(&written, &notation) && !records_press(&written, &spelled),
+        "the written plan carries a key step for {notation:?}; it reads:\n{text}"
+    );
+}
+
+#[then("the written plan credits the tldr-pages project for the page it read")]
+async fn the_written_plan_credits_the_project(world: &mut TinmanWorld) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    assert!(
+        text.contains(TLDR_PROJECT),
+        "the written plan credits no {TLDR_PROJECT} for the page it read; it reads:\n{text}"
+    );
+}
+
+#[then("the written plan credits no page")]
+async fn the_written_plan_credits_no_page(world: &mut TinmanWorld) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    assert!(
+        !text.contains(TLDR_PROJECT),
+        "the written plan credits {TLDR_PROJECT} though it read no page; it reads:\n{text}"
+    );
+}
+
+#[then(expr = "the written plan names {string} as that page's licence")]
+async fn the_written_plan_names_the_licence(world: &mut TinmanWorld, licence: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    assert!(
+        text.contains(&licence),
+        "the written plan names no {licence:?} as the page's licence; it reads:\n{text}"
+    );
+}
+
+#[then("the written plan names the command Tinman ran with its substituted path")]
+async fn the_written_plan_names_the_substituted_command(world: &mut TinmanWorld) {
+    let text = written_plan_text(world, "tinman.yaml");
+    let plan = written_plan(world, "tinman.yaml");
+    let named: Vec<String> = plan
+        .flow
+        .iter()
+        .map(|step| match step {
+            tinman::plan::FlowStep::Run(run) => run.command.clone(),
+            tinman::plan::FlowStep::Tui(tui) => tui.command.clone(),
+        })
+        .collect();
+    assert!(
+        named
+            .iter()
+            .any(|command| !command.contains("{{") && !command.contains("}}")),
+        "the written plan names {named:?}, so none is a command line with its placeholder substituted; it reads:\n{text}"
+    );
+}
+
+#[then(expr = "the written plan records {string} as the documented example it came from")]
+async fn the_written_plan_records_the_documented_example(world: &mut TinmanWorld, example: String) {
+    let text = written_plan_text(world, "tinman.yaml");
+    written_plan(world, "tinman.yaml");
+    assert!(
+        text.contains(&example),
+        "the written plan records no {example:?} as the documented example it came from; it reads:\n{text}"
     );
 }
 

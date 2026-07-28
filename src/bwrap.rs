@@ -8,7 +8,7 @@ use crate::terminfo;
 use std::path::Path;
 
 /// Where the sandboxed program's home directory sits inside the sandbox.
-const SANDBOX_HOME: &str = "/sandbox";
+pub const SANDBOX_HOME: &str = "/sandbox";
 
 /// Where Tinman's curated terminfo database sits inside the sandbox, so a
 /// full-screen program can resolve its terminal type without the host's own
@@ -319,4 +319,53 @@ fn executable_available(executable: &str) -> bool {
         return false;
     };
     std::env::split_paths(&path).any(|dir| dir.join(executable).exists())
+}
+
+/// The Bubblewrap version floor `RIGGING.md` records under `## Dependencies`.
+/// Bubblewrap cannot be bundled, so this is the version an operator's own
+/// installation must clear before anything is launched under it.
+const REQUIRED_VERSION: &str = "0.11.2";
+
+/// Confirm Bubblewrap is on the path at a version at least `REQUIRED_VERSION`.
+/// A command that will launch a sandboxed program calls this before it does
+/// anything else, so an absent or too-old Bubblewrap refuses before a port is
+/// bound, a connection accepted, or a program executed. The message names what
+/// was found against what is required, so an absent Bubblewrap reads as
+/// "install" and a too-old one reads as "upgrade".
+///
+/// @planks("the operator inspects the fixture terminal program")
+/// @planks("the operator starts the driver")
+/// @planks("the failure reports the required Bubblewrap version")
+/// @planks("the failure reports the version found and the version required")
+pub fn require_available() -> Result<(), String> {
+    match installed_version("bwrap") {
+        None => Err(format!(
+            "Bubblewrap was not found on the path; Tinman requires Bubblewrap {REQUIRED_VERSION} or newer"
+        )),
+        Some(found) if version_at_least(&found, REQUIRED_VERSION) => Ok(()),
+        Some(found) => Err(format!(
+            "Bubblewrap {found} was found but Tinman requires {REQUIRED_VERSION} or newer"
+        )),
+    }
+}
+
+/// The version `executable` reports for itself, read from the last
+/// whitespace-separated word of its `--version` output. `None` when the
+/// executable is not on the path or does not answer.
+fn installed_version(executable: &str) -> Option<String> {
+    let output = std::process::Command::new(executable)
+        .arg("--version")
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .last()
+        .map(str::to_string)
+}
+
+/// Whether `found` is at least `required`, comparing each dot-separated
+/// component as a number.
+fn version_at_least(found: &str, required: &str) -> bool {
+    let parts = |v: &str| -> Vec<u32> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    parts(found) >= parts(required)
 }

@@ -4,6 +4,7 @@
 //! log.
 
 use crate::bwrap::BubblewrapBackend;
+use crate::inference::Settings;
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
 use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::{CommandSpec, SandboxSpec};
@@ -299,6 +300,30 @@ pub fn plan_expecting(model: &Model, role: &str, name: &str) -> Result<Plan, Str
         })],
         sources: Vec::new(),
     })
+}
+
+/// The plan an expectation on the region playing `role` and carrying `name` is
+/// written into, for a naming pass over `program`. The pass reads that program's
+/// tldr page where the configured source carries one, and a page is somebody
+/// else's work, so the plan says whose it read and on what terms. A pass that
+/// read no page credits nothing.
+///
+/// @planks("the plan for {string} is written")
+/// @planks("the plan credits the tldr-pages project for the page it read")
+/// @planks("the plan names {string} as that page's licence")
+/// @planks("the plan credits no page")
+pub fn plan_expecting_for(
+    model: &Model,
+    role: &str,
+    name: &str,
+    program: &str,
+    settings: &Settings,
+) -> Result<Plan, String> {
+    let mut plan = plan_expecting(model, role, name)?;
+    if crate::examples::fetch_page(&settings.tldr_base_url, program).is_some() {
+        plan.sources.push(crate::examples::page_credit(program));
+    }
+    Ok(plan)
 }
 
 /// The command line that launches `command`: the program and every argument it

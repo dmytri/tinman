@@ -791,17 +791,68 @@ fn cursor_of(screen: &VirtualScreen) -> Option<Cursor> {
 /// Read `screen` into a model, enriched by the configured engine. The
 /// deterministic model is the spine: it stands whenever the engine is
 /// unavailable, and it stands again whenever the engine answers with something
-/// the model's own shape rejects.
+/// the model's own shape rejects. What the engine contributes is names, region
+/// by region, so the model Tinman produces keeps the structure the screen
+/// yields whatever the engine sent.
 ///
 /// @planks("the terminal object model is inferred")
+/// @planks("the terminal object model is inferred by the configured engine")
 pub fn infer(screen: &VirtualScreen, settings: &Settings) -> Model {
-    let deterministic = build(screen);
-    let Some(reply) = crate::inference::tom_completion(settings, &screen.contents()) else {
+    enriched(
+        screen,
+        crate::inference::tom_completion(settings, &screen.contents()),
+    )
+}
+
+/// `infer`, naming the program the screen belongs to, so the naming pass carries
+/// that program's tldr page as the vocabulary it names regions from.
+///
+/// @planks("the terminal object model of {string} is inferred")
+/// @planks("the plan for {string} is written")
+pub fn infer_for(screen: &VirtualScreen, settings: &Settings, program: &str) -> Model {
+    enriched(
+        screen,
+        crate::inference::tom_completion_for(settings, &screen.contents(), program),
+    )
+}
+
+/// The deterministic model of `screen`, carrying the names `reply` proposed for
+/// its regions. A reply that never arrived, and one nothing of the model's own
+/// shape can be read from, both leave the deterministic model standing.
+///
+/// @planks("the terminal object model is inferred")
+/// @planks("the terminal object model is inferred by the configured engine")
+/// @planks("the terminal object model of {string} is inferred")
+fn enriched(screen: &VirtualScreen, reply: Option<String>) -> Model {
+    let mut deterministic = build(screen);
+    let Some(reply) = reply else {
         return deterministic;
     };
-    match serde_yaml::from_str::<Model>(&reply) {
-        Ok(inferred) => inferred,
-        Err(_) => deterministic,
+    let Ok(inferred) = serde_yaml::from_str::<Model>(&reply) else {
+        return deterministic;
+    };
+    take_names(&mut deterministic.root, &inferred.root);
+    deterministic
+}
+
+/// Take onto `region` and the regions beneath it the names `proposed` carries
+/// for them, paired position by position. A region the engine named with
+/// nothing is a region the enrichment is refused for, so the deterministic
+/// reading stands there: a role the model requires a name on would otherwise
+/// carry none, which is the reply arriving in part rather than whole.
+///
+/// @planks("the terminal object model is inferred")
+/// @planks("the terminal object model is inferred by the configured engine")
+fn take_names(region: &mut Region, proposed: &Region) {
+    if let Some(name) = proposed
+        .name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+    {
+        region.name = Some(name.to_string());
+    }
+    for (child, proposed) in region.children.iter_mut().zip(&proposed.children) {
+        take_names(child, proposed);
     }
 }
 

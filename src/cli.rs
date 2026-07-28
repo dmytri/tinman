@@ -31,6 +31,7 @@ pub struct Cli {
 /// @planks("the operator executes {string}")
 /// @planks("each is requested from {string}")
 /// @planks("each is passed to the command parser")
+/// @planks("{string} is passed to the command parser")
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Capture a live session into an editable plan
@@ -54,6 +55,12 @@ pub enum Command {
         /// Write the model as JSON
         #[arg(long)]
         json: bool,
+        /// Run the examples the program's own help and its tldr page document
+        #[arg(long)]
+        examples: bool,
+        /// Where the plan is written
+        #[arg(long)]
+        output: Option<String>,
     },
     /// Speak the JSON driver protocol on stdin and stdout
     Driver,

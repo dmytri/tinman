@@ -1046,6 +1046,176 @@ fn http_response(status: u16, reason: &str, body: &str) -> String {
     )
 }
 
+fn markdown_response(status: u16, reason: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/markdown\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// A tldr page for `program` carrying `examples`, in the form the tldr-pages
+/// style guide fixes: a heading, a description, and one titled example per
+/// command line, each written on its own line between backticks. Built rather
+/// than copied from the project, so the text an assertion depends on is text
+/// this project controls.
+pub fn tldr_page(program: &str, examples: &[&str]) -> String {
+    let mut page = format!(
+        "# {program}\n\n> Documentation for {program}.\n> More information: <https://example.invalid/{program}>.\n"
+    );
+    for (index, example) in examples.iter().enumerate() {
+        page.push_str(&format!("\n- Example {}:\n\n`{example}`\n", index + 1));
+    }
+    page
+}
+
+/// A real HTTP source of tldr pages on loopback, serving raw markdown under the
+/// tldr project's own `<platform>/<name>.md` layout. Verification points Tinman
+/// at this source rather than at the public project, so the page an assertion
+/// depends on is one this project controls rather than whatever the project
+/// happens to serve today. The fetch itself stays real, because faking it would
+/// be the doubling the Real-by-default Article forbids.
+///
+/// Only the `common` platform carries pages here. A request for any other
+/// platform is answered as absent, so a client resolving a platform page before
+/// falling back to the common one is exercised rather than short-circuited.
+#[derive(Debug)]
+pub struct LocalTldrSource {
+    base_url: String,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    requested: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl LocalTldrSource {
+    /// Start a source carrying one page per `(program, markdown)` pair. A
+    /// program named in no pair has no page here, which is the answer this
+    /// source gives for a program the project does not carry.
+    pub fn serving(pages: &[(String, String)]) -> LocalTldrSource {
+        use std::io::{BufRead, BufReader, Write};
+        use std::sync::atomic::Ordering;
+
+        let carried: std::collections::BTreeMap<String, String> = pages.iter().cloned().collect();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("the local tldr source binds a loopback port");
+        let addr = listener
+            .local_addr()
+            .expect("the local tldr source reports its address");
+        listener
+            .set_nonblocking(true)
+            .expect("the local tldr source listener is non-blocking");
+
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = std::sync::Arc::clone(&shutdown);
+        let requested = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let asked = std::sync::Arc::clone(&requested);
+
+        let handle = std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("the accepted connection is blocking");
+                        let mut reader =
+                            BufReader::new(stream.try_clone().expect("the connection is cloned"));
+                        let mut request_line = String::new();
+                        if reader.read_line(&mut request_line).unwrap_or(0) == 0 {
+                            // The readiness probe connects and sends nothing, so
+                            // it is not recorded as a request for a page.
+                            continue;
+                        }
+                        // Drain the headers so the client sees its whole request
+                        // consumed before the answer arrives.
+                        loop {
+                            let mut header = String::new();
+                            if reader.read_line(&mut header).unwrap_or(0) == 0 {
+                                break;
+                            }
+                            if header == "\r\n" || header == "\n" {
+                                break;
+                            }
+                        }
+                        let target = request_line
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+                        asked
+                            .lock()
+                            .expect("the requested path log is readable")
+                            .push(target.clone());
+
+                        let page = target
+                            .strip_prefix("/common/")
+                            .and_then(|rest| rest.strip_suffix(".md"))
+                            .and_then(|name| carried.get(name));
+                        let response = match page {
+                            Some(markdown) => markdown_response(200, "OK", markdown),
+                            None => markdown_response(404, "Not Found", "not found\n"),
+                        };
+                        let mut stream = stream;
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let source = LocalTldrSource {
+            base_url: format!("http://{addr}"),
+            shutdown,
+            requested,
+            handle: Some(handle),
+        };
+        source.await_ready();
+        source
+    }
+
+    /// The base URL to configure Tinman's page source with.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// The request targets that reached this source, in arrival order.
+    pub fn requested_paths(&self) -> Vec<String> {
+        self.requested
+            .lock()
+            .expect("the requested path log is readable")
+            .clone()
+    }
+
+    /// Poll the listening port until it observably accepts a connection, so no
+    /// scenario reaches the source before it serves.
+    fn await_ready(&self) {
+        let authority = self.base_url.trim_start_matches("http://").to_string();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if std::net::TcpStream::connect(&authority).is_ok() {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("the local tldr source at {authority} never accepted a connection");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for LocalTldrSource {
+    fn drop(&mut self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// A loopback address with nothing listening on it, for the scenario that names
 /// an unreachable provider. The port is bound to learn a free one and then
 /// released, so a connection to it is refused rather than hanging.
@@ -1149,11 +1319,22 @@ impl DriverProcess {
     /// reply is waited for on an observed signal rather than a blocking read
     /// that could never return.
     pub fn start() -> DriverProcess {
+        DriverProcess::start_with(&[])
+    }
+
+    /// Start the real driver with `env` set in its environment, so a scenario
+    /// can settle what the driver finds when it looks for the sandbox. Anything
+    /// else the driver reads is inherited, as it is for an ordinary start.
+    pub fn start_with(env: &[(String, String)]) -> DriverProcess {
         use std::io::{BufRead, BufReader};
 
         SESSIONS_RECLAIMED.call_once(reclaim_stale_session_dirs);
-        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tinman"))
-            .arg("driver")
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_tinman"));
+        command.arg("driver");
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let mut child = command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()

@@ -33,6 +33,10 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator inspects the fixture terminal program as JSON")
 /// @planks("the operator inspects the command {string}")
 /// @planks("the operator inspects {string}")
+/// @planks("the operator inspects {string} with its documented examples")
+/// @planks("the operator inspects {string} with its documented examples and writes a plan")
+/// @planks("the operator inspects the fixture terminal program with its documented examples")
+/// @planks("the operator inspects the fixture terminal program with its documented examples and writes a plan")
 /// @planks("the operator inspects a command that writes to the sentinel path and prints {string}")
 /// @planks("the operator records a command that writes to the sentinel path and prints {string}")
 /// @planks("the operator records a command that prints {string} and the value of {string}")
@@ -42,6 +46,7 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator records the fixture terminal program")
 /// @planks("the operator records that program")
 /// @planks("the Tinman driver is running")
+/// @planks("the operator starts the driver")
 fn main() {
     let cli = Cli::parse();
     if cli.help || matches!(cli.command, Some(Command::Help)) {
@@ -104,8 +109,39 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Command::Inspect { command, json }) => {
+        Some(Command::Inspect {
+            command,
+            json,
+            examples,
+            output,
+        }) => {
+            if let Err(failure) = tinman::bwrap::require_available() {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
             let workspace = std::env::current_dir().expect("the working directory is read");
+            if examples {
+                // The page source is configuration, so a probe reads it the same
+                // way every other configured endpoint is read.
+                let settings = tinman::inference::Settings::from_process();
+                match tinman::examples::probe(&command, &workspace, &settings.tldr_base_url) {
+                    Ok(probe) => {
+                        println!("{}", probe.listing);
+                        if let Some(path) = output
+                            && let Err(failure) =
+                                tinman::examples::write_plan(&probe.plan, &workspace.join(path))
+                        {
+                            println!("{failure}");
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(failure) => {
+                        println!("{failure}");
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             match tinman::inspect::model(&command, &workspace) {
                 Ok(model) => {
                     if json {
@@ -124,7 +160,13 @@ fn main() {
                 }
             }
         }
-        Some(Command::Driver) => tinman::driver::serve().expect("the driver answers its client"),
+        Some(Command::Driver) => {
+            if let Err(failure) = tinman::bwrap::require_available() {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
+            tinman::driver::serve().expect("the driver answers its client")
+        }
         Some(Command::Man { command }) => {
             // A doc comment on a command type is written for a developer, and
             // the operator reading the page wants the copy the help asset
