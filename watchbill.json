@@ -148,7 +148,6 @@
       "features/driver-session.feature:a request the driver cannot serve is answered with an error",
       "features/driver-session.feature:the driver and assistant seams discharge the panic-free contract",
       "features/interactive-help.feature:an interrupted session still gives the terminal back",
-      "features/inference-provider.feature:every timed seam abandons its wait at its ceiling",
       "features/bwrap-argument-generation.feature:generated Bubblewrap arguments satisfy the isolation policy",
       "features/replay.feature:a locator recorded with a scope replays inside that scope",
       "features/driver-session.feature:every method the protocol names is served",
