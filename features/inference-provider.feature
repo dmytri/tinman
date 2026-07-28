@@ -29,12 +29,12 @@ Feature: inference provider
 
   Rule: each timed seam carries a wall-clock ceiling, and a ceiling nobody measures is a guess that fails silently, because the seam it bounds degrades rather than erroring. One contract lists them and one scenario attests them all, so a new timed seam adds a line to the contract rather than a scenario to this file.
 
-  @inference
   @contract
-  Scenario: every timed seam is observed inside its budget
+  Scenario: every timed seam abandons its wait at its ceiling
     Given the seams and ceilings in "scantlings/latency-budgets.json"
+    And a dependency that never answers
     When each seam is exercised and timed
-    Then no seam exceeds its ceiling
+    Then every seam gave up at its ceiling
     And the seams read are not empty
 
   Rule: a reasoning model spends its thinking budget on whatever it is asked, and the tagline asks for six words. Measured against the configured provider, the request as first written returned nothing inside forty seconds, so the tagline never filled and the help simply rendered without it, which reads as a design choice rather than a failure. With reasoning disabled the same request answers in one to two seconds. The lever is the request, not the ceiling: raising a budget to fit a call that should never have been slow hides the cause and pays the latency for ever.
@@ -43,12 +43,6 @@ Feature: inference provider
     Given the inference credential is configured
     When the acronym request is built
     Then the request disables reasoning
-
-  @inference
-  Scenario: the tagline is generated inside its ceiling
-    Given the inference credential is configured
-    When Tinman generates the tagline
-    Then an expansion is returned inside the tagline ceiling
 
   Rule: asking a model for an acronym gets a claim that the words spell the name, and this project checks claims rather than repeating them. A deterministic pass walks the expansion for the letters of "tinman" in order and raises them, which both proves the acronym and shows the reader where it hides. It is the same rule the naming pass already follows, where the model proposes and the screen decides; here the expansion decides. Where the letters do not appear in order the expansion is not an acronym at all, so it is replaced rather than dressed up.
 

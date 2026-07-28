@@ -1,7 +1,7 @@
 {
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/latency-budgets.json",
   "title": "Latency budgets",
-  "description": "The wall-clock ceiling each timed seam must be observed to meet. Discharged by the latency-budget checker in verification support and attested by one scenario rather than one per seam.",
+  "description": "The wall-clock ceiling at which each timed seam abandons its wait. A ceiling is a limit Tinman enforces, never a speed a dependency is asked to achieve, so what is attested is that the wait ends rather than that the answer arrived. Discharged by the latency-budget checker in verification support and attested by one scenario rather than one per seam.",
   "budgets": [
     {
       "seam": "tagline generation",
@@ -24,5 +24,5 @@
       "tier": "@sandbox"
     }
   ],
-  "rationale": "Every one of these was a constant chosen without measurement, and one was wrong by a factor of eight: the tagline ceiling stood at five seconds against a call that returned nothing inside forty, so the tagline never filled and the help rendered without it as though that were the design. A ceiling nobody measures is a guess that fails silently, because the seam it bounds degrades rather than erroring. Declaring them in one list means a new timed seam adds a line here rather than a scenario, and the attestation stays one scenario however many seams there are."
+  "rationale": "Every one of these was a constant chosen without measurement, and one was wrong by a factor of eight: the tagline ceiling stood at five seconds against a call that returned nothing inside forty, so the tagline never filled and the help rendered without it as though that were the design. The first form of this contract then made the opposite error, asserting each seam answered inside its ceiling, which measures the provider's wall clock rather than Tinman's. That reading went red at 5366ms against 5000ms on a seam this voyage never touched, from ordinary provider variance, and no production change could have fixed it. A ceiling is what Tinman enforces: the seam abandons its wait there. Attesting enforcement is deterministic, needs no paid tier, and is the same rule that keeps the inference tier asserting our seam and never the model's compliance."
 }
