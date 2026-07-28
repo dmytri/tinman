@@ -52,6 +52,16 @@ Run the Opening retrieval first and believe it over anything here.
 
 **It also answers the outside review's sharpest objection.** A maintained idiom catalogue is what rules produce when they must cover everything, and the answer is not a better catalogue: it is to stop maintaining one wherever inference generalises and a deterministic pass refutes.
 
+## Custody refused on an inference scenario that broke a standing ruling, 2026-07-28
+
+**The scenario asserted the provider's output rather than Tinman's**, which the standing decision forbids: the `@inference` tier asserts our seam, never the model's compliance, and shaping the request is not validating the response. `the configured engine infers a conforming model from a real screen` validated the raw reply against `tom.schema.json`, so it was asserting that a language model returns conforming JSON, which nothing can enforce. It passed for as long as it did only because nothing in the schema was strict enough to catch a real reply; **Captain's ARIA name-required constraint exposed it rather than caused it.**
+
+**The corpus already carried the right pattern beside it**, in `an unavailable engine leaves the deterministic model standing` and `an engine answering with a value that is not a model is discarded`. A reply that is a model but leaves a required name null is that same case arriving in part rather than whole, and the enrichment should be refused for that region while the deterministic reading stands. Rewritten to assert what Tinman produces, with a second scenario pinning the partial case.
+
+**Two faults sit underneath and both are real.** The step validated the provider's raw reply rather than the model Tinman produces, which is QM's; and production discards a whole non-model reply while leaving a partially non-conforming one intact, which is Crew's.
+
+**Dependency finding from Boatswain, flagged not changed under the `locked` policy.** `tui-markdown` pulls the test-fixture macro crate `rstest` into the **production** graph, plus an `itertools` that duplicates the one `cucumber` and `ratatui-core` already require: 23 packages for 3 direct additions. A crate shipping test dependencies as normal dependencies is a quality signal worth weighing at harbour against what it does for us.
+
 ## Three findings from QM, 2026-07-28, and the first is Captain's own process fault
 
 **The deck moved under verification for the third time, and Captain caused all three.** Specs were edited while QM was running and then committed mid-run, so its greens for watches 1-16 were measured against text that has since changed and are not evidence for those watches as they now stand. They need re-running on a fresh dispatch. **The operator's rule that an idle deck is worse than a wrong call licenses dispatching promptly; it does not license editing the scope a role is currently measuring.** Author between dispatches, not during them.
