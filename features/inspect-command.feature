@@ -46,6 +46,49 @@ Feature: inspect command
     When the operator inspects a command printing "src", a blank line and "tests"
     Then the inspect output lists a "list" holding 2 "listitem" regions
 
+  Rule: columnar output is a table, and reading it as a list hands the test author back the raw text this feature exists to spare them. `ls -la` becomes one item per line whose name is the entire line, so asserting a file's size or counting directories means matching a substring of "-rw-r--r--  1 1000 1000    669 Jul 25 14:51 .env". The list rule above already names that failure as the one it prevents; it prevents it for a bare listing and walks into it the moment a column appears. `ps`, `df` and `git log --oneline` are the same shape, and the standing preference that Tinman stay useful for plain command-line testing makes this the half that matters most.
+
+  Rule: a header row names the columns and its absence does not stop them being columns. Where the first row labels the rest, cells are addressed by that label; where nothing labels them, they are addressed by position. WAI-ARIA permits a table with no column headers, so the model reports what it can see and invents no name it cannot, which is the same rule that governs naming everywhere else here.
+
+  Rule: alignment that means columns is alignment sustained across rows, not spacing that happened to line up once. Prose breaks into words at whatever positions it likes, and a paragraph read as a table is wrong in the direction nobody notices, because it still produces regions and still looks addressable. The negative control below is what keeps the discriminator honest; without it a rule that turns everything into a table passes every positive case.
+
+  @sandbox
+  Scenario: output whose first row labels the rest is read as a table
+    When the operator inspects a command printing "NAME   SIZE", "alpha  10" and "beta   20" on their own lines
+    Then the inspect output lists a "table" holding 2 "row" regions
+    And the inspect output lists a "columnheader" named "SIZE"
+
+  @sandbox
+  Scenario: a cell is addressed by the column that labels it
+    When the operator inspects a command printing "NAME   SIZE", "alpha  10" and "beta   20" on their own lines
+    Then the "SIZE" cell of the row naming "beta" is "20"
+
+  @sandbox
+  Scenario: columns with no header row are addressed by position
+    When the operator inspects a command printing "alpha  10" and "beta   20" on their own lines
+    Then the inspect output lists a "table" holding 2 "row" regions
+    And the second cell of the row naming "alpha" is "10"
+
+  Rule: a column boundary is a character position blank in every row, not a gap of some chosen width. Real listings separate their fields with a single space, right-align their numbers and vary their field widths, so a rule keyed on separator width reads `ls -la` as prose and toy two-space examples as tables. Captain wrote those toy examples and the first implementation satisfied them without ever meeting real output, which is the third fixture this voyage that was easier than the thing it stood for. The data below is shaped like a real listing for that reason.
+
+  @sandbox
+  Scenario: a listing whose fields are single-space separated is still a table
+    When the operator inspects a command printing "-rw-r--r-- 1 dk dk  669 Jul 25 14:51 .env" and "drwxr-xr-x 2 dk dk 4096 Jul 25 11:38 assets" on their own lines
+    Then the inspect output lists a "table" holding 2 "row" regions
+    And the fifth cell of the first row is "669"
+
+  @sandbox
+  Scenario: prose that happens to align is not read as a table
+    When the operator inspects a command printing "the quick brown fox" and "jumped over  the lazy dog" on their own lines
+    Then the inspect output lists a "list" holding 2 "listitem" regions
+    And the inspect output lists no "table" region
+
+  @sandbox
+  Scenario: a running program's table is read as one
+    When the operator inspects "top"
+    Then the inspect output lists a "columnheader" named "COMMAND"
+    And the inspect output lists a "table" holding at least 1 "row" region
+
   Rule: a --help text, a man page, a tldr page and an inference engine all produce claims about what a program does, and a claim is the one thing Tinman does not accept. The whole thesis of the project is that the screen is the evidence, so a documented example is a hypothesis to run rather than a fact to repeat. Tinman collaborates with these sources in both directions: it reads them for hypotheses here, and it emits its own through `tinman man` and `tinman completions` so other tools can read Tinman the same way. This is also the distance between Tinman and the projects tldr-pages names for putting its pages through a language model and publishing the result: those pass a claim along about commands nobody executed, where inspection runs the command and reports what happened. Documentation that has drifted from its binary announces itself here instead of being quietly believed.
 
   Rule: the sources rank by how close they sit to the binary in hand. A program's own --help came out of the binary being tested, at the version installed, so it is ground truth and it is always there. A man page is read where the sandbox has one, which a minimal bwrap sandbox does not, and widening the sandbox to read documentation is not worth it. A tldr page describes some version of some machine's program and is a hint only. The ranking decides disagreements rather than tastes: nothing outranks what the binary says about itself.
@@ -60,13 +103,13 @@ Feature: inspect command
 
   @sandbox
   Scenario: inspection runs the examples its tldr page carries
-    Given the operator's tldr client has a page for "printf" carrying the example "printf hello"
+    Given the configured tldr page source has a page for "printf" carrying the example "printf hello"
     When the operator inspects "printf" with its documented examples
     Then the inspect output lists a region named "hello"
 
   @sandbox
   Scenario: the binary's own help outranks its tldr page where they disagree
-    Given the operator's tldr client has a page for "printf" carrying the example "printf from-the-page"
+    Given the configured tldr page source has a page for "printf" carrying the example "printf from-the-page"
     And the "printf" help carries the example "printf from-the-binary"
     When the operator inspects "printf" with its documented examples
     Then the inspect output reports "printf from-the-binary" as the ground-truth example
@@ -74,14 +117,14 @@ Feature: inspect command
 
   @sandbox
   Scenario: a documented example the program refuses is reported as an unhonoured claim
-    Given the operator's tldr client has a page for "ls" carrying the example "ls --wormhole"
+    Given the configured tldr page source has a page for "ls" carrying the example "ls --wormhole"
     When the operator inspects "ls" with its documented examples
     Then the inspect output reports the example "ls --wormhole" was refused
 
   @sandbox
   Scenario: a documented example cannot write outside the sandbox
     Given a sentinel path outside the sandbox where no file exists
-    And the operator's tldr client has a page for "sh" carrying an example that writes to the sentinel path and prints "ran"
+    And the configured tldr page source has a page for "sh" carrying an example that writes to the sentinel path and prints "ran"
     When the operator inspects "sh" with its documented examples
     Then the inspect output lists a region named "ran"
     And no file exists at the sentinel path
@@ -92,7 +135,7 @@ Feature: inspect command
 
   @sandbox
   Scenario: probing a program's documentation writes a replayable plan
-    Given the operator's tldr client has a page for "printf" carrying the example "printf hello"
+    Given the configured tldr page source has a page for "printf" carrying the example "printf hello"
     When the operator inspects "printf" with its documented examples and writes a plan
     Then the written plan names the command "printf hello"
     And the written plan carries an expectation on the text "hello"
@@ -100,11 +143,20 @@ Feature: inspect command
 
   @sandbox
   Scenario: a refused example is reported rather than written as an expectation
-    Given the operator's tldr client has a page for "ls" carrying the example "ls --wormhole"
+    Given the configured tldr page source has a page for "ls" carrying the example "ls --wormhole"
     When the operator inspects "ls" with its documented examples and writes a plan
     Then the inspect output reports the example "ls --wormhole" was refused
     And the written plan carries no expectation for "ls --wormhole"
     And the written plan is not empty
+
+  Rule: the page is fetched as raw markdown from the tldr project rather than read out of an installed client. Declining to be a client meant declining the client specification, which carries required flags, platform resolution, language handling and cache maintenance; it never meant declining a single request for a single file. Fetching directly also removes a dependency on the operator having a client at all, and removes the raw-output extension that no client is obliged to provide. Markdown is the form the style guide specifies, so the placeholders and the keypress notation arrive as written rather than as somebody's rendering of them. Platform is resolved by asking for the platform page and falling back to the common one, which is two attempts and not a cache.
+
+  @sandbox
+  Scenario: a page the project does not carry reports no page
+    Given the configured tldr page source has no page for "obscurecmd"
+    When the operator inspects "obscurecmd" with its documented examples
+    Then the inspect output reports no tldr page was read
+    And the inspect output reports the examples the program's own help carries
 
   Rule: a tldr example is a template rather than a command line. Its style guide fixes the syntax, so "{{path/to/file}}" and "{{option1|option2}}" and "{{1..5}}" are holes a reader is expected to fill, and passing one to the program as written hands it an argument nobody meant. That failure would arrive wearing the costume of a finding: the program rejects the line, and inspection reports a documented example the program would not honour, which is this project's signature fault manufactured out of nothing but a template Tinman filled in wrong.
 
@@ -112,20 +164,20 @@ Feature: inspect command
 
   @sandbox
   Scenario: a placeholder Tinman can fill is filled before the example runs
-    Given the operator's tldr client has a page for "cat" carrying the example "cat {{path/to/file}}"
+    Given the configured tldr page source has a page for "cat" carrying the example "cat {{path/to/file}}"
     When the operator inspects "cat" with its documented examples
     Then the inspect output lists a region named "tinman fixture"
 
   @sandbox
   Scenario: the plan records the line Tinman ran and the example it came from
-    Given the operator's tldr client has a page for "cat" carrying the example "cat {{path/to/file}}"
+    Given the configured tldr page source has a page for "cat" carrying the example "cat {{path/to/file}}"
     When the operator inspects "cat" with its documented examples and writes a plan
     Then the written plan names the command Tinman ran with its substituted path
     And the written plan records "cat {{path/to/file}}" as the documented example it came from
 
   @sandbox
   Scenario: a placeholder Tinman cannot fill leaves the example untestable as written
-    Given the operator's tldr client has a page for "printf" carrying the example "printf hello"
+    Given the configured tldr page source has a page for "printf" carrying the example "printf hello"
     And that page also carries the example "printf {{format}} {{arguments}}"
     When the operator inspects "printf" with its documented examples and writes a plan
     Then the inspect output reports "printf {{format}} {{arguments}}" as untestable as written
@@ -134,14 +186,14 @@ Feature: inspect command
 
   @sandbox
   Scenario: a plan whose examples came from a tldr page credits the project
-    Given the operator's tldr client has a page for "printf" carrying the example "printf hello"
+    Given the configured tldr page source has a page for "printf" carrying the example "printf hello"
     When the operator inspects "printf" with its documented examples and writes a plan
     Then the written plan credits the tldr-pages project for the page it read
     And the written plan names "CC-BY-4.0" as that page's licence
 
   @sandbox
   Scenario: a plan whose examples came only from the binary credits no page
-    Given the operator's tldr client has no page for "printf"
+    Given the configured tldr page source has no page for "printf"
     And the "printf" help carries the example "printf hello"
     When the operator inspects "printf" with its documented examples and writes a plan
     Then the written plan credits no page

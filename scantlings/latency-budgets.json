@@ -1,0 +1,28 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/latency-budgets.json",
+  "title": "Latency budgets",
+  "description": "The wall-clock ceiling each timed seam must be observed to meet. Discharged by the latency-budget checker in verification support and attested by one scenario rather than one per seam.",
+  "budgets": [
+    {
+      "seam": "tagline generation",
+      "ceilingMs": 5000,
+      "tier": "@inference"
+    },
+    {
+      "seam": "inference availability probe",
+      "ceilingMs": 20000,
+      "tier": "@inference"
+    },
+    {
+      "seam": "assistant answer generation",
+      "ceilingMs": 110000,
+      "tier": "@inference"
+    },
+    {
+      "seam": "inspect exit deadline",
+      "ceilingMs": 2000,
+      "tier": "@sandbox"
+    }
+  ],
+  "rationale": "Every one of these was a constant chosen without measurement, and one was wrong by a factor of eight: the tagline ceiling stood at five seconds against a call that returned nothing inside forty, so the tagline never filled and the help rendered without it as though that were the design. A ceiling nobody measures is a guess that fails silently, because the seam it bounds degrades rather than erroring. Declaring them in one list means a new timed seam adds a line here rather than a scenario, and the attestation stays one scenario however many seams there are."
+}

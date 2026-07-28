@@ -101,6 +101,30 @@ Feature: terminal object model
 
   Rule: a single computed style for a region drawn two ways would be a summary of the screen rather than a reading of it, and a test author asserting against a summary is asserting against Tinman rather than against their own program. An absence is the more honest answer, and a scenario reading it learns something true.
 
+  Rule: the root region carries the `application` role, and WAI-ARIA requires a name on it, so the model must say what application this is. The program the operator asked about is the answer, and it is the answer a listener needs first: a screen reader announcing "application" and nothing else has told them the role and withheld the subject. Leaving it null is what the name-required constraint caught the moment it was written.
+
+  Scenario: the root region is named for the program under inspection
+    When the operator inspects the command "printf hi"
+    Then the inspect output names the root region "printf hi"
+
+  Rule: the emulator hands the builder nine cell attributes and the model carried two, so seven standard presentations were read off the wire and thrown away. That is the same omission the colour work closed, one layer over. The set is ECMA-48's, so `undercurl` stays out as a terminal extension rather than a standard: a model of what terminals do is worth more when it models what the standard says they do.
+
+  Rule: these are semantic states, not decoration, which is why an accessibility layer needs them. A terminal says disabled with dim, says password field with hidden, and says done or deleted with strikeout. A reader that cannot report them is back to flat text for exactly the distinctions a listener most needs, which is the gap the model exists to close.
+
+  Scenario Outline: a region drawn with a standard attribute reports it
+    When the operator inspects a command that prints "marked" <attribute>
+    Then the inspect output lists a region named "marked"
+    And the inspect output reports that region is <attribute>
+
+    Examples:
+      | attribute         |
+      | dim               |
+      | italic            |
+      | underlined        |
+      | hidden            |
+      | struck through    |
+      | doubly underlined |
+
   Scenario: a region whose cells are drawn differently carries no style
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
     And the line "tests" is rendered in red while the rest of the pane is drawn plainly

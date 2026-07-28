@@ -4,48 +4,105 @@
   "title": "Tinman driver protocol message",
   "description": "One newline-delimited JSON-RPC 2.0 message exchanged with the Tinman driver on stdin and stdout, per the specification at https://www.jsonrpc.org/specification. Tinman defines no wire protocol of its own: a client in any language reaches for an existing JSON-RPC library, and the language servers, debug adapters and model-context servers a test author already runs speak the same framing. A protocol fault is an `error` object carrying a reserved code. A failed expectation is not a protocol fault, because the call succeeded and the product disagreed, so it returns a `result` whose `ok` is false. Referenced by features/driver-protocol.feature.",
   "oneOf": [
-    { "$ref": "#/$defs/request" },
-    { "$ref": "#/$defs/response" }
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    }
   ],
   "$defs": {
     "request": {
       "description": "A call from the test runner to the driver. The parameters a method requires are constrained here rather than on the params object, because params alone cannot see which method it belongs to. A driver holds several sessions at once, so an omitted session on a call that addresses one is ambiguous rather than defaultable.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["jsonrpc", "id", "method"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
       "allOf": [
         {
-          "if": { "properties": { "method": { "const": "launch" } } },
+          "if": {
+            "properties": {
+              "method": {
+                "const": "launch"
+              }
+            }
+          },
           "then": {
             "properties": {
               "params": {
-                "required": ["command"],
-                "not": { "required": ["session"] }
+                "required": [
+                  "command"
+                ],
+                "not": {
+                  "required": [
+                    "session"
+                  ]
+                }
               }
             },
-            "required": ["params"]
+            "required": [
+              "params"
+            ]
           }
         },
         {
           "if": {
-            "properties": { "method": { "not": { "const": "launch" } } },
-            "required": ["method"]
+            "properties": {
+              "method": {
+                "not": {
+                  "const": "launch"
+                }
+              }
+            },
+            "required": [
+              "method"
+            ]
           },
           "then": {
-            "properties": { "params": { "required": ["session"] } },
-            "required": ["params"]
+            "properties": {
+              "params": {
+                "required": [
+                  "session"
+                ]
+              }
+            },
+            "required": [
+              "params"
+            ]
           }
         },
         {
-          "if": { "properties": { "method": { "const": "capture" } } },
-          "then": { "properties": { "params": { "required": ["scope"] } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "capture"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "required": [
+                  "scope"
+                ]
+              }
+            }
+          }
         }
       ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
+        "jsonrpc": {
+          "const": "2.0"
+        },
         "id": {
           "description": "Client-assigned call identifier, echoed on the reply. Tinman assigns it no meaning beyond correlation.",
-          "type": ["string", "integer"]
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "method": {
           "description": "The operation called. A method outside this set is answered with the reserved code -32601.",
@@ -54,6 +111,7 @@
             "activate",
             "fill",
             "press",
+            "wait",
             "expect",
             "capture",
             "screen",
@@ -62,7 +120,9 @@
             "close"
           ]
         },
-        "params": { "$ref": "#/$defs/params" }
+        "params": {
+          "$ref": "#/$defs/params"
+        }
       }
     },
     "params": {
@@ -84,14 +144,38 @@
           "description": "Backend-neutral sandbox specification for the session, on a launch call. Omitted means the secure defaults.",
           "type": "object"
         },
-        "role": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "within": { "type": "string", "minLength": 1 },
-        "label": { "type": "string", "minLength": 1 },
-        "value": { "type": "string" },
-        "key": { "type": "string", "minLength": 1 },
-        "text": { "type": "string" },
-        "scope": { "enum": ["visible", "all"] },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "within": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "visible",
+            "all"
+          ]
+        },
         "as": {
           "description": "The name the captured collection is bound to, on a capture call.",
           "type": "string",
@@ -103,23 +187,48 @@
       "description": "A reply from the driver. Exactly one of result or error is present, per the JSON-RPC specification.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["jsonrpc", "id"],
+      "required": [
+        "jsonrpc",
+        "id"
+      ],
       "oneOf": [
-        { "required": ["result"] },
-        { "required": ["error"] }
+        {
+          "required": [
+            "result"
+          ]
+        },
+        {
+          "required": [
+            "error"
+          ]
+        }
       ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "type": ["string", "integer", "null"] },
-        "result": { "$ref": "#/$defs/result" },
-        "error": { "$ref": "#/$defs/error" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ]
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       }
     },
     "result": {
       "description": "The outcome of a call the driver was able to make. A failed expectation reports here rather than as an error, because the call itself succeeded.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["ok"],
+      "required": [
+        "ok"
+      ],
       "properties": {
         "ok": {
           "description": "Whether the operation did what it was asked. False on a failed expectation or a locator that did not resolve.",
@@ -151,7 +260,9 @@
         "items": {
           "description": "The captured items, on a capture reply, in screen order.",
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -159,13 +270,25 @@
       "description": "A protocol fault, per the JSON-RPC specification's error object. Reserved codes carry their standard meanings: -32700 parse error, -32600 invalid request, -32601 method not found, -32602 invalid params, -32603 internal error. Tinman defines no codes of its own, because a fault outside that set is a product outcome and belongs in a result.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
         "code": {
           "type": "integer",
-          "enum": [-32700, -32600, -32601, -32602, -32603]
+          "enum": [
+            -32700,
+            -32600,
+            -32601,
+            -32602,
+            -32603
+          ]
         },
-        "message": { "type": "string", "minLength": 1 },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
         "data": {
           "description": "What the fault concerned, such as the unknown method name."
         }

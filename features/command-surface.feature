@@ -20,6 +20,36 @@ Feature: command surface
     Then mandoc parses the emitted page and reports no error
     And the emitted page is not empty
 
+  Rule: a doc comment on a command type serves developers, and clap turns it into the description an operator reads. Those are two audiences and the operator gets the wrong one: the NAME line shipped three sentences on why the parser's own help output is disabled and whose version flag it is, where the convention is one short line. Copy for a human is an asset here, so the man page's prose is joined to `assets/help/tinman.txt` rather than written where the compiler happens to read it. The join is what stops the two surfaces drifting, since nothing about a stale man page announces itself.
+
+  Scenario: the man page names Tinman in one line
+    When the operator runs "tinman man" with stdout redirected to a file
+    Then the NAME section is a single line
+    And it carries the one-line description from the asset at "assets/help/tinman.txt"
+
+  Scenario: the man page describes Tinman in the operator's terms
+    When the operator runs "tinman man" with stdout redirected to a file
+    Then the DESCRIPTION section carries the closing paragraph of the asset at "assets/help/tinman.txt"
+
+  Rule: the man page is generated from the doc comments on the command types, and those doc comments are where the trace annotations live. So the one artifact a packager installs system-wide is the one surface that can print the project's own internal bookkeeping at an operator. It did: the DESCRIPTION carried two `@planks` strings on the voyage that added the command. Nothing else Tinman emits is derived from doc comments, so this is the only surface that needs the guard.
+
+  Scenario: the emitted man page carries no trace annotation
+    When the operator runs "tinman man" with stdout redirected to a file
+    Then the output names every command the parser accepts
+    And the output carries no "@planks" annotation
+
+  Rule: the page's SUBCOMMANDS section cross-references `tinman-record(1)` and six more by name, which is the roff convention for "this page exists, go read it". Seven of them did not exist and nothing could emit them, so the one artifact a packager installs system-wide sent every reader to a page no machine has. A cross-reference is a claim about what is installed, and this project does not ship claims it cannot honour. The join below is what keeps the two in step: the page names the pages, and every name it prints is one the binary will produce.
+
+  Scenario: man emits the page for a named subcommand
+    When the operator runs "tinman man record" with stdout redirected to a file
+    Then the output begins with a roff title macro naming "tinman-record"
+
+  Scenario: every subcommand page the man page cross-references can be emitted
+    Given the subcommand pages the man page cross-references
+    When each is requested from "tinman man"
+    Then every one is emitted
+    And the cross-references read are not empty
+
   Scenario: completions emits a script for the shell named
     When the operator runs "tinman completions bash" with stdout redirected to a file
     Then the output is a completion script naming "tinman"
@@ -28,9 +58,9 @@ Feature: command surface
     When the operator executes "tinman completions klingon"
     Then the command exits with a non-zero status
 
-  Rule: the named-commands floor is what makes adding a command safe. A count alone would pass a parser that had lost inspect and gained something else, and an unnamed floor passes a parser that reads nothing at all. Naming the seven is what turns a silent loss into a red.
+  Rule: naming the commands is what makes changing the set safe. A count alone would pass a parser that had lost inspect and gained something else, and a set read from nothing at all passes every parser. The assertion is exact rather than a floor, because a floor is silent about the command nobody meant to ship: an addition has to be written here before it reaches an operator, which is the agreement `features/command-dispatch.feature` states and this scenario is the only place that enforces.
 
-  Scenario: the parser accepts at least the seven named commands
+  Scenario: the parser accepts exactly the seven named commands
     Given the commands Tinman names
       | command     |
       | record      |
@@ -40,8 +70,8 @@ Feature: command surface
       | help        |
       | man         |
       | completions |
-    When each is passed to the command parser
-    Then the parser accepts every one
+    When the accepted command set is read
+    Then it is exactly the seven commands named
 
   Rule: documentation is where a reader or an agent learns what to run, and a command struck from the parser stays in the prose through the voyage that struck it. One sweep over every shipped markdown file replaces the per-asset check the bundled skill used to carry: the skill, the readme and the onboarding document all ship, and all three tell someone what to type. A fence reader that matches nothing would report a clean bill for every document it never read, which is what the floor below is for.
 

@@ -125,7 +125,13 @@
         "foreground",
         "background",
         "bold",
-        "reverse"
+        "reverse",
+        "dim",
+        "italic",
+        "underline",
+        "hidden",
+        "strikeout",
+        "doubleUnderline"
       ],
       "properties": {
         "foreground": {
@@ -138,6 +144,24 @@
           "type": "boolean"
         },
         "reverse": {
+          "type": "boolean"
+        },
+        "dim": {
+          "type": "boolean"
+        },
+        "italic": {
+          "type": "boolean"
+        },
+        "underline": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "strikeout": {
+          "type": "boolean"
+        },
+        "doubleUnderline": {
           "type": "boolean"
         }
       }
@@ -194,7 +218,11 @@
             "textbox",
             "status",
             "log",
-            "article"
+            "article",
+            "table",
+            "row",
+            "columnheader",
+            "cell"
           ]
         },
         "name": {
@@ -228,7 +256,39 @@
             "$ref": "#/$defs/region"
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "description": "WAI-ARIA 1.2 divides the roles this model produces into those supporting a name from the author and those requiring one. A region carrying a role from the required set and no name is a region a screen reader announces by role alone, which is the flat-text failure this model exists to close. The roles left out are not oversights: menu, list, listitem, status, log and article support a name without requiring one, so demanding it here would contradict the specification the model borrows its vocabulary from.",
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "application",
+                  "region",
+                  "menuitem",
+                  "button",
+                  "textbox"
+                ]
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

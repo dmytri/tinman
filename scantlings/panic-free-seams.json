@@ -1,0 +1,16 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/panic-free-seams.json",
+  "title": "Panic-free seams",
+  "description": "Constructs that abort the process, forbidden in the seams that must answer instead of dying. Discharged by the reference-boundary checker in verification support and attested by the @contract scenario in features/driver-session.feature.",
+  "searchPaths": [
+    "src/driver.rs",
+    "src/assistant.rs"
+  ],
+  "forbiddenReferences": [
+    "panic!",
+    "unwrap()",
+    "expect(",
+    "todo!("
+  ],
+  "rationale": "The driver speaks JSON-RPC 2.0, a protocol carrying an error object, to a caller in another language. Twenty-five abort sites in that one module mean a caller meets a dead pipe where the protocol promised a diagnosable error, on the surface every external integration depends on. The assistant holds the terminal in raw mode on the alternate screen, so an abort there leaves the operator with no prompt and no cursor, which is the failure an operator actually sees. A prohibition over the tree is the right instrument because these are constructs that must never appear, and a scenario proves only the cases somebody thought to write; the positive half, that an error is returned and the terminal is restored, is what the scenarios beside this contract carry."
+}

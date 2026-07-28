@@ -63,7 +63,10 @@
 - dependency: ast-grep
 - dependency: gplint
 - dependency: mandoc
-- dependency: tui-markdown
+- dependency: tlrc
+- dependency: signal-hook
+- dependency: bwrap >= 0.11.2
+- dependency: tui-markdown, default-features = false
 - dependency: clap_mangen
 - dependency: clap_complete
 

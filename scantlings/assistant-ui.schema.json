@@ -99,7 +99,13 @@
             "foreground",
             "background",
             "bold",
-            "reverse"
+            "reverse",
+            "dim",
+            "italic",
+            "underline",
+            "hidden",
+            "strikeout",
+            "doubleUnderline"
           ]
         },
         "children": {

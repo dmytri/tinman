@@ -79,31 +79,43 @@ Feature: terminal object model inference
 
   Rule: the tldr-pages project keeps a public list of projects that take its pages, run them through a language model and publish the result without crediting it, describing that output as inaccurate and riddled with hallucinations. Feeding a page to an inference engine and emitting names from it is that shape exactly, so what keeps Tinman off the list has to be structural rather than well meant. Two things do. The pages are licensed CC-BY-4.0, so credit is a licence term and not a courtesy, and it belongs in the artifact the operator commits rather than on a screen they saw once. And no text from a page reaches a Tinman artifact on the page's authority alone: the deterministic pass refuses any name the screen does not independently carry, which is the refusal every other inferred name already meets.
 
-  Rule: Tinman is not a tldr client and does not intend to become one. The client specification carries its own required flags, platform resolution, language handling and cache maintenance, all of it off Tinman's mission, and a second copy of somebody else's pages is a second thing to serve stale. The operator's own installed client already holds their cache, their language and their platform, so that is what Tinman asks.
+  Rule: the page source is configuration, the way the inference endpoint already is. It defaults to the tldr-pages project's own raw markdown and is pointed elsewhere by an environment variable, which serves an operator behind a mirror or working offline, and lets this project's own verification fetch a real page over real HTTP from a source it controls rather than depending on what the public project happens to serve today. A page whose text the project may edit at any time is not a fixture, and faking the fetch instead is the doubling the Real-by-default Article forbids.
+
+  Scenario: the page source is the tldr project unless configured otherwise
+    Given no tldr page source is configured
+    When the page source is read
+    Then it is the tldr-pages project's raw markdown
+
+  Scenario: a configured page source is read instead
+    Given the environment sets "TINMAN_TLDR_BASE_URL" to "https://mirror.example.com/tldr"
+    When the page source is read
+    Then it is "https://mirror.example.com/tldr"
+
+  Rule: Tinman is not a tldr client and does not intend to become one. The client specification carries required flags, platform resolution, language handling and cache maintenance, all of it off Tinman's mission, and a second copy of somebody else's pages is a second thing to serve stale. Declining the specification is not declining a request: one page is fetched as raw markdown from the project, which needs no client installed and no cache kept. Markdown is the form the style guide specifies, so placeholders and keypress notation arrive as written rather than as somebody's rendering of them. Platform is resolved by asking for the platform page and falling back to the common one, which is two attempts rather than a cache. The page is under CC-BY-4.0 and the credit rides in the plan.
 
   Scenario: the naming context carries a tldr page for the program being inferred
-    Given the operator's tldr client has a page for "git"
+    Given the configured tldr page source has a page for "git"
     And a virtual screen showing an unbordered pane whose first line reads "Recent files"
     When the terminal object model of "git" is inferred
-    Then the page is read by invoking the operator's tldr client
+    Then the page is read as raw markdown from the tldr project
     And the inference request carries the tldr page for "git"
 
   Scenario: inference proceeds where no tldr page is available
-    Given the operator's tldr client has no page for "obscurecmd"
+    Given the configured tldr page source has no page for "obscurecmd"
     And a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
     When the terminal object model of "obscurecmd" is inferred
     Then the inference request carries no tldr page
     And the region named "Files" has the role "list"
 
   Scenario: a name only the tldr page carries is rejected like any other
-    Given the operator's tldr client has a page for "git"
+    Given the configured tldr page source has a page for "git"
     And a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
     And an engine that names the pane "repository browser"
     When the inferred locator is round-tripped against the deterministic model
     Then the locator is rejected as unbindable
 
   Scenario: a plan whose naming read a tldr page credits the project
-    Given the operator's tldr client has a page for "git"
+    Given the configured tldr page source has a page for "git"
     And a virtual screen showing an unbordered pane whose first line reads "Recent files"
     And an engine that names that region "Recent files"
     When the plan for "git" is written
@@ -111,7 +123,7 @@ Feature: terminal object model inference
     And the plan names "CC-BY-4.0" as that page's licence
 
   Scenario: a plan whose naming read no tldr page credits nothing
-    Given the operator's tldr client has no page for "obscurecmd"
+    Given the configured tldr page source has no page for "obscurecmd"
     And a virtual screen showing an unbordered pane whose first line reads "Recent files"
     And an engine that names that region "Recent files"
     When the plan for "obscurecmd" is written

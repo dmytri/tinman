@@ -39,6 +39,45 @@ Feature: conventional help
 
   Rule: an example is the part of a help text a reader actually types, so it is the part that costs them most when it has drifted. The Commands block is checked in both directions and an example line escapes both, because it carries flags, arguments and a subcommand together in the one form the parser will really be handed. The tldr-pages style guide is the source for the shape: simplest invocation first, complexity introduced gradually, and around five of them.
 
+  Rule: the tagline is the one line of the help a model writes, and it is the only line worth waiting on. Rendering the rest first and letting the tagline arrive into place keeps the help instant whatever the provider is doing, and makes the generated line legible as generated. The failure this shape must not have is a spinner that outlives its answer: an animation with no end state is worse than a missing line, because a missing line is honest and a spinner promises something is still coming. The tagline ceiling is that end state, and the scenario below is what proves it exists.
+
+  Rule: motion is a presentation channel like colour, so it carries no meaning of its own here and nothing is lost by never seeing it. A terminal gets the animation, a redirected stream gets none, and a provider that never answers gets a settled line rather than a spinner. That keeps the help readable by a screen reader, a pipe and an operator on a slow link alike.
+
+  Scenario: the help is on the screen before the tagline arrives
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the Commands block is drawn before the tagline is drawn
+
+  Scenario: the tagline arrives into place when inference answers
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the tagline line carries the generated expansion
+
+  Scenario: a tagline that never arrives settles rather than spinning
+    Given the inference provider does not answer
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the tagline line settles inside the tagline ceiling
+    And no spinner frame is on the screen
+
+  Scenario: redirected help waits for no tagline
+    Given inference is available
+    When the operator runs "tinman --help" with stdout redirected to a file
+    Then the Commands block is in the output
+    And the output carries no spinner frame
+
+  Rule: the examples are authored in the tldr-pages placeholder syntax and expanded before an operator sees them, so one source serves two audiences. Unexpanded, the block is the body of a tldr page and stays in step with the parser instead of drifting into a separately written document. Expanded, it is a command a reader can paste. The asset already worked this way for "{{tagline}}", so this is that mechanism reaching the examples rather than a second placeholder vocabulary. Expansion is what keeps Tinman's own documentation honest by its own standard: an unexpanded placeholder is a template, and inspecting a program whose help carries templates reports them untestable as written, which is this project's signature fault aimed at its own flagship example.
+
+  Scenario: the rendered help carries no unexpanded placeholder
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the Examples block is on the screen
+    And no placeholder delimiter is on the screen
+
+  Scenario: every example placeholder has a value to expand to
+    Given the placeholders in the Examples block of the asset at "assets/help/tinman.txt"
+    When each is looked up among the example values
+    Then every one has a value
+    And the placeholders read are not empty
+
   Scenario: every example the help text carries is accepted by the parser
     Given the Tinman command lines in the Examples block of the asset at "assets/help/tinman.txt"
     When each is passed to the command parser

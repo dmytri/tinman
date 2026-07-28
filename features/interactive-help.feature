@@ -37,6 +37,21 @@ Feature: interactive help
     When the operator presses "esc" at the assistant prompt
     Then the conventional help is on the screen
 
+  Rule: the session runs on the alternate screen so the operator's scrollback is theirs until the assistant leaves, and the transcript is written back into it on exit. Asserting only that the screen carries the text afterwards cannot tell that apart from a session that never switched screens at all, which is what the code does today while this feature's prose has claimed otherwise. Scrollback is meaningful because an alternate screen was left; with no alternate screen there is nothing to write back into.
+
+  @sandbox
+  Scenario: the assistant draws on the alternate screen
+    Given inference is available
+    When the operator runs "tinman --help" in an interactive terminal
+    Then the terminal is on the alternate screen
+
+  @sandbox
+  Scenario: the operator's scrollback is untouched while the assistant is drawing
+    Given inference is available
+    And the terminal scrollback carries the line "earlier work"
+    When the operator runs "tinman --help" in an interactive terminal
+    Then "earlier work" is not on the screen
+
   Scenario: the transcript is written into the scrollback when the assistant leaves
     Given inference is available
     And the assistant answers "Inspect prints the terminal object model of a running program."
@@ -58,6 +73,61 @@ Feature: interactive help
     When the operator runs "tinman" in an interactive terminal
     Then the screen does not carry the Commands block of the asset at "assets/help/tinman.txt"
     And a bordered region titled "Ask Tinman" is drawn
+
+  Rule: the assistant holds the terminal in raw mode on the alternate screen, so it owns restoring both however it leaves. Restoring on the ordinary path only is the case that never gets tested, because the ordinary path is the one everybody runs; the operator meets the other one, with no prompt, no cursor and no echo, and a terminal they have to reset by hand.
+
+  @sandbox
+  Scenario: an interrupted session still gives the terminal back
+    Given the assistant is drawing its box
+    When the operator interrupts the session
+    Then the terminal is out of raw mode
+    And the alternate screen has been left
+
+  Rule: an assistant that cannot reach a model has one useful thing to say, which is how to give it one. Drawing the ask box anyway offers an input that cannot answer, so the setup form takes that place instead. It stays deterministic and needs no model to run, which is why it is drawn here rather than added as a command: the operator already has the environment and a dotenv file, so a command would be a third route to a value two routes already reach.
+
+  Rule: the credential is a secret, so it is masked as it is typed and written where a secret belongs. The operator's project directory is the wrong home for it, since a file written beside their work is a file their next commit can carry; the configuration directory is owner-readable and outside any repository. Masking is the model's `hidden` attribute doing the job it names.
+
+  @sandbox
+  Scenario: the setup form replaces the ask box when inference is unavailable
+    Given no inference credential is configured
+    When the operator runs "tinman" in an interactive terminal
+    Then a region titled "Set up inference" is drawn
+    And no region titled "Ask Tinman" is drawn
+
+  @sandbox
+  Scenario: the setup form offers the defaults it would otherwise use
+    Given no inference credential is configured
+    When the operator runs "tinman" in an interactive terminal
+    Then the form offers "https://openrouter.ai/api/v1" as the endpoint
+    And the form offers "deepseek/deepseek-v4-flash" as the model
+
+  @sandbox
+  Scenario: the key is masked as it is typed
+    Given no inference credential is configured
+    And the operator has opened the setup form
+    When the operator types a key into the credential field
+    Then the credential field is hidden
+
+  @sandbox
+  Scenario: the form names the environment as the other way in
+    Given no inference credential is configured
+    When the operator runs "tinman" in an interactive terminal
+    Then the form names "TINMAN_API_KEY" as an environment variable it reads
+
+  @sandbox
+  Scenario: a saved credential is written where only its owner can read it
+    Given no inference credential is configured
+    And the operator has opened the setup form
+    When the operator saves a key through the form
+    Then the credential is written under the configuration directory
+    And that file is readable only by its owner
+    And no credential is written to the operator's working directory
+
+  Scenario: bare tinman renders the conventional help when no credential is configured
+    Given no inference credential is configured
+    When the operator runs "tinman" in an interactive terminal
+    Then the conventional help is on the screen
+    And no bordered region titled "Ask Tinman" is drawn
 
   Scenario: tinman with stdin redirected renders the conventional help
     Given inference is available

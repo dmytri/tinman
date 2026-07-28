@@ -14,7 +14,7 @@ Feature: methodology conformance
     Then no rule in the set reports a match
     And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules
 
-  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; five scantlings carry no dialect because they are proof contracts discharged by their own checkers.
+  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; seven scantlings carry no dialect because they are proof contracts discharged by their own checkers.
 
   @conformance
   Scenario: every scantling declaring a dialect satisfies it
@@ -26,7 +26,7 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all sixteen name that version
+    Then all eighteen name that version
 
   Rule: the plank joins below need two sources joined, the plank inventory and the step-usage pattern set, so their logic lives in step definitions rather than in an ast-grep rule. The pattern set comes from the derived step-usage command, which reports each step-definition pattern literal untruncated; the join is exact string membership, with no normalization on either side.
 
@@ -70,11 +70,31 @@ Feature: methodology conformance
     Then no tier's most recent sweep exceeds its budget
     And every tier declaring a budget has a sweep command that records its wall clock
 
-  Rule: five scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
+  Rule: the assistant contract restates the model's style object rather than referencing it, so two schemas hold one shape. That is tolerable only while something keeps them in step: when the model gained six standard attributes the assistant contract still required four, and a model emitting the old four would have failed the model's own schema while passing the interface's. Neither file announces the drift, and both stay green apart. A cross-file reference would remove the duplicate outright, and no scantling here uses one yet, so the join stands until that is proven rather than assumed.
+
+  @conformance
+  Scenario: the assistant contract requires the style the model defines
+    Given the style properties required by "scantlings/tom.schema.json"
+    And the style properties required by "scantlings/assistant-ui.schema.json"
+    When the two sets are compared
+    Then they are the same set
+    And the properties read are not empty
+
+  Rule: a sandboxed scenario creates a real process and a real staging directory, and a run that is killed or crashes cannot be trusted to have torn either down. Reclaim at suite start is the safety net for exactly that, and a net nobody checks reports the same clean bill whether it is holding or not. What it costs when it stops holding is not tidiness: an orphaned sandbox keeps a bind mount alive against a directory the operator may be editing, and staging directories accumulate silently until the disk answers for them. The floor guards the reader, because an inventory that matches nothing and a genuinely empty one both report zero.
+
+  @conformance
+  Scenario: no sandbox resource outlives the run that created it
+    Given the sandbox processes and staging directories present after the suite reclaims
+    When each is matched against the runs that are still live
+    Then no sandbox process outlives the run that created it
+    And no staging directory outlives the run that created it
+    And the inventory reports the paths and processes it searched
+
+  Rule: seven scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the five scantlings that declare no JSON Schema dialect
+    Given the seven scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all five validate
+    Then all seven validate
     And the meta-schema forbids a property it does not name

@@ -27,6 +27,53 @@ Feature: inference provider
     When Tinman checks whether inference is available
     Then inference is reported unavailable
 
+  Rule: each timed seam carries a wall-clock ceiling, and a ceiling nobody measures is a guess that fails silently, because the seam it bounds degrades rather than erroring. One contract lists them and one scenario attests them all, so a new timed seam adds a line to the contract rather than a scenario to this file.
+
+  @inference
+  @contract
+  Scenario: every timed seam is observed inside its budget
+    Given the seams and ceilings in "scantlings/latency-budgets.json"
+    When each seam is exercised and timed
+    Then no seam exceeds its ceiling
+    And the seams read are not empty
+
+  Rule: a reasoning model spends its thinking budget on whatever it is asked, and the tagline asks for six words. Measured against the configured provider, the request as first written returned nothing inside forty seconds, so the tagline never filled and the help simply rendered without it, which reads as a design choice rather than a failure. With reasoning disabled the same request answers in one to two seconds. The lever is the request, not the ceiling: raising a budget to fit a call that should never have been slow hides the cause and pays the latency for ever.
+
+  Scenario: the tagline request asks the provider not to reason
+    Given the inference credential is configured
+    When the acronym request is built
+    Then the request disables reasoning
+
+  @inference
+  Scenario: the tagline is generated inside its ceiling
+    Given the inference credential is configured
+    When Tinman generates the tagline
+    Then an expansion is returned inside the tagline ceiling
+
+  Rule: asking a model for an acronym gets a claim that the words spell the name, and this project checks claims rather than repeating them. A deterministic pass walks the expansion for the letters of "tinman" in order and raises them, which both proves the acronym and shows the reader where it hides. It is the same rule the naming pass already follows, where the model proposes and the screen decides; here the expansion decides. Where the letters do not appear in order the expansion is not an acronym at all, so it is replaced rather than dressed up.
+
+  Rule: replacement is bounded by the same tagline ceiling as the first attempt. An unbounded retry would spin for ever on a model that keeps missing, which is the end-state failure the help's spinner rule forbids, so the ceiling governs the whole attempt rather than each try.
+
+  Scenario: the tagline raises the letters that spell Tinman
+    Given the provider answers "terminal interaction and networkless model-driven application navigator"
+    When the tagline is generated
+    Then the tagline reads "Terminal Interaction and Networkless Model-driven Application Navigator"
+
+  Scenario: the raised letters begin words where the expansion allows
+    Given the provider answers "terminal interaction and networkless model-driven application navigator"
+    When the tagline is generated
+    Then every raised letter begins a word
+
+  Scenario: an expansion that does not spell Tinman is asked again
+    Given the provider answers "a testing tool for terminals"
+    When the tagline is generated
+    Then that expansion is not on the tagline line
+
+  Scenario: a provider that keeps missing settles inside the ceiling
+    Given the provider always answers "a testing tool for terminals"
+    When the tagline is generated
+    Then the tagline line settles inside the tagline ceiling
+
   Scenario: a rejected credential reports inference unavailable
     Given the inference provider rejects the configured credential
     When Tinman checks whether inference is available

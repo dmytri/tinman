@@ -13,6 +13,39 @@ Feature: driver session
     When the test runner requests the session's sandbox backend
     Then the reported backend is "bubblewrap"
 
+  Rule: arriving somewhere and claiming something are different acts that shared one keyword. `expect` waited for text and asserted it in the same call, so a readiness check and a behavioural claim were indistinguishable in a plan, in the protocol and in `src/flow.rs`, where both routed through the same wait. What that cost is legibility of failure: a barrier that never fires means the program did not reach the state, a claim that fails means the behaviour is wrong, and one keyword reported both identically. Readiness stays Tinman's problem because Tinman alone holds the PTY, the emulator and the frame timing; a caller polling over the protocol would reimplement that worse, and moving a hard problem does not solve it. Claims belong to whoever is testing, which is the caller's own suite wherever one exists.
+
+  Scenario: a driver call can wait for readiness without claiming anything
+    When the test runner waits for the text "READY"
+    Then the driver reports the session reached that state
+
+  Scenario: a wait that never arrives reports failure to arrive
+    When the test runner waits for text the program never draws
+    Then the driver reports the session did not reach that state
+    And the failure names no failed expectation
+
+  Rule: the driver answers a caller in another language over JSON-RPC 2.0, and that protocol carries an error object precisely so a failure can be described rather than inflicted. A seam that aborts instead hands the caller a closed pipe: no code, no message, nothing to act on, on the surface every external integration depends on. The contract forbids the constructs that abort; this scenario carries the half a prohibition cannot prove, which is that something useful is returned in their place.
+
+  Scenario: a request the driver cannot serve is answered with an error
+    When the test runner sends a request naming a method the driver does not serve
+    Then the driver answers with a JSON-RPC error object
+    And the session stays open for the next request
+
+  Rule: the protocol scantling names every method the driver serves, and a contract scenario exchanging two of them attests two of them. That is how `wait` reached the driver while the scantling's enum did not carry it: a `wait` message would have failed the protocol it is served under, and the attestation stayed green because it never sent one. A method the enum names and no message exercises is a name nothing checks.
+
+  @contract
+  Scenario: every method the protocol names is served
+    Given the methods named in "scantlings/driver-protocol.schema.json"
+    When each is exchanged with the driver
+    Then every exchange conforms to the protocol
+    And the methods read are not empty
+
+  @contract
+  Scenario: the driver and assistant seams discharge the panic-free contract
+    Given the implementation sources
+    When the verifier checks the seams named in "scantlings/panic-free-seams.json"
+    Then no counterexample is found
+
   Rule: what activation opened must be something the screen did not already show. The fixture draws its labelled input from the first frame, because the failure-report scenarios in `features/replay.feature` and `features/test-command.feature` assert on that text, so a `Then` naming it cannot tell an opened pane from an unopened one. These scenarios name the `Save` button instead, which `assets/examples/settings-flow.yaml` places inside Settings.
 
   Scenario: activating a menu item opens what it names

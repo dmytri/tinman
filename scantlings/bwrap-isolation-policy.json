@@ -13,10 +13,18 @@
     "name": "HOME",
     "mustNotEqualOperatorHome": true
   },
+  "workspaceMount": {
+    "appliesTo": "operatorWorkingDirectory",
+    "sourceFlag": "--overlay-src",
+    "mountFlag": "--tmp-overlay"
+  },
   "forbid": {
     "operatorHomeAsBindSource": true,
+    "operatorWorkingDirectoryAsBindSource": true,
     "hostPathInheritance": true,
-    "writableSystemMounts": true
+    "writableSystemMounts": true,
+    "credentialFileInWorkspace": true
   },
-  "systemMountFlag": "--ro-bind"
+  "systemMountFlag": "--ro-bind",
+  "rationale": "The operator's working directory was bound writable and the program launched inside it, so a probed command wrote straight into the tree the operator was standing in. Every sandboxed-launch scenario stayed green throughout, because each guarded a sentinel path outside the sandbox while the operator's own directory sat inside it. Forbidding the working directory as a bind source states the prohibition, and requiring the overlay pair where that directory is the workspace states what replaces it: the program reads the real tree through --overlay-src and every write lands in the invisible tmpfs --tmp-overlay provides, which goes when the sandbox goes. Bubblewrap 0.11.0 introduced these options, so the policy carries a version floor the project actually runs against rather than one nobody exercises. This is the same failure shape the prepared-process construction boundary closed: isolation asserted by a scenario that reached the plumbing rather than the promise. The requirement is scoped rather than flat because two workspace modes are legitimate: the operator's own directory, which must survive the launch untouched, and a workspace Tinman created for the caller, whose host-visible writes features/flow-orchestration.feature pins in three scenarios. A flat invariant would have condemned the second, which is why appliesTo names the subject. The workspace overlay lets a probed program read the tree it is pointed at, which is the point, but the dotenv file Tinman itself reads for its provider credential sits in that tree on this project and on plenty of others. Tinman knows which file that is, so it masks it: a documented example written by a stranger reads an empty file rather than a live key, and the plan the operator commits cannot carry one."
 }

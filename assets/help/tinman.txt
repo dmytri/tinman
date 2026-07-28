@@ -2,7 +2,7 @@ tinman
 
 {{tagline}}
 
-Record, inspect and test terminal applications and coding agents.
+Record, inspect, and test terminal applications and coding agents.
 
 Usage:
   tinman <COMMAND>
@@ -22,16 +22,20 @@ Options:
 
 Examples:
   Read the structure of a program you have not seen before:
-    tinman inspect opencode
+    tinman inspect {{program}}
 
   Capture a live session into a plan you can edit:
-    tinman record opencode
+    tinman record {{program}}
 
   Replay that plan with no model and no network:
-    tinman test tinman.yaml
+    tinman test {{path/to/plan.yaml}}
 
   Write the manual page so man can find it:
     tinman man
+
+Example values:
+  program: opencode
+  path/to/plan.yaml: tinman.yaml
 
 Tinman drives real terminal programs through a sandboxed PTY. Capture time may
 infer; replay time is deterministic, with no model invocation and no network.
