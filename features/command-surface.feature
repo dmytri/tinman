@@ -58,6 +58,16 @@ Feature: command surface
     When the operator executes "tinman completions klingon"
     Then the command exits with a non-zero status
 
+  Rule: probing a program's documentation is a mode of inspection rather than a command of its own, so it is a flag on `inspect` and the named set stays at seven. Writing the result reuses the option `record` already carries, because two commands that both write a plan should not spell it two ways. Naming both here is what stops the operator surface being settled in verification support by whoever authors a step first.
+
+  Scenario: inspect accepts the documented-examples flag
+    When "inspect --examples printf" is passed to the command parser
+    Then the parser accepts it
+
+  Scenario: inspect writes its plan where the operator says
+    When "inspect --examples printf --output plan.yaml" is passed to the command parser
+    Then the parser accepts it
+
   Rule: naming the commands is what makes changing the set safe. A count alone would pass a parser that had lost inspect and gained something else, and a set read from nothing at all passes every parser. The assertion is exact rather than a floor, because a floor is silent about the command nobody meant to ship: an addition has to be written here before it reaches an operator, which is the agreement `features/command-dispatch.feature` states and this scenario is the only place that enforces.
 
   Scenario: the parser accepts exactly the seven named commands

@@ -30,6 +30,9 @@ Examples:
   Replay that plan with no model and no network:
     tinman test {{path/to/plan.yaml}}
 
+  Probe a program's own documentation and write what held as a plan:
+    tinman inspect --examples {{program}} --output {{path/to/plan.yaml}}
+
   Write the manual page so man can find it:
     tinman man
 

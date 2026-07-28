@@ -5,8 +5,16 @@
   "description": "The canonical YAML representation of a recorded or authored flow. A plan is either the full form, carrying a flow of run and tui entries, or the shorthand form, carrying one command and its steps. Both normalize to the same parsed plan. Referenced by features/harness-plan.feature and features/plan-shorthand.feature.",
   "type": "object",
   "oneOf": [
-    { "required": ["flow"] },
-    { "required": ["tui"] }
+    {
+      "required": [
+        "flow"
+      ]
+    },
+    {
+      "required": [
+        "tui"
+      ]
+    }
   ],
   "additionalProperties": false,
   "properties": {
@@ -18,7 +26,9 @@
       "description": "Full form: ordered process entries.",
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/flowEntry" }
+      "items": {
+        "$ref": "#/$defs/flowEntry"
+      }
     },
     "tui": {
       "description": "Shorthand form: the single terminal program this plan drives.",
@@ -28,7 +38,31 @@
     "steps": {
       "description": "Shorthand form: the steps driving the program named by tui.",
       "type": "array",
-      "items": { "$ref": "#/$defs/step" }
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "sources": {
+      "description": "What this plan was written from, and the terms that came with it. A plan built from a program's own help needs no entry; a plan built from somebody else's documentation carries the source and its licence, because the page is their work and the plan travels further than the session that wrote it. Absent where nothing outside the binary was read, which is the ordinary case.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "licence": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -41,14 +75,25 @@
       "properties": {
         "run": {
           "oneOf": [
-            { "type": "string", "minLength": 1 },
+            {
+              "type": "string",
+              "minLength": 1
+            },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["command"],
+              "required": [
+                "command"
+              ],
               "properties": {
-                "command": { "type": "string", "minLength": 1 },
-                "cwd": { "type": "string", "minLength": 1 },
+                "command": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "cwd": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "status": {
                   "description": "The exit status this command is expected to leave. Omitted means 0. A command-line program's failure is often the behaviour under test, so an expected non-zero status passes the step and any other status fails it.",
                   "type": "integer",
@@ -66,12 +111,19 @@
         "tui": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["command"],
+          "required": [
+            "command"
+          ],
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
             "steps": {
               "type": "array",
-              "items": { "$ref": "#/$defs/step" }
+              "items": {
+                "$ref": "#/$defs/step"
+              }
             }
           }
         }
@@ -87,18 +139,31 @@
         "activate": {
           "description": "Activate the region a locator resolves to. A bare string is the locator's name.",
           "oneOf": [
-            { "type": "string", "minLength": 1 },
-            { "$ref": "#/$defs/locator" }
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "$ref": "#/$defs/locator"
+            }
           ]
         },
         "fill": {
           "description": "Enter a value into the textbox carrying a label.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["label", "value"],
+          "required": [
+            "label",
+            "value"
+          ],
           "properties": {
-            "label": { "type": "string", "minLength": 1 },
-            "value": { "type": "string" }
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "value": {
+              "type": "string"
+            }
           }
         },
         "press": {
@@ -109,14 +174,25 @@
         "expect": {
           "description": "Assert text is present on screen. A bare string is the text.",
           "oneOf": [
-            { "type": "string", "minLength": 1 },
+            {
+              "type": "string",
+              "minLength": 1
+            },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["text"],
+              "required": [
+                "text"
+              ],
               "properties": {
-                "text": { "type": "string", "minLength": 1 },
-                "within": { "type": "string", "minLength": 1 }
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "within": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             }
           ]
@@ -125,12 +201,31 @@
           "description": "Collect the items of a pane into named structured data.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["role", "items", "as"],
+          "required": [
+            "role",
+            "items",
+            "as"
+          ],
           "properties": {
-            "role": { "type": "string", "minLength": 1 },
-            "items": { "type": "string", "minLength": 1 },
-            "scope": { "enum": ["all", "visible"], "default": "all" },
-            "as": { "type": "string", "minLength": 1 }
+            "role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scope": {
+              "enum": [
+                "all",
+                "visible"
+              ],
+              "default": "all"
+            },
+            "as": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
@@ -139,14 +234,29 @@
       "description": "Addresses a region of the terminal object model by role and name. An absent role matches any role.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "role": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "within": { "type": "string", "minLength": 1 },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "within": {
+          "type": "string",
+          "minLength": 1
+        },
         "binding": {
           "description": "How this locator was arrived at when the plan was recorded. An inferred name that bound on its own reads `exact`; one that needed its parent region to disambiguate reads `scoped`; one the deterministic pass could not confirm reads `ordinal`, and the locator addresses a position within its role rather than a name. A hand-authored locator omits the key. Recording the rung keeps a weak locator legible: a plan whose locators are mostly `ordinal` reports that inference did badly on that screen, and a green run never will.",
-          "enum": ["exact", "scoped", "ordinal"]
+          "enum": [
+            "exact",
+            "scoped",
+            "ordinal"
+          ]
         }
       }
     }

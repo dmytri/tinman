@@ -195,6 +195,8 @@
   },
   "watch22": {
     "scenarios": [
+      "features/command-surface.feature:inspect accepts the documented-examples flag",
+      "features/command-surface.feature:inspect writes its plan where the operator says",
       "features/tom-inference.feature:the naming context carries a tldr page for the program being inferred",
       "features/tom-inference.feature:inference proceeds where no tldr page is available",
       "features/tom-inference.feature:a name only the tldr page carries is rejected like any other",

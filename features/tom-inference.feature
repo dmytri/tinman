@@ -75,6 +75,12 @@ Feature: terminal object model inference
     When the terminal object model is inferred
     Then the region named "Files" has the role "list"
 
+  Scenario: a region the engine leaves unnamed keeps its deterministic reading
+    Given a virtual screen showing an unbordered pane whose first line reads "Recent files"
+    And an engine that answers with a region carrying no name
+    When the terminal object model is inferred
+    Then that region carries the name the deterministic reading gave it
+
   Rule: tldr pages describe what a command is for in the words its own community chose, and that is the vocabulary a good name comes from. The engine is naming regions of a program it has never seen, so a page describing that program is worth carrying. A page also describes some version of a program, and the drift between it and the binary on this machine is the drift that made Tinman's own help text describe a parser it had diverged from; carried into naming, a stale page costs a worse suggestion, where taken as the basis for an assertion it would write a claim about a program nobody ran. The network objection was Captain's error and the user caught it: network is denied to the target, never to Tinman, which already calls a provider from outside the sandbox.
 
   Rule: the tldr-pages project keeps a public list of projects that take its pages, run them through a language model and publish the result without crediting it, describing that output as inaccurate and riddled with hallucinations. Feeding a page to an inference engine and emitting names from it is that shape exactly, so what keeps Tinman off the list has to be structural rather than well meant. Two things do. The pages are licensed CC-BY-4.0, so credit is a licence term and not a courtesy, and it belongs in the artifact the operator commits rather than on a screen they saw once. And no text from a page reaches a Tinman artifact on the page's authority alone: the deterministic pass refuses any name the screen does not independently carry, which is the refusal every other inferred name already meets.
@@ -138,9 +144,3 @@ Feature: terminal object model inference
     Given the fixture terminal program is captured through a PTY
     When the terminal object model is inferred by the configured engine
     Then the model Tinman produces conforms to the "tom" schema in "scantlings/tom.schema.json"
-
-  Scenario: a region the engine leaves unnamed keeps its deterministic reading
-    Given the fixture terminal program is captured through a PTY
-    And the engine answers with no name for a region whose role requires one
-    When the terminal object model is inferred by the configured engine
-    Then that region carries the name the deterministic reading gave it
