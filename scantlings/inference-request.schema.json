@@ -5,7 +5,13 @@
   "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. Referenced by features/inference-provider.feature.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["url", "authorization", "model", "messages", "temperature"],
+  "required": [
+    "url",
+    "authorization",
+    "model",
+    "messages",
+    "temperature"
+  ],
   "properties": {
     "url": {
       "description": "The absolute chat-completions endpoint the request addresses, built from the resolved base URL.",
@@ -36,10 +42,35 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["role", "content"],
+        "required": [
+          "role",
+          "content"
+        ],
         "properties": {
-          "role": { "enum": ["system", "user", "assistant"] },
-          "content": { "type": "string", "minLength": 1 }
+          "role": {
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "reasoning": {
+      "description": "The provider's reasoning control, omitted where a request does not set one. A reasoning model spends its budget on whatever it is asked, and the tagline asks for six words: measured against the configured provider, the request answered nothing inside forty seconds with reasoning left on and one to two seconds with it disabled. This is OpenRouter's parameter rather than a cross-vendor standard, which is the one place the vendor-neutral claim strains; an OpenAI-compatible endpoint that does not know it ignores it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         }
       }
     }
