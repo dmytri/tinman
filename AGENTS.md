@@ -43,7 +43,9 @@ Methodology breaches surface as failing verification rather than as review comme
 
 Watchbill-shape conformance is deliberately absent. Shipwright derived it and Captain condemned it at the 2026-07-25 harbour, on the decision that the watchbill stays hand-checked rather than schema-backed. A later harbour that re-derives it is repeating a settled decision, not finding a gap.
 
-`discover` reads `none`: cucumber-rs offers no dry-run form, confirmed against the runner's own `--help`.
+`discover` reads `none`: cucumber-rs offers no dry-run form, confirmed against the runner's own `--help`. That absence has a consequence for role ordering, so sail it this way.
+
+Doctrine's red-first flow assumes a dry-run exists to list unimplemented steps without building anything. Here there is none, so a step naming a production seam that does not exist yet fails at compile time rather than at run time. **That compile failure is a production-code failure and is legitimate evidence for a Crew dispatch** - the message names the absent seam as precisely as any assertion diff. A role may leave the crate uncompilable *during* its turn while producing that evidence. It must not *end* its turn there: the hand-off has to leave a tree custody can verify, so restore compilation before reporting. Where a scenario can observe the shipped binary instead of an internal seam, prefer that; it fails at run time and needs none of this.
 
 `lint` chains feature lint before code lint: `npx --no-install gplint "features/**"`, then `cargo fmt --check` and `cargo clippy`. gplint is an npm dev dependency, so the rigging carries a `package.json` and `package-lock.json` beside `Cargo.toml`, and `RIGGING.md` records `packageManager` twice. `--no-install` honours the `locked` dependency policy: it resolves the lockfile's version and refuses to fetch a floating one.
 
