@@ -79,7 +79,7 @@ Feature: terminal object model inference
     Given a virtual screen showing an unbordered pane whose first line reads "Recent files"
     And an engine that answers with a region carrying no name
     When the terminal object model is inferred
-    Then that region carries the name the deterministic reading gave it
+    Then that region is left as the deterministic reading left it
 
   Rule: tldr pages describe what a command is for in the words its own community chose, and that is the vocabulary a good name comes from. The engine is naming regions of a program it has never seen, so a page describing that program is worth carrying. A page also describes some version of a program, and the drift between it and the binary on this machine is the drift that made Tinman's own help text describe a parser it had diverged from; carried into naming, a stale page costs a worse suggestion, where taken as the basis for an assertion it would write a claim about a program nobody ran. The network objection was Captain's error and the user caught it: network is denied to the target, never to Tinman, which already calls a provider from outside the sandbox.
 
