@@ -5,7 +5,7 @@
 
 use crate::process::PreparedProcess;
 use crate::screen::VirtualScreen;
-use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, ExitStatus, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -165,6 +165,19 @@ impl InteractiveCapture {
             .try_wait()
             .expect("read the launched program's status")
             .is_some()
+    }
+
+    /// The status the program exited with, once `finished` has reported it
+    /// done. A program that could not be launched at all leaves this
+    /// unsuccessful, which is what separates it from one that ran and simply
+    /// drew nothing.
+    ///
+    /// @planks("the operator inspects {string}")
+    pub fn exit_status(&mut self) -> ExitStatus {
+        self.child
+            .try_wait()
+            .expect("read the launched program's status")
+            .expect("the program has already finished")
     }
 
     /// End the running program's input and wait for it to finish, so the screen

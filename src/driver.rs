@@ -14,6 +14,9 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// The reserved JSON-RPC code for a line the driver cannot read as JSON.
+const PARSE_ERROR: i64 = -32700;
+
 /// The reserved JSON-RPC code for a method the driver does not answer.
 const METHOD_NOT_FOUND: i64 = -32601;
 
@@ -26,6 +29,10 @@ const CAPTURE_SCOPES: [&str; 2] = ["visible", "all"];
 /// How long a driven program is given to draw the text an expectation names, so
 /// an expectation resolves the moment the text appears.
 const EXPECT_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long a wait gives the driven program to reach the state it names, so a
+/// barrier that never fires reports failure to arrive within a budget.
+const WAIT_DEADLINE: Duration = Duration::from_secs(5);
 
 /// How many times a capture scrolls a pane, so a pane that never stops showing
 /// new items fails within a budget rather than collecting forever.
@@ -94,26 +101,28 @@ struct Sessions {
 /// @planks("the test runner closes the driver's stdin")
 /// @planks("the driver process exits with a success status")
 /// @planks("the driver leaves no session sandbox directory standing")
-pub fn serve() {
+pub fn serve() -> std::io::Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     let mut sessions = Sessions::default();
     for line in stdin.lock().lines().map_while(Result::ok) {
-        let request: Value = serde_json::from_str(&line)
-            .unwrap_or_else(|e| panic!("the request line is not JSON: {e}\n{line}"));
-        let reply = answer(&request, &mut sessions);
-        writeln!(stdout, "{reply}").expect("the reply reaches the client");
-        stdout.flush().expect("the reply is flushed");
+        let reply = match serde_json::from_str::<Value>(&line) {
+            Ok(request) => answer(&request, &mut sessions),
+            Err(e) => fault(
+                Value::Null,
+                PARSE_ERROR,
+                "the request line is not JSON",
+                &e.to_string(),
+            ),
+        };
+        writeln!(stdout, "{reply}")?;
+        stdout.flush()?;
     }
     for (_, mut session) in sessions.open.drain() {
         session.capture.end_session();
-        std::fs::remove_dir_all(&session.home).unwrap_or_else(|e| {
-            panic!(
-                "the sandbox home {} was not reclaimed: {e}",
-                session.home.display()
-            )
-        });
+        std::fs::remove_dir_all(&session.home)?;
     }
+    Ok(())
 }
 
 /// Answer one request. A method outside the protocol is a fault, so it is
@@ -126,14 +135,12 @@ pub fn serve() {
 /// @planks("the test runner captures the visible {string} items in the {string} as {string}")
 fn answer(request: &Value, sessions: &mut Sessions) -> Value {
     let id = request["id"].clone();
-    let method = request["method"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the request names no method: {request}"))
-        .to_string();
+    let method = request["method"].as_str().unwrap_or_default();
     let params = &request["params"];
-    match method.as_str() {
+    match method {
         "launch" => launch(id, params, sessions),
-        "expect" => expect(id, params, sessions),
+        "expect" => expect_text(id, params, sessions),
+        "wait" => wait(id, params, sessions),
         "capture" => capture(id, params, sessions),
         "screen" => screen(id, params, sessions),
         "tom" => tom(id, params, sessions),
@@ -160,15 +167,42 @@ fn reply(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
-/// The session a call addresses.
-fn addressed<'a>(params: &Value, sessions: &'a mut Sessions) -> &'a mut Session {
-    let name = params["session"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the call addresses no session: {params}"));
-    sessions
-        .open
-        .get_mut(name)
-        .unwrap_or_else(|| panic!("the driver holds no session {name:?}"))
+/// A protocol fault: the framing, the identifier the call carried, the reserved
+/// code the fault falls under, and what the fault concerned. A caller in another
+/// language reads this object where a seam that aborted would leave it a closed
+/// pipe.
+///
+/// @planks("the driver answers with a JSON-RPC error object")
+/// @planks("the driver replies to request {int} with the error code {int}")
+/// @planks("the error data names the missing parameter {string}")
+fn fault(id: Value, code: i64, message: &str, data: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {"code": code, "message": message, "data": data},
+    })
+}
+
+/// The session a call addresses, where the call names one the driver holds.
+///
+/// @planks("the driver replies to request {int} with the error code {int}")
+/// @planks("the error data names the missing parameter {string}")
+fn addressed<'a>(params: &Value, sessions: &'a mut Sessions) -> Option<&'a mut Session> {
+    let name = params["session"].as_str()?;
+    sessions.open.get_mut(name)
+}
+
+/// The fault a call naming no session the driver holds is answered with.
+///
+/// @planks("the driver replies to request {int} with the error code {int}")
+/// @planks("the error data names the missing parameter {string}")
+fn no_session(id: Value) -> Value {
+    fault(
+        id,
+        INVALID_PARAMS,
+        "the call addresses no open session",
+        "session",
+    )
 }
 
 /// Launch the named command in a sandbox of its own and keep it running. The
@@ -182,9 +216,14 @@ fn addressed<'a>(params: &Value, sessions: &'a mut Sessions) -> &'a mut Session 
 /// @planks("the failure names the program it could not start")
 /// @planks("the failure reports the selection did not reach the {string} named {string}")
 fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let command = params["command"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the launch call names no command: {params}"));
+    let Some(command) = params["command"].as_str() else {
+        return fault(
+            id,
+            INVALID_PARAMS,
+            "the launch call names no command",
+            "command",
+        );
+    };
     if let Some(program) = unreachable_program(command) {
         return reply(
             id,
@@ -197,21 +236,47 @@ fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     sessions.launched += 1;
     let name = format!("sess-{}-{}", std::process::id(), sessions.launched);
     let home = std::env::temp_dir().join(format!("tinman-{name}"));
-    std::fs::create_dir_all(&home)
-        .unwrap_or_else(|e| panic!("the sandbox home {} was not created: {e}", home.display()));
-    let prepared = BubblewrapBackend::new()
-        .prepare_with_home(
-            &SandboxSpec::default_for_record(),
-            &CommandSpec {
-                program: "/bin/sh".to_string(),
-                args: vec!["-c".to_string(), format!("{SILENCE_ECHO}; {command}")],
-            },
-            Some(&home),
-            None,
-        )
-        .unwrap_or_else(|e| panic!("the session's process was not prepared: {e}"));
-    let capture = capture_interactive(&prepared)
-        .unwrap_or_else(|e| panic!("the session's process was not launched: {e}"));
+    if let Err(e) = std::fs::create_dir_all(&home) {
+        return reply(
+            id,
+            json!({
+                "ok": false,
+                "failure": format!("the sandbox home {} was not created: {e}", home.display()),
+            }),
+        );
+    }
+    let prepared = match BubblewrapBackend::new().prepare_with_home(
+        &SandboxSpec::default_for_record(),
+        &CommandSpec {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), format!("{SILENCE_ECHO}; {command}")],
+        },
+        Some(&home),
+        None,
+    ) {
+        Ok(prepared) => prepared,
+        Err(e) => {
+            return reply(
+                id,
+                json!({
+                    "ok": false,
+                    "failure": format!("the session's process was not prepared: {e}"),
+                }),
+            );
+        }
+    };
+    let capture = match capture_interactive(&prepared) {
+        Ok(capture) => capture,
+        Err(e) => {
+            return reply(
+                id,
+                json!({
+                    "ok": false,
+                    "failure": format!("the session's process was not launched: {e}"),
+                }),
+            );
+        }
+    };
     await_first_draw(&capture);
     sessions.open.insert(
         name.clone(),
@@ -263,16 +328,17 @@ fn unreachable_program(command: &str) -> Option<&str> {
 /// @planks("the driver replies with a result whose {string} is false")
 /// @planks("the reply carries no error object")
 /// @planks("the driver replies with a failed result")
-fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let text = params["text"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the expectation names no text: {params}"))
-        .to_string();
-    let session = addressed(params, sessions);
+fn expect_text(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
+    let Some(text) = params["text"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the expectation names no text", "text");
+    };
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     let deadline = Instant::now() + EXPECT_DEADLINE;
     loop {
         let screen = session.capture.screen();
-        if screen.contains(&text) {
+        if screen.contains(text) {
             return reply(id, json!({"ok": true}));
         }
         if Instant::now() >= deadline {
@@ -282,6 +348,41 @@ fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
                     "ok": false,
                     "failure": format!("the text {text:?} was not found on screen"),
                     "screen": screen.contents(),
+                }),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Wait until the session's program draws the named text, and report whether it
+/// arrived. A wait is a barrier rather than a claim: it names the state the
+/// session was to reach, so a wait that never arrives reports failure to arrive
+/// rather than a failed expectation.
+///
+/// @planks("the test runner waits for the text {string}")
+/// @planks("the test runner waits for text the program never draws")
+/// @planks("the driver reports the session reached that state")
+/// @planks("the driver reports the session did not reach that state")
+/// @planks("the failure names no failed expectation")
+fn wait(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
+    let Some(text) = params["text"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the wait names no text", "text");
+    };
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
+    let deadline = Instant::now() + WAIT_DEADLINE;
+    loop {
+        if session.capture.screen().contains(text) {
+            return reply(id, json!({"ok": true}));
+        }
+        if Instant::now() >= deadline {
+            return reply(
+                id,
+                json!({
+                    "ok": false,
+                    "failure": format!("the session did not reach the state where the screen shows {text:?}"),
                 }),
             );
         }
@@ -308,14 +409,17 @@ fn expect(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 /// @planks("the error data names the missing parameter {string}")
 /// @planks("the error data names the rejected scope {string}")
 fn capture(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let role = params["role"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the capture call names no role: {params}"))
-        .to_string();
-    let within = params["within"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the capture call names no pane: {params}"))
-        .to_string();
+    let Some(role) = params["role"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the capture call names no role", "role");
+    };
+    let Some(within) = params["within"].as_str() else {
+        return fault(
+            id,
+            INVALID_PARAMS,
+            "the capture call names no pane",
+            "within",
+        );
+    };
     let scope = match params["scope"].as_str() {
         None => {
             return json!({
@@ -339,17 +443,19 @@ fn capture(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
                 },
             });
         }
-        Some(named) => named.to_string(),
+        Some(named) => named,
     };
-    let session = addressed(params, sessions);
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     let mut items = Vec::new();
-    gather(session, &within, &role, &mut items);
+    gather(session, within, role, &mut items);
     if scope == "visible" {
         return reply(id, json!({"ok": true, "items": items}));
     }
     for _ in 0..CAPTURE_SCROLL_LIMIT {
         session.capture.press_key(SCROLL_KEY);
-        if !gather(session, &within, &role, &mut items) {
+        if !gather(session, within, role, &mut items) {
             return reply(id, json!({"ok": true, "items": items}));
         }
     }
@@ -415,18 +521,9 @@ fn pane_items(model: &Model, within: &str, role: &str) -> Vec<String> {
 /// @planks("the driver replies to request {int} with the error code {int}")
 /// @planks("the error data names the missing parameter {string}")
 fn screen(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    if params["session"].as_str().is_none() {
-        return json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": INVALID_PARAMS,
-                "message": "the call addresses no session",
-                "data": "session",
-            },
-        });
-    }
-    let session = addressed(params, sessions);
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     reply(
         id,
         json!({"ok": true, "screen": session.capture.screen().contents()}),
@@ -439,17 +536,22 @@ fn screen(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 ///
 /// @planks("the test runner requests the terminal object model")
 fn tom(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let session = addressed(params, sessions);
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     let mut model = build(&session.capture.screen());
     overlay_selection(&mut model, &session.selected);
     overlay_fill(&mut model.root, &session.filled);
-    reply(
-        id,
-        json!({
-            "ok": true,
-            "tom": serde_json::to_value(model).expect("the model is written as JSON"),
-        }),
-    )
+    match serde_json::to_value(model) {
+        Ok(written) => reply(id, json!({"ok": true, "tom": written})),
+        Err(e) => reply(
+            id,
+            json!({
+                "ok": false,
+                "failure": format!("the model was not written as JSON: {e}"),
+            }),
+        ),
+    }
 }
 
 /// Mark the region an activation moved the selection onto as selected, and
@@ -511,7 +613,9 @@ fn overlay_fill(region: &mut Region, filled: &HashMap<String, String>) {
 /// @planks("the test runner requests the session's sandbox backend")
 /// @planks("the reported backend is {string}")
 fn sandbox(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    addressed(params, sessions);
+    if addressed(params, sessions).is_none() {
+        return no_session(id);
+    }
     reply(id, json!({"ok": true, "backend": SANDBOX_BACKEND}))
 }
 
@@ -543,17 +647,27 @@ fn status_line(screen: &VirtualScreen) -> String {
 /// @planks("the failure reports {int} matches for the {string} named {string}")
 /// @planks("the failure reports the selection did not reach the {string} named {string}")
 fn activate(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let role = params["role"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the activate call names no role: {params}"))
-        .to_string();
-    let name = params["name"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the activate call names no name: {params}"))
-        .to_string();
-    let session = addressed(params, sessions);
+    let Some(role) = params["role"].as_str() else {
+        return fault(
+            id,
+            INVALID_PARAMS,
+            "the activate call names no role",
+            "role",
+        );
+    };
+    let Some(name) = params["name"].as_str() else {
+        return fault(
+            id,
+            INVALID_PARAMS,
+            "the activate call names no name",
+            "name",
+        );
+    };
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     let model = build(&session.capture.screen());
-    match Locator::new(&role, &name).resolve(&model) {
+    match Locator::new(role, name).resolve(&model) {
         Resolution::NoMatch => reply(
             id,
             json!({"ok": false, "failure": format!("no {role} named {name:?} was found")}),
@@ -594,17 +708,17 @@ fn activate(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 ///
 /// @planks("the test runner fills the textbox labelled {string} with {string}")
 fn fill(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let label = params["label"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the fill call names no label: {params}"))
-        .to_string();
-    let value = params["value"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the fill call names no value: {params}"))
-        .to_string();
-    let session = addressed(params, sessions);
-    session.capture.press_key(&value);
-    session.filled.insert(label, value);
+    let Some(label) = params["label"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the fill call names no label", "label");
+    };
+    let Some(value) = params["value"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the fill call names no value", "value");
+    };
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
+    session.capture.press_key(value);
+    session.filled.insert(label.to_string(), value.to_string());
     reply(id, json!({"ok": true}))
 }
 
@@ -615,13 +729,14 @@ fn fill(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 ///
 /// @planks("the test runner presses the key {string}")
 fn press(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let key = params["key"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the press call names no key: {params}"))
-        .to_string();
-    let session = addressed(params, sessions);
+    let Some(key) = params["key"].as_str() else {
+        return fault(id, INVALID_PARAMS, "the press call names no key", "key");
+    };
+    let Some(session) = addressed(params, sessions) else {
+        return no_session(id);
+    };
     let before = status_line(&session.capture.screen());
-    session.capture.press_key(&key);
+    session.capture.press_key(key);
     if key != "Enter" {
         session.capture.press_key("Enter");
     }
@@ -638,19 +753,24 @@ fn press(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
 /// @planks("the test runner closes the session")
 /// @planks("the session's temporary sandbox directories no longer exist")
 fn close(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
-    let name = params["session"]
+    let Some(mut session) = params["session"]
         .as_str()
-        .unwrap_or_else(|| panic!("the close call addresses no session: {params}"));
-    let mut session = sessions
-        .open
-        .remove(name)
-        .unwrap_or_else(|| panic!("the driver holds no session {name:?}"));
+        .and_then(|name| sessions.open.remove(name))
+    else {
+        return no_session(id);
+    };
     session.capture.end_session();
-    std::fs::remove_dir_all(&session.home).unwrap_or_else(|e| {
-        panic!(
-            "the sandbox home {} was not reclaimed: {e}",
-            session.home.display()
-        )
-    });
+    if let Err(e) = std::fs::remove_dir_all(&session.home) {
+        return reply(
+            id,
+            json!({
+                "ok": false,
+                "failure": format!(
+                    "the sandbox home {} was not reclaimed: {e}",
+                    session.home.display()
+                ),
+            }),
+        );
+    }
     reply(id, json!({"ok": true}))
 }

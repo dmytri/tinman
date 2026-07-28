@@ -16,8 +16,22 @@ pub struct BwrapPolicy {
     pub required_flags: Vec<String>,
     pub network_deny_requires_flag: String,
     pub home_setenv: HomeSetenv,
+    pub workspace_mount: WorkspaceMount,
     pub forbid: Forbid,
     pub system_mount_flag: String,
+}
+
+/// How the workspace is mounted: the directory the requirement is scoped to, the
+/// flag naming the real tree the program reads through, and the flag providing
+/// the tmpfs its writes land in. `applies_to` names the subject, because two
+/// workspace modes are legitimate and only the operator's own directory must be
+/// overlaid.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMount {
+    pub applies_to: String,
+    pub source_flag: String,
+    pub mount_flag: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,6 +46,7 @@ pub struct HomeSetenv {
 #[serde(rename_all = "camelCase")]
 pub struct Forbid {
     pub operator_home_as_bind_source: bool,
+    pub operator_working_directory_as_bind_source: bool,
     pub host_path_inheritance: bool,
     pub writable_system_mounts: bool,
 }
@@ -63,6 +78,35 @@ pub struct ConstructionBoundary {
     pub search_paths: Vec<String>,
 }
 
+/// A seam-set reference contract: the sources it names and the references none
+/// of them may carry. `scantlings/panic-free-seams.json` is read into this
+/// shape. The contract carries its own search paths, so the set it guards grows
+/// by a line in the contract rather than by a checker somebody has to remember
+/// to extend.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeamReferenceContract {
+    pub search_paths: Vec<String>,
+    pub forbidden_references: Vec<String>,
+}
+
+/// The wall-clock ceiling one timed seam must be observed to meet.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatencyBudget {
+    pub seam: String,
+    pub ceiling_ms: u64,
+    pub tier: String,
+}
+
+/// The latency budget contract: every timed seam and its ceiling.
+/// `scantlings/latency-budgets.json` is read into this shape.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatencyBudgets {
+    pub budgets: Vec<LatencyBudget>,
+}
+
 fn read_policy<T: for<'de> Deserialize<'de>>(path: &str) -> T {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("policy file {path} unreadable: {e}"));
@@ -78,6 +122,7 @@ pub fn check_bwrap_policy(
     argv: &[String],
     network_denied: bool,
     operator_home: &str,
+    operator_working_directory: &str,
 ) -> Vec<String> {
     let policy: BwrapPolicy = read_policy(policy_path);
     let mut bad = Vec::new();
@@ -109,6 +154,50 @@ pub fn check_bwrap_policy(
     // The operator's real home must never appear as a bind source.
     if policy.forbid.operator_home_as_bind_source && argv.iter().any(|a| a == operator_home) {
         bad.push(format!("operator home {operator_home} used as a bind path"));
+    }
+
+    // The workspace is mounted through the overlay pair: the program reads the
+    // real tree through the source flag, and every write lands in the tmpfs the
+    // mount flag provides, which goes when the sandbox goes. The rule is scoped
+    // by `appliesTo` rather than flat, because two workspace modes are
+    // legitimate and only the directory `appliesTo` names must be overlaid, so
+    // the requirement has a subject only where that directory is mounted at all.
+    // An `appliesTo` the checker cannot resolve fails loudly: a scope nobody
+    // reads is a rule nobody applies.
+    let workspace = match policy.workspace_mount.applies_to.as_str() {
+        "operatorWorkingDirectory" => operator_working_directory,
+        other => panic!(
+            "the isolation policy scopes the workspace mount to {other:?}, which this checker cannot resolve"
+        ),
+    };
+    if argv.iter().any(|a| a == workspace) {
+        let read_through_the_overlay = argv
+            .windows(2)
+            .any(|pair| pair[0] == policy.workspace_mount.source_flag && pair[1] == workspace);
+        if !read_through_the_overlay {
+            bad.push(format!(
+                "workspace {workspace} is mounted without {}",
+                policy.workspace_mount.source_flag
+            ));
+        }
+        if !argv.iter().any(|a| a == &policy.workspace_mount.mount_flag) {
+            bad.push(format!(
+                "workspace mount flag {} missing where {workspace} is the workspace",
+                policy.workspace_mount.mount_flag
+            ));
+        }
+    }
+
+    // The operator's working directory must never be bound: binding it is what
+    // put a probed command's writes into the tree the operator was standing in.
+    if policy.forbid.operator_working_directory_as_bind_source
+        && argv
+            .windows(2)
+            .any(|pair| is_bind_flag(&pair[0]) && pair[1] == operator_working_directory)
+    {
+        bad.push(format!(
+            "operator working directory {operator_working_directory} used as a bind source"
+        ));
     }
 
     // System paths must be mounted read-only, never writable, and the host root
@@ -229,6 +318,7 @@ pub struct ScratchDir {
 impl ScratchDir {
     /// Create a scratch directory whose name no other scenario can collide with.
     pub fn new(label: &str) -> ScratchDir {
+        reclaim_stale_staging_dirs();
         let unique = format!(
             "tinman-{label}-{}-{}",
             std::process::id(),
@@ -410,6 +500,19 @@ pub fn fixture_ignoring_directional_keys_source() -> &'static str {
     FIXTURE_TUI_NO_ARROWS
 }
 
+/// The fixture terminal program's source with the menu item named `from` drawn
+/// as `to` instead. Real renaming, not a simulated failure: the program draws
+/// the new name everywhere it drew the old one, so a locator naming the old one
+/// finds nothing on a screen that is otherwise the one the plan was captured
+/// against.
+pub fn fixture_terminal_source_renaming(from: &str, to: &str) -> String {
+    assert!(
+        FIXTURE_TUI.contains(from),
+        "the fixture terminal program draws no region named {from:?}, so renaming it would change nothing"
+    );
+    FIXTURE_TUI.replace(from, to)
+}
+
 /// The source of a fixture terminal program drawing two buttons that carry the
 /// same name, on separate rows, so a locator naming that button matches both.
 /// The terminal object model reads one bracketed label per row as a button.
@@ -426,6 +529,52 @@ while read -r _key; do
 done
 "
     )
+}
+
+/// The inner width of the bordered pane the scoped-button fixture draws.
+const SCOPED_PANE_WIDTH: usize = 20;
+
+/// The drawing a fixture terminal program makes when it shows one bracketed
+/// button inside a bordered pane titled `scope` and a second, identically
+/// named, outside that pane. The two buttons are the same by name and differ
+/// only in where they are drawn, which is the one thing a scoped locator has to
+/// tell apart. Real ambiguity, not a simulated one: a locator naming the button
+/// without saying where it is matches both.
+fn scoped_button_drawing(scope: &str, name: &str) -> String {
+    let rule = "\u{2500}".repeat(SCOPED_PANE_WIDTH.saturating_sub(scope.chars().count()));
+    let label = format!("[{name}]");
+    let pad = " ".repeat(SCOPED_PANE_WIDTH.saturating_sub(label.chars().count()));
+    let bottom = "\u{2500}".repeat(SCOPED_PANE_WIDTH);
+    format!(
+        "printf '\\033[2J'\n\
+         printf '\\033[3;1H\u{250c}{scope}{rule}\u{2510}'\n\
+         printf '\\033[4;1H\u{2502}{label}{pad}\u{2502}'\n\
+         printf '\\033[5;1H\u{2514}{bottom}\u{2518}'\n\
+         printf '\\033[8;1H{label}'\n\
+         printf '\\033[24;1HREADY'\n"
+    )
+}
+
+/// The source of that fixture terminal program: it draws the two buttons and
+/// then answers every key by changing its bottom line, which is the answer an
+/// activation waits for before the step ends.
+pub fn fixture_with_scoped_button_source(scope: &str, name: &str) -> String {
+    format!(
+        "#!/bin/sh\n{drawing}while read -r _key; do\n  printf '\\033[24;1H\\033[KActivated'\ndone\n",
+        drawing = scoped_button_drawing(scope, name)
+    )
+}
+
+/// The screen that fixture draws, read by really running its drawing under a
+/// shell and parsing what it wrote. The program itself is what a precondition
+/// about what it shows is read from, so nothing here restates the drawing.
+pub fn scoped_button_screen(scope: &str, name: &str) -> tinman::screen::VirtualScreen {
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(scoped_button_drawing(scope, name))
+        .output()
+        .unwrap_or_else(|e| panic!("the scoped-button fixture drawing did not run: {e}"));
+    terminal_screen_at(&output.stdout, 80)
 }
 
 /// Where the shared fixture programs for this run live, provisioned once.
@@ -921,6 +1070,10 @@ pub struct RunOutcome {
     pub stdout: String,
     pub status: i32,
     pub raw: Vec<u8>,
+    /// What the run wrote to stderr. A run that fails writes its diagnosis
+    /// here, so a step reporting only stdout reports a failure with nothing in
+    /// it.
+    pub stderr: String,
 }
 
 /// Run the real `tinman` binary with the given arguments, in `dir`, with only
@@ -946,11 +1099,20 @@ pub fn run_tinman(
     match stdout_file {
         Some(path) => {
             let file = std::fs::File::create(path)?;
-            let status = command.stdout(std::process::Stdio::from(file)).status()?;
+            // The caller's file stands for the terminal stdout would otherwise
+            // be, so stderr takes a file beside it rather than the runner's own
+            // stderr, where a failing run's diagnosis would be lost.
+            let errors_path = path.with_extension("stderr");
+            let errors = std::fs::File::create(&errors_path)?;
+            let status = command
+                .stdout(std::process::Stdio::from(file))
+                .stderr(std::process::Stdio::from(errors))
+                .status()?;
             Ok(RunOutcome {
                 stdout: std::fs::read_to_string(path)?,
                 status: status.code().unwrap_or(-1),
                 raw: std::fs::read(path)?,
+                stderr: std::fs::read_to_string(&errors_path).unwrap_or_default(),
             })
         }
         None => {
@@ -959,6 +1121,7 @@ pub fn run_tinman(
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                 status: output.status.code().unwrap_or(-1),
                 raw: output.stdout,
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             })
         }
     }
@@ -1151,6 +1314,152 @@ pub fn standing_session_dirs(driver_pid: u32) -> Vec<std::path::PathBuf> {
                 .is_some_and(|name| name.starts_with(&prefix))
         })
         .collect()
+}
+
+/// What a sweep of the system found standing: the staging directories and
+/// sandbox processes it searched, and the ones that outlived the run that made
+/// them.
+#[derive(Debug, Default)]
+pub struct SandboxInventory {
+    /// The sources the sweep read, named as it read them.
+    pub searched: Vec<String>,
+    pub searched_dirs: Vec<String>,
+    pub searched_processes: Vec<String>,
+    pub orphan_dirs: Vec<String>,
+    pub orphan_processes: Vec<String>,
+}
+
+static STAGING_RECLAIMED: std::sync::Once = std::sync::Once::new();
+
+/// Reclaim every Tinman staging directory whose owning run has ended.
+///
+/// This is the suite's primary safety net, so it runs at suite start rather than
+/// only where a driver happens to be started: a crashed or killed run cannot be
+/// trusted to have torn down after itself, and what it left is exactly what no
+/// later teardown will reach. Every scenario that stages anything passes through
+/// here, so the sweep has run before any scenario reads the system.
+pub fn reclaim_stale_staging_dirs() {
+    STAGING_RECLAIMED.call_once(|| {
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(owner) = staging_dir_owner(name) else {
+                continue;
+            };
+            if process_is_live(owner) {
+                continue;
+            }
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    });
+}
+
+/// Whether a process identifier names a live process.
+fn process_is_live(pid: u32) -> bool {
+    std::path::Path::new("/proc").join(pid.to_string()).exists()
+}
+
+/// The process identifier a Tinman temporary directory's name carries. Tinman
+/// names one `tinman-<kind>-<pid>-<nanos>`, so the run that made it is named in
+/// the directory itself rather than in a record a killed run never wrote.
+fn staging_dir_owner(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix("tinman-")?;
+    let (_, tail) = rest.split_once('-')?;
+    let (pid, _) = tail.split_once('-')?;
+    pid.parse().ok()
+}
+
+/// The parent of `pid`, read from the process table. `None` when the process is
+/// gone or its record cannot be read.
+fn parent_of(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command field is parenthesised and may itself hold spaces, so the
+    // fields after it are counted from the closing parenthesis.
+    let after = stat.rsplit_once(") ")?.1;
+    after.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// One sweep of the temporary directory and the process table.
+fn sweep_sandbox_resources() -> SandboxInventory {
+    let mut found = SandboxInventory::default();
+    let temp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp) {
+        found.searched.push(temp.display().to_string());
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(owner) = staging_dir_owner(name) else {
+                continue;
+            };
+            let path = entry.path().display().to_string();
+            found.searched_dirs.push(path.clone());
+            if !process_is_live(owner) {
+                found.orphan_dirs.push(path);
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        found.searched.push("/proc".to_string());
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(pid) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else {
+                continue;
+            };
+            if comm.trim() != "bwrap" {
+                continue;
+            }
+            let record = format!("{} (pid {pid})", comm.trim());
+            found.searched_processes.push(record.clone());
+            // A sandbox whose launcher is gone has been reparented to init, so
+            // the process table itself says the run that made it has ended.
+            if !parent_of(pid).is_some_and(process_is_live) {
+                found.orphan_processes.push(record);
+            }
+        }
+    }
+    found
+}
+
+/// The sandbox resources standing after the suite's own reclaim, read from the
+/// system rather than from a record the suite kept: a resource a killed run
+/// leaked is exactly the one no record mentions.
+///
+/// The suite runs many workers, so a run mid-exit can be caught with its sandbox
+/// briefly reparented and its directory briefly unclaimed. An orphan is
+/// therefore one that survives a second sweep: a leaked resource persists, and a
+/// resource still being torn down is gone or claimed by the time the second
+/// sweep reads it.
+pub fn standing_sandbox_resources() -> SandboxInventory {
+    // The scenario reads the system the suite's reclaim has already swept, so a
+    // focused run of it alone sweeps first rather than reading a system no
+    // scenario in this run had reason to clear.
+    reclaim_stale_staging_dirs();
+    let first = sweep_sandbox_resources();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let second = sweep_sandbox_resources();
+    SandboxInventory {
+        orphan_dirs: second
+            .orphan_dirs
+            .iter()
+            .filter(|path| first.orphan_dirs.contains(path))
+            .cloned()
+            .collect(),
+        orphan_processes: second
+            .orphan_processes
+            .iter()
+            .filter(|record| first.orphan_processes.contains(record))
+            .cloned()
+            .collect(),
+        searched: second.searched,
+        searched_dirs: second.searched_dirs,
+        searched_processes: second.searched_processes,
+    }
 }
 
 /// The inner width of the bordered panes these fixtures draw.
@@ -1417,6 +1726,121 @@ pub fn run_tinman_on_a_terminal_at(
     Ok(session.finish(std::time::Duration::from_secs(30)))
 }
 
+/// Run the real `tinman` binary to completion on a real pseudo-terminal that
+/// already carries `line` on it, so the run meets a terminal an operator has
+/// been working on rather than a blank one. The line is printed by the shell
+/// that then becomes the binary, so it reaches the terminal exactly as the
+/// operator's own earlier work did, on the normal screen and in the scrollback.
+pub fn run_tinman_on_a_terminal_after_printing(
+    dir: &std::path::Path,
+    args: &[&str],
+    env: &[(String, String)],
+    line: &str,
+) -> Result<RunOutcome, String> {
+    let mut shell_line = format!(
+        "printf '%s\\n' {}; exec {}",
+        shell_quote(line),
+        shell_quote(env!("CARGO_BIN_EXE_tinman"))
+    );
+    for arg in args {
+        shell_line.push(' ');
+        shell_line.push_str(&shell_quote(arg));
+    }
+    let mut session = TerminalSession::start_shell_line(dir, &shell_line, env, TERMINAL_COLS)?;
+    session.end_input();
+    Ok(session.finish(std::time::Duration::from_secs(30)))
+}
+
+/// The bytes a run wrote while the terminal stood on the alternate screen, or
+/// `None` where the run never put it there.
+///
+/// A terminal switches screens on the DEC private mode 1049 sequences, so the
+/// span begins at the last switch onto the alternate screen and ends at the
+/// switch back, or at the end of the stream where the run never switched back.
+/// Reading the span rather than the whole stream is what separates what the
+/// program drew for itself from what the operator already had on their
+/// terminal: the two are the same bytes in one stream and two different screens
+/// on the terminal.
+pub fn alternate_screen_span(raw: &[u8]) -> Option<Vec<u8>> {
+    let enter = b"\x1b[?1049h";
+    let leave = b"\x1b[?1049l";
+    let at = raw
+        .windows(enter.len())
+        .rposition(|window| window == enter)?;
+    let body = &raw[at + enter.len()..];
+    let end = body
+        .windows(leave.len())
+        .position(|window| window == leave)
+        .unwrap_or(body.len());
+    Some(body[..end].to_vec())
+}
+
+/// Run the real `tinman` binary to completion on a real pseudo-terminal with
+/// its standard input redirected from `stdin_path`. The program's output is
+/// still a terminal, so this is the shape a shell redirection gives it: a file
+/// handed to a program nobody is standing in front of. The redirection is done
+/// by the shell that runs the binary, which is the same mechanism an operator's
+/// own `tinman < plan.yaml` uses, so no separate plumbing stands in for it.
+pub fn run_tinman_on_a_terminal_with_stdin_from(
+    dir: &std::path::Path,
+    args: &[&str],
+    env: &[(String, String)],
+    stdin_path: &std::path::Path,
+) -> Result<RunOutcome, String> {
+    let mut line = format!("exec {}", shell_quote(env!("CARGO_BIN_EXE_tinman")));
+    for arg in args {
+        line.push(' ');
+        line.push_str(&shell_quote(arg));
+    }
+    line.push_str(" < ");
+    line.push_str(&shell_quote(&stdin_path.display().to_string()));
+    let mut session = TerminalSession::start_shell_line(dir, &line, env, TERMINAL_COLS)?;
+    Ok(session.finish(std::time::Duration::from_secs(30)))
+}
+
+/// How often a terminal session asks whether the program has exited. A run's
+/// measured duration is therefore accurate only to this interval, so a step
+/// timing a run reads its instrument's resolution here rather than assuming the
+/// measurement is exact.
+pub const EXIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// What the shell prints once the program has exited, ahead of the terminal's
+/// own report of the state it was left in.
+pub const TERMINAL_STATE_MARKER: &str = "<<<terminal-state>>>";
+
+/// Start `tinman` on a real terminal under a shell that outlives it and then
+/// asks the terminal itself what state the program left it in. `stty` inherits
+/// that terminal, so its reading is the operator's own terminal answering
+/// rather than the program reporting on itself.
+///
+/// The shell catches the interrupt rather than ignoring it: an ignored
+/// disposition is inherited by the program under test, which would then never
+/// receive the interrupt the scenario delivers.
+pub fn start_interruptible(
+    dir: &std::path::Path,
+    args: &[&str],
+    env: &[(String, String)],
+) -> Result<TerminalSession, String> {
+    let mut line = format!(
+        "trap ':' INT; {}",
+        shell_quote(env!("CARGO_BIN_EXE_tinman"))
+    );
+    for arg in args {
+        line.push(' ');
+        line.push_str(&shell_quote(arg));
+    }
+    line.push_str(&format!(
+        "; printf '\\n{TERMINAL_STATE_MARKER}\\n'; stty -a"
+    ));
+    TerminalSession::start_shell_line(dir, &line, env, TERMINAL_COLS)
+}
+
+/// `word` as a single shell word, so a path carrying a space or a quote reaches
+/// the shell as one argument.
+fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
 /// A live `tinman` run on a real pseudo-terminal, kept open so a scenario can
 /// type at its prompt and end its input exactly as an operator does. Everything
 /// the program writes is drained on a reader thread into a shared buffer, so
@@ -1461,7 +1885,35 @@ impl TerminalSession {
         env: &[(String, String)],
         columns: u16,
     ) -> Result<TerminalSession, String> {
-        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        let mut command = portable_pty::CommandBuilder::new(env!("CARGO_BIN_EXE_tinman"));
+        for arg in args {
+            command.arg(arg);
+        }
+        Self::spawn_on_pty(command, dir, env, columns)
+    }
+
+    /// Start `line` under `sh` on a real terminal in `dir`, so a scenario whose
+    /// subject is the shape of the invocation, such as a redirected stream, gets
+    /// that shape from the shell that really makes it.
+    pub fn start_shell_line(
+        dir: &std::path::Path,
+        line: &str,
+        env: &[(String, String)],
+        columns: u16,
+    ) -> Result<TerminalSession, String> {
+        let mut command = portable_pty::CommandBuilder::new("sh");
+        command.arg("-c");
+        command.arg(line);
+        Self::spawn_on_pty(command, dir, env, columns)
+    }
+
+    fn spawn_on_pty(
+        mut command: portable_pty::CommandBuilder,
+        dir: &std::path::Path,
+        env: &[(String, String)],
+        columns: u16,
+    ) -> Result<TerminalSession, String> {
+        use portable_pty::{PtySize, native_pty_system};
         use std::io::Read;
 
         let pair = native_pty_system()
@@ -1473,10 +1925,6 @@ impl TerminalSession {
             })
             .map_err(|e| e.to_string())?;
 
-        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_tinman"));
-        for arg in args {
-            command.arg(arg);
-        }
         command.cwd(dir);
         for (key, value) in std::env::vars() {
             if !key.starts_with("TINMAN_") {
@@ -1559,6 +2007,45 @@ impl TerminalSession {
         }
     }
 
+    /// Wait until `text` appears in what the terminal has produced, bounded by
+    /// `budget`, failing with everything observed so far.
+    pub fn await_output(&self, text: &str, budget: std::time::Duration) {
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            let seen = self.output();
+            if seen.contains(text) {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("the terminal never produced {text:?}; it produced:\n{seen}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Interrupt the session the way a terminal driver does when the operator
+    /// presses Ctrl-C: SIGINT to the terminal's foreground process group.
+    ///
+    /// A program holding the terminal in raw mode has turned off the driver's
+    /// own signal generation, so typing the interrupt character would arrive as
+    /// an ordinary byte and interrupt nothing. The signal goes through the
+    /// system's own `kill`, which needs no signalling dependency to reach.
+    pub fn interrupt(&self) {
+        let group = self
+            ._master
+            .process_group_leader()
+            .expect("the terminal reports a foreground process group");
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("kill -INT -{group}"))
+            .status()
+            .expect("the interrupt is delivered to the session");
+        assert!(
+            status.success(),
+            "interrupting the session's process group {group} failed"
+        );
+    }
+
     /// Type `text` at the prompt and press Enter, as an operator does.
     ///
     /// A write that fails because the program has already exited is left to the
@@ -1633,7 +2120,7 @@ impl TerminalSession {
                     self.output()
                 );
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(EXIT_POLL_INTERVAL);
         }
     }
 
@@ -1650,6 +2137,9 @@ impl TerminalSession {
             stdout: self.output(),
             status,
             raw: self.raw_output(),
+            // A program on a real terminal writes its errors to that same
+            // terminal, so the output above already carries them.
+            stderr: String::new(),
         }
     }
 }
@@ -1669,6 +2159,15 @@ pub fn terminal_screen_at(raw: &[u8], columns: u16) -> tinman::screen::VirtualSc
     tinman::screen::VirtualScreen::from_pty_output_at(raw, columns)
 }
 
+/// The whole of what a run drew, rather than the last screenful of it.
+///
+/// An assertion that something is absent has to read everything the program
+/// drew: read on one screenful, it passes the moment the offending line scrolls
+/// out of view, so its result turns on timing rather than on the program.
+pub fn whole_terminal_screen(raw: &[u8], columns: u16) -> tinman::screen::VirtualScreen {
+    tinman::screen::VirtualScreen::from_pty_stream(raw, columns)
+}
+
 /// What the terminal received, parsed by the same emulator the virtual screen
 /// is built by, kept whole so the cell attributes and the cursor position the
 /// virtual screen does not carry can be read off it. Reports the term and the
@@ -1680,9 +2179,36 @@ pub fn terminal_screen_at(raw: &[u8], columns: u16) -> tinman::screen::VirtualSc
 /// amounts, so a read on a grid of its own reports cells at rows the model
 /// never places a region at, and the join with a region rectangle is false
 /// however the program drew.
+/// The height the cell grid is read on. A live session is read on the screenful
+/// the operator is looking at; a finished run is read whole, because a program
+/// that has exited has finished speaking and nothing it drew has scrolled out of
+/// reach. The suite opens its terminal taller than the screenful reader's own
+/// grid, so a run that drew more than that reader holds loses its opening lines
+/// unless it is read whole.
+fn grid_rows(raw: &[u8], columns: u16, whole: bool) -> usize {
+    if whole {
+        tinman::screen::VirtualScreen::from_pty_stream(raw, columns)
+            .rows()
+            .len()
+    } else {
+        terminal_screen_at(raw, columns).rows().len()
+    }
+}
+
 fn emulated_terminal(
     raw: &[u8],
     columns: u16,
+) -> (
+    alacritty_terminal::term::Term<alacritty_terminal::event::VoidListener>,
+    usize,
+) {
+    emulated_terminal_at(raw, columns, false)
+}
+
+fn emulated_terminal_at(
+    raw: &[u8],
+    columns: u16,
+    whole: bool,
 ) -> (
     alacritty_terminal::term::Term<alacritty_terminal::event::VoidListener>,
     usize,
@@ -1711,7 +2237,7 @@ fn emulated_terminal(
         }
     }
 
-    let rows = terminal_screen_at(raw, columns).rows().len();
+    let rows = grid_rows(raw, columns, whole);
     let size = Size {
         columns: columns as usize,
         rows,
@@ -1751,12 +2277,23 @@ pub fn cursor_cell(raw: &[u8], columns: u16) -> (u16, u16) {
 /// attributes tell them apart. The run's first cell carries the colour of the
 /// text: a piece of text drawn in one style is drawn in it whole.
 pub fn text_foreground(raw: &[u8], columns: u16, text: &str) -> Option<String> {
+    text_foreground_from(raw, columns, text, 1)
+}
+
+/// As `text_foreground`, reading the first run reading `text` on or below the
+/// 1-based row `from_row`.
+///
+/// A screen can show the same words in two passages, such as a help text's own
+/// example line and an answer quoting it back. A comparison between two texts of
+/// one passage reads each from that passage rather than from whichever the top
+/// of the screen happens to carry.
+pub fn text_foreground_from(raw: &[u8], columns: u16, text: &str, from_row: u16) -> Option<String> {
     use alacritty_terminal::index::{Column, Line};
 
     let (term, rows) = emulated_terminal(raw, columns);
     let grid = term.grid();
     let wanted: Vec<String> = text.chars().map(|c| c.to_string()).collect();
-    for row in 0..rows {
+    for row in (from_row.saturating_sub(1) as usize)..rows {
         let cells: Vec<String> = (0..columns as usize)
             .map(|col| grid[Line(row as i32)][Column(col)].c.to_string())
             .collect();
@@ -1779,10 +2316,15 @@ pub fn text_foreground(raw: &[u8], columns: u16, text: &str) -> Option<String> {
 /// drawn in colour and a box drawn plain hold the same characters, and only the
 /// cell attributes tell them apart.
 pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
+    coloured_cells_at(raw, columns, false)
+}
+
+/// As `coloured_cells`, read on the screenful or on the whole run.
+pub fn coloured_cells_at(raw: &[u8], columns: u16, whole: bool) -> Vec<(u16, u16)> {
     use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::vte::ansi::{Color, NamedColor};
 
-    let (term, rows) = emulated_terminal(raw, columns);
+    let (term, rows) = emulated_terminal_at(raw, columns, whole);
     let grid = term.grid();
     let mut found = Vec::new();
     for row in 0..rows {
@@ -1794,6 +2336,99 @@ pub fn coloured_cells(raw: &[u8], columns: u16) -> Vec<(u16, u16)> {
         }
     }
     found
+}
+
+/// The 1-based row and column of the first run of cells reading `text`, with the
+/// run's length, or `None` when no row of the screen shows `text`.
+///
+/// A presentation assertion names the text it is about rather than a coordinate,
+/// so the cells that text was drawn on are located here and their attributes read
+/// from the same emulator the virtual screen is parsed by.
+pub fn text_cells(raw: &[u8], columns: u16, text: &str, whole: bool) -> Option<(u16, u16, u16)> {
+    use alacritty_terminal::index::{Column, Line};
+
+    let wanted: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+    if wanted.is_empty() || wanted.len() > columns as usize {
+        return None;
+    }
+    let (term, rows) = emulated_terminal_at(raw, columns, whole);
+    let grid = term.grid();
+    for row in 0..rows {
+        let cells: Vec<String> = (0..columns as usize)
+            .map(|col| grid[Line(row as i32)][Column(col)].c.to_string())
+            .collect();
+        if let Some(at) = cells
+            .windows(wanted.len())
+            .position(|window| window == wanted.as_slice())
+        {
+            let width = u16::try_from(wanted.len()).expect("the text fits a terminal row");
+            return Some((row as u16 + 1, at as u16 + 1, width));
+        }
+    }
+    None
+}
+
+/// The 1-based row and column of every cell a program drew on a background other
+/// than the terminal's default.
+///
+/// Background is an attribute the virtual screen does not carry, so a block drawn
+/// behind the words and a run of plain text hold the same characters, and only the
+/// cell attributes tell them apart.
+pub fn background_cells(raw: &[u8], columns: u16, whole: bool) -> Vec<(u16, u16)> {
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::vte::ansi::{Color, NamedColor};
+
+    let (term, rows) = emulated_terminal_at(raw, columns, whole);
+    let grid = term.grid();
+    let mut found = Vec::new();
+    for row in 0..rows {
+        for col in 0..columns as usize {
+            let cell = &grid[Line(row as i32)][Column(col)];
+            if cell.bg != Color::Named(NamedColor::Background) {
+                found.push((row as u16 + 1, col as u16 + 1));
+            }
+        }
+    }
+    found
+}
+
+/// The contiguous run of cells drawn on a background other than the terminal's
+/// default that covers the 1-based cell at `row`, `col`, as a 1-based start
+/// column and a width. `None` when that cell carries the default background.
+///
+/// A block is read as the run it occupies rather than as the words inside it,
+/// because the whole point of drawing one is that it extends past them.
+pub fn background_run(
+    raw: &[u8],
+    columns: u16,
+    row: u16,
+    col: u16,
+    whole: bool,
+) -> Option<(u16, u16)> {
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::vte::ansi::{Color, NamedColor};
+
+    let (term, rows) = emulated_terminal_at(raw, columns, whole);
+    if row == 0 || row as usize > rows || col == 0 || col > columns {
+        return None;
+    }
+    let grid = term.grid();
+    let line = Line(row as i32 - 1);
+    let painted = |column: u16| {
+        grid[line][Column(column as usize - 1)].bg != Color::Named(NamedColor::Background)
+    };
+    if !painted(col) {
+        return None;
+    }
+    let mut start = col;
+    while start > 1 && painted(start - 1) {
+        start -= 1;
+    }
+    let mut end = col;
+    while end < columns && painted(end + 1) {
+        end += 1;
+    }
+    Some((start, end - start + 1))
 }
 
 impl Drop for TerminalSession {
@@ -1881,6 +2516,350 @@ pub fn named_command_lines(asset: &str) -> Vec<String> {
         }
     }
     lines
+}
+
+/// The body lines of a roff page's named section: everything between its `.SH`
+/// heading and the next one, with the roff macro lines dropped and the escapes
+/// roff spells with a backslash read back as the characters they stand for.
+pub fn roff_section(page: &str, name: &str) -> Vec<String> {
+    let mut body = Vec::new();
+    let mut inside = false;
+    for line in page.lines() {
+        if let Some(heading) = line.strip_prefix(".SH") {
+            inside = heading.trim().trim_matches('"') == name;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if line.starts_with('.') {
+            continue;
+        }
+        let text = line.replace("\\-", "-").replace("\\&", "");
+        if !text.trim().is_empty() {
+            body.push(text.trim().to_string());
+        }
+    }
+    body
+}
+
+/// The subcommand pages a roff page cross-references: every `name(1)` reference
+/// it prints, in the order it prints them, without the section suffix.
+pub fn man_cross_references(page: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in page.lines() {
+        let text = line.replace("\\-", "-");
+        for token in text.split_whitespace() {
+            let Some(name) = token.strip_suffix("(1)") else {
+                continue;
+            };
+            let name = name.trim_matches(|c: char| !c.is_ascii_graphic());
+            if let Some(subcommand) = name.strip_prefix("tinman-")
+                && !subcommand.is_empty()
+                && !found.iter().any(|seen| seen == subcommand)
+            {
+                found.push(subcommand.to_string());
+            }
+        }
+    }
+    found
+}
+
+/// The one-line description a help asset carries: the first non-empty line after
+/// the line the tagline placeholder reserves. The name and the tagline come
+/// first, and the line beneath them is the program said in one sentence.
+pub fn asset_one_line_description(asset: &str, placeholder: &str) -> String {
+    let mut past_tagline = false;
+    for line in asset.lines() {
+        if line.contains(placeholder) {
+            past_tagline = true;
+            continue;
+        }
+        if past_tagline && !line.trim().is_empty() {
+            return line.trim().to_string();
+        }
+    }
+    String::new()
+}
+
+/// The closing paragraph of a help asset: the last run of non-empty unindented
+/// lines, joined into one paragraph.
+pub fn asset_closing_paragraph(asset: &str) -> String {
+    let mut paragraphs: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for line in asset.lines() {
+        if line.trim().is_empty() || line.starts_with(' ') {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(line.trim().to_string());
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+    paragraphs
+        .last()
+        .map(|lines| lines.join(" "))
+        .unwrap_or_default()
+}
+
+/// The Tinman command lines a help asset's `Examples:` block carries: every
+/// indented line beneath the heading that opens with `tinman`, in the order the
+/// asset lists them. The block runs from the heading to the first non-blank line
+/// that is not indented, so the blank lines separating entries stay inside it and
+/// the closing prose paragraph ends it.
+pub fn examples_block_command_lines(asset: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_block = false;
+    for line in asset.lines() {
+        if line.trim_end() == "Examples:" {
+            in_block = true;
+            continue;
+        }
+        if !in_block {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        let entry = line.trim();
+        if entry == "tinman" || entry.starts_with("tinman ") {
+            lines.push(entry.to_string());
+        }
+    }
+    lines
+}
+
+/// The lines of a help asset's `Commands:` block: the heading and every
+/// indented entry beneath it, trimmed of trailing space. The block runs from the
+/// heading to the first line that is not one of its indented entries.
+pub fn commands_block(asset: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for line in asset.lines() {
+        if line.trim_end() == "Commands:" {
+            lines.push(line.trim_end().to_string());
+            continue;
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        lines.push(line.trim_end().to_string());
+    }
+    lines
+}
+
+/// The lines of a help asset's `Examples:` block: the heading and every
+/// indented line beneath it, trimmed of trailing space. The block runs from the
+/// heading to the first non-blank line that is not indented, so the blank lines
+/// separating entries stay inside it and the `Example values:` heading ends it.
+pub fn examples_block(asset: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_block = false;
+    for line in asset.lines() {
+        if line.trim_end() == "Examples:" {
+            in_block = true;
+            lines.push(line.trim_end().to_string());
+            continue;
+        }
+        if !in_block {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        lines.push(line.trim_end().to_string());
+    }
+    lines
+}
+
+/// The placeholder names a help asset's `Examples:` block carries, in the order
+/// the block writes them. Each is read from the tldr-pages `{{name}}` notation
+/// and reported without its delimiters.
+pub fn examples_block_placeholders(asset: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in examples_block(asset) {
+        let mut rest = line.as_str();
+        while let Some(open) = rest.find("{{") {
+            let after = &rest[open + 2..];
+            let Some(close) = after.find("}}") else {
+                break;
+            };
+            names.push(after[..close].to_string());
+            rest = &after[close + 2..];
+        }
+    }
+    names
+}
+
+/// The example values a help asset's `Example values:` block offers: each
+/// indented `name: value` entry beneath the heading, in the order the asset
+/// lists them. The block runs from the heading to the first non-blank line that
+/// is not indented, so the closing prose paragraph ends it.
+pub fn example_values(asset: &str) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    let mut in_block = false;
+    for line in asset.lines() {
+        if line.trim_end() == "Example values:" {
+            in_block = true;
+            continue;
+        }
+        if !in_block {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            break;
+        }
+        let Some((name, value)) = line.trim().split_once(':') else {
+            continue;
+        };
+        values.push((name.trim().to_string(), value.trim().to_string()));
+    }
+    values
+}
+
+/// The bodies of a document's fenced code blocks whose info string is
+/// `language`, in the order the document carries them. A fence opening with a
+/// different info string is skipped whole, so its closing fence is never read
+/// as an opening one.
+pub fn fenced_blocks(asset: &str, language: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut inside = false;
+    let mut collecting = false;
+    let mut body: Vec<&str> = Vec::new();
+    for line in asset.lines() {
+        if let Some(info) = line.trim_start().strip_prefix("```") {
+            if inside {
+                if collecting {
+                    blocks.push(body.join("\n"));
+                    body.clear();
+                    collecting = false;
+                }
+                inside = false;
+            } else {
+                inside = true;
+                collecting = info.trim() == language;
+            }
+            continue;
+        }
+        if collecting {
+            body.push(line);
+        }
+    }
+    blocks
+}
+
+/// The roles a document names: the inline code spans of the sentence declaring
+/// the full set, and the value every `role` key takes in its examples. A
+/// document teaches roles both ways, and a reader of one alone reports a clean
+/// bill for the half it never read.
+pub fn named_roles(asset: &str) -> Vec<String> {
+    let mut roles: Vec<String> = Vec::new();
+    let mut awaiting_set = false;
+    for line in asset.lines() {
+        if line.contains("The full set:") {
+            awaiting_set = true;
+            continue;
+        }
+        if awaiting_set {
+            if line.trim().is_empty() {
+                continue;
+            }
+            for (index, span) in line.split('`').enumerate() {
+                if index % 2 == 1 {
+                    add_role(&mut roles, span);
+                }
+            }
+            awaiting_set = false;
+            continue;
+        }
+        for value in role_values(line) {
+            add_role(&mut roles, &value);
+        }
+    }
+    roles
+}
+
+/// Add `candidate` to `roles` as a bare role name, once.
+fn add_role(roles: &mut Vec<String>, candidate: &str) {
+    let role = candidate
+        .trim()
+        .trim_matches(|c: char| c == '"' || c == ',' || c == '.');
+    if !role.is_empty() && !roles.iter().any(|carried| carried == role) {
+        roles.push(role.to_string());
+    }
+}
+
+/// Every value a `role` key takes on one line, in either the JSON or the YAML
+/// spelling the examples use. A `role` the prose merely mentions carries no
+/// colon after it and is passed over.
+fn role_values(line: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = line;
+    while let Some(at) = rest.find("role") {
+        rest = &rest[at + "role".len()..];
+        let after = rest.trim_start().trim_start_matches('"').trim_start();
+        if let Some(value) = after.strip_prefix(':') {
+            let value = value.trim_start().trim_start_matches('"');
+            let end = value
+                .find(|c: char| c == ',' || c == '}' || c == '"' || c.is_whitespace())
+                .unwrap_or(value.len());
+            if end > 0 {
+                found.push(value[..end].to_string());
+            }
+        }
+    }
+    found
+}
+
+/// The role names a schema declares: the `enum` of every `role` property it
+/// carries, wherever that property sits in the document.
+pub fn declared_roles(schema_path: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(schema_path)
+        .unwrap_or_else(|e| panic!("schema file {schema_path} unreadable: {e}"));
+    let schema: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("schema file {schema_path} did not parse: {e}"));
+    let mut roles = Vec::new();
+    collect_role_enum(&schema, false, &mut roles);
+    roles
+}
+
+fn collect_role_enum(node: &serde_json::Value, under_role: bool, roles: &mut Vec<String>) {
+    match node {
+        serde_json::Value::Object(map) => {
+            if under_role && let Some(serde_json::Value::Array(values)) = map.get("enum") {
+                for value in values {
+                    if let Some(name) = value.as_str()
+                        && !roles.iter().any(|carried| carried == name)
+                    {
+                        roles.push(name.to_string());
+                    }
+                }
+            }
+            for (key, value) in map {
+                collect_role_enum(value, key == "role", roles);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_role_enum(item, under_role, roles);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The index of the line the tagline occupies in the help asset, found by the
@@ -1988,6 +2967,199 @@ pub fn nondialect_scantlings() -> Vec<(String, serde_json::Value)> {
     scantling_documents()
         .into_iter()
         .filter(|(_, document)| document.get("$schema").is_none())
+        .collect()
+}
+
+/// The property names the style object in the scantling at `path` requires.
+/// The model defines its style once under `$defs` and the assistant contract
+/// restates it inside the region it constrains, so the reader finds the object
+/// by the key it hangs from rather than by a path one of the two files happens
+/// to use. A region pointing at a shared definition carries a `$ref` and no
+/// `required` of its own, so it contributes nothing and the definition it
+/// points at contributes once.
+pub fn required_style_properties(path: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("scantling {path} unreadable: {e}"));
+    let document: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("scantling {path} did not parse: {e}"));
+    let mut found = std::collections::BTreeSet::new();
+    collect_required_style(&document, &mut found);
+    found.into_iter().collect()
+}
+
+/// Walk `value`, collecting the `required` entries of every object hanging from
+/// a key named `style`.
+fn collect_required_style(
+    value: &serde_json::Value,
+    found: &mut std::collections::BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if key == "style" {
+                    let required = child.get("required").and_then(|r| r.as_array());
+                    for name in required.into_iter().flatten() {
+                        if let Some(name) = name.as_str() {
+                            found.insert(name.to_string());
+                        }
+                    }
+                }
+                collect_required_style(child, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_required_style(item, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A property a JSON Schema declares, named by the schema pointer of the node
+/// that declares it and the property's own name. The pointer is what keeps two
+/// declarations of the same name apart: an expectation's `within` and a
+/// locator's `within` are different declarations, and a check that compared
+/// names alone would let a production type that carries one stand in for the
+/// other.
+pub type DeclaredProperty = (String, String);
+
+/// Resolve a local `$ref` against `document`, answering the node it points at
+/// and the pointer of that node. A node carrying no `$ref` is its own answer.
+fn resolve_ref<'a>(
+    document: &'a serde_json::Value,
+    node: &'a serde_json::Value,
+    pointer: &str,
+) -> (&'a serde_json::Value, String) {
+    let Some(target) = node.get("$ref").and_then(|r| r.as_str()) else {
+        return (node, pointer.to_string());
+    };
+    let path = target
+        .strip_prefix("#")
+        .unwrap_or_else(|| panic!("only local references are resolved, not {target:?}"));
+    let resolved = document
+        .pointer(path)
+        .unwrap_or_else(|| panic!("the schema carries no node at {path:?}"));
+    (resolved, path.to_string())
+}
+
+/// Every property the JSON Schema at `path` declares, each named by the pointer
+/// of the node declaring it.
+pub fn declared_properties(path: &str) -> Vec<DeclaredProperty> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("scantling {path} unreadable: {e}"));
+    let document: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("scantling {path} did not parse: {e}"));
+    let mut found = std::collections::BTreeSet::new();
+    collect_declared(&document, "", &mut found);
+    found.into_iter().collect()
+}
+
+/// Walk `node`, recording every property each schema node declares.
+fn collect_declared(
+    node: &serde_json::Value,
+    pointer: &str,
+    found: &mut std::collections::BTreeSet<DeclaredProperty>,
+) {
+    match node {
+        serde_json::Value::Object(map) => {
+            if let Some(properties) = map.get("properties").and_then(|p| p.as_object()) {
+                for name in properties.keys() {
+                    found.insert((pointer.to_string(), name.clone()));
+                }
+            }
+            for (key, child) in map {
+                collect_declared(child, &format!("{pointer}/{key}"), found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_declared(item, &format!("{pointer}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every property `instance` really carries, named by the pointer of the schema
+/// node that governs it, so a property the instance carries is credited to the
+/// declaration it satisfies rather than to its bare name.
+pub fn carried_properties(
+    schema_path: &str,
+    instance: &serde_json::Value,
+) -> std::collections::BTreeSet<DeclaredProperty> {
+    let text = std::fs::read_to_string(schema_path)
+        .unwrap_or_else(|e| panic!("scantling {schema_path} unreadable: {e}"));
+    let document: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("scantling {schema_path} did not parse: {e}"));
+    let mut found = std::collections::BTreeSet::new();
+    collect_carried(&document, &document, "", instance, &mut found);
+    found
+}
+
+/// Walk a schema node and an instance node together, recording every declared
+/// property the instance carries. A choice of forms is followed into whichever
+/// branch the instance satisfies, so a bare-string form and a full-object form
+/// each credit the declarations they really govern.
+fn collect_carried(
+    document: &serde_json::Value,
+    node: &serde_json::Value,
+    pointer: &str,
+    instance: &serde_json::Value,
+    found: &mut std::collections::BTreeSet<DeclaredProperty>,
+) {
+    let (node, pointer) = resolve_ref(document, node, pointer);
+    let Some(map) = node.as_object() else { return };
+    if let Some(branches) = map.get("oneOf").and_then(|b| b.as_array()) {
+        for (index, branch) in branches.iter().enumerate() {
+            let branch_pointer = format!("{pointer}/oneOf/{index}");
+            if schema_counterexamples_for(document, branch, instance).is_empty() {
+                collect_carried(document, branch, &branch_pointer, instance, found);
+            }
+        }
+    }
+    if let Some(properties) = map.get("properties").and_then(|p| p.as_object())
+        && let Some(carried) = instance.as_object()
+    {
+        for (name, child) in properties {
+            if let Some(value) = carried.get(name) {
+                found.insert((pointer.clone(), name.clone()));
+                collect_carried(
+                    document,
+                    child,
+                    &format!("{pointer}/properties/{name}"),
+                    value,
+                    found,
+                );
+            }
+        }
+    }
+    if let Some(items) = map.get("items")
+        && let Some(elements) = instance.as_array()
+    {
+        for element in elements {
+            collect_carried(document, items, &format!("{pointer}/items"), element, found);
+        }
+    }
+}
+
+/// Whether `instance` satisfies `branch`, read through the whole document so a
+/// branch that references a definition still resolves it.
+fn schema_counterexamples_for(
+    document: &serde_json::Value,
+    branch: &serde_json::Value,
+    instance: &serde_json::Value,
+) -> Vec<String> {
+    let mut schema = branch.clone();
+    if let (Some(map), Some(defs)) = (schema.as_object_mut(), document.get("$defs")) {
+        map.entry("$defs").or_insert_with(|| defs.clone());
+    }
+    let Ok(validator) = jsonschema::validator_for(&schema) else {
+        return vec!["the branch is not a valid schema".to_string()];
+    };
+    validator
+        .iter_errors(instance)
+        .map(|e| e.to_string())
         .collect()
 }
 
@@ -2196,6 +3368,54 @@ pub fn check_construction_boundary(contract_path: &str) -> Vec<String> {
     bad
 }
 
+/// Check every seam the contract names against the references it forbids.
+/// Returns counterexamples; an empty list means no named seam carries a
+/// construct that aborts the process.
+///
+/// A construct named in a comment aborts nothing, so comment lines are read
+/// past. A search path that cannot be read is itself a counterexample, and so
+/// is a contract naming no path at all: a scan that reached nothing would
+/// otherwise report a clean bill for a set it never opened.
+pub fn check_seam_references(contract_path: &str) -> Vec<String> {
+    let contract: SeamReferenceContract = read_policy(contract_path);
+    let mut bad = Vec::new();
+    if contract.search_paths.is_empty() {
+        bad.push(format!(
+            "{contract_path} names no search path, so the scan asserted nothing"
+        ));
+    }
+    for path in &contract.search_paths {
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(e) => {
+                bad.push(format!("seam source {path} unreadable: {e}"));
+                continue;
+            }
+        };
+        for (index, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for reference in &contract.forbidden_references {
+                if line.contains(reference) {
+                    bad.push(format!(
+                        "{path}:{} carries the forbidden construct {reference}",
+                        index + 1
+                    ));
+                }
+            }
+        }
+    }
+    bad
+}
+
+/// The timed seams and their ceilings, as the latency budget contract declares
+/// them.
+pub fn latency_budgets(contract_path: &str) -> Vec<LatencyBudget> {
+    let contract: LatencyBudgets = read_policy(contract_path);
+    contract.budgets
+}
+
 /// One match an `ast-grep` scan reports, in the shape the derived
 /// `plank-inventory` and `step-usage` commands emit.
 #[derive(Debug, Deserialize)]
@@ -2392,6 +3612,23 @@ pub struct StepPattern {
     pub matcher: Matcher,
 }
 
+/// The custom cucumber parameters this suite declares, as the runner's own
+/// macros register them. The runner expands a pattern against the parameters in
+/// scope, so a checker expanding against the built-in set alone would reject a
+/// pattern the runner accepts. Each type deriving `cucumber::Parameter` is
+/// registered here from its own `NAME` and `REGEX`, so the two never disagree.
+/// A parameter added and left unregistered fails loudly at the expansion above,
+/// naming the pattern, rather than passing quietly.
+fn custom_parameters() -> std::collections::HashMap<String, String> {
+    use cucumber::codegen::Parameter as _;
+    let mut parameters = std::collections::HashMap::new();
+    parameters.insert(
+        crate::StandardAttribute::NAME.to_string(),
+        crate::StandardAttribute::REGEX.to_string(),
+    );
+    parameters
+}
+
 /// Every step definition pattern the verification support declares, read
 /// through the `step-usage` command in RIGGING.md. The pattern is carried
 /// verbatim, so the plank join over it is exact string membership.
@@ -2417,13 +3654,15 @@ pub fn step_definition_patterns() -> Vec<StepPattern> {
             )
         });
         let matcher = if reported.text.contains("expr =") {
+            let parameters = custom_parameters();
             Matcher::Expression(
-                cucumber::codegen::Expression::regex(pattern.as_str()).unwrap_or_else(|e| {
-                    panic!(
-                        "{}:{line} declares the cucumber expression {pattern}, which does not expand: {e}",
-                        reported.file
-                    )
-                }),
+                cucumber::codegen::Expression::regex_with_parameters(pattern.as_str(), &parameters)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "{}:{line} declares the cucumber expression {pattern}, which does not expand: {e}",
+                            reported.file
+                        )
+                    }),
             )
         } else {
             Matcher::Literal(pattern.clone())
@@ -2486,9 +3725,17 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
     let mut found = Vec::new();
     for path in paths {
         let display = path.display().to_string();
+        // The runner's own parser expands a Scenario Outline into one scenario
+        // per example row before matching any step, so a checker reading the
+        // unexpanded outline would see `<placeholder>` where the runner sees a
+        // value, and would report every outline-only step definition as binding
+        // nothing. Expanding here reads what the runner runs.
+        use cucumber::feature::Ext as _;
         let feature =
             cucumber::gherkin::Feature::parse_path(&path, cucumber::gherkin::GherkinEnv::default())
-                .unwrap_or_else(|e| panic!("spec {display} did not parse: {e}"));
+                .unwrap_or_else(|e| panic!("spec {display} did not parse: {e}"))
+                .expand_examples()
+                .unwrap_or_else(|e| panic!("spec {display} did not expand its examples: {e:?}"));
         let feature_background: Vec<String> = feature
             .background
             .iter()
@@ -2825,7 +4072,7 @@ where
 /// the reason it is out of the join's reach. A scantling enumeration named
 /// neither here nor in the join below is unclassified, and reading the pairs
 /// fails rather than passing over it.
-const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 7] = [
+const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 8] = [
     (
         "scantlings/inference-request.schema.json",
         "/properties/messages/items/properties/role",
@@ -2860,6 +4107,11 @@ const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 7] = [
         "scantlings/tom.schema.json",
         "/$defs/colour/oneOf/1",
         "the screen carries a cell colour as a string, so no production enumeration carries the set",
+    ),
+    (
+        "scantlings/tom.schema.json",
+        "/$defs/region/allOf/0/if/properties/role",
+        "the clause selects the subset of roles WAI-ARIA requires a name on rather than declaring a set of its own; the model's role enumeration is joined at /$defs/region/properties/role, and the subset is read from this scantling by the accessible-name sweep",
     ),
 ];
 

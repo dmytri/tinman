@@ -19,6 +19,8 @@ pub mod pty;
 pub mod record;
 pub mod sandbox;
 pub mod screen;
+pub mod setup;
 pub mod skill;
+pub mod terminfo;
 pub mod tom;
 pub mod view;

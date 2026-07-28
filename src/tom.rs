@@ -40,6 +40,7 @@ pub struct Rect {
 /// @planks("the model contains a region with the role {string}")
 /// @planks("the region named {string} has the role {string}")
 /// @planks("that region has {int} child regions with the role {string}")
+/// @planks("the operator inspects a command printing {string} and {string} on their own lines")
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -54,10 +55,14 @@ pub enum Role {
     Status,
     Log,
     Article,
+    Table,
+    Row,
+    Columnheader,
+    Cell,
 }
 
 /// Every role the model defines, so a name maps to its role through one list.
-const ROLES: [Role; 11] = [
+const ROLES: [Role; 15] = [
     Role::Application,
     Role::Region,
     Role::Menu,
@@ -69,12 +74,17 @@ const ROLES: [Role; 11] = [
     Role::Status,
     Role::Log,
     Role::Article,
+    Role::Table,
+    Role::Row,
+    Role::Columnheader,
+    Role::Cell,
 ];
 
 impl Role {
     /// The name this role carries in the model.
     ///
     /// @planks("the region named {string} has the role {string}")
+    /// @planks("the operator inspects a command printing {string} and {string} on their own lines")
     pub fn as_str(&self) -> &'static str {
         match self {
             Role::Application => "application",
@@ -88,6 +98,10 @@ impl Role {
             Role::Status => "status",
             Role::Log => "log",
             Role::Article => "article",
+            Role::Table => "table",
+            Role::Row => "row",
+            Role::Columnheader => "columnheader",
+            Role::Cell => "cell",
         }
     }
 
@@ -181,6 +195,30 @@ impl Region {
             Colour::Name(name) if name != "default" => Some(name),
             _ => None,
         }
+    }
+
+    /// The standard presentations this region is drawn with, named as a reader
+    /// names them rather than as the wire spells them. A terminal says disabled
+    /// with dim, password field with hidden, and done or deleted with strikeout,
+    /// so a reader that cannot report them is back to flat text for exactly the
+    /// distinctions the model exists to carry.
+    ///
+    /// @planks("the operator inspects a command that prints {string} {attribute}")
+    pub fn presentations(&self) -> Vec<&'static str> {
+        let Some(style) = self.style.as_ref() else {
+            return Vec::new();
+        };
+        [
+            (style.dim, "dim"),
+            (style.italic, "italic"),
+            (style.underline, "underlined"),
+            (style.hidden, "hidden"),
+            (style.strikeout, "struck through"),
+            (style.double_underline, "doubly underlined"),
+        ]
+        .into_iter()
+        .filter_map(|(drawn, name)| drawn.then_some(name))
+        .collect()
     }
 
     /// The child region that is the selected one among its siblings.
@@ -304,13 +342,23 @@ impl Model {
     }
 }
 
+/// The name the root region carries where the reading was handed a screen and no
+/// program. WAI-ARIA requires a name on `application`, and a screen read on its
+/// own says only that it is a terminal screen, so that is what the model says. A
+/// reading that knows the program the operator asked about names the root for it
+/// instead.
+///
+/// @planks("the terminal object model is serialized")
+const SCREEN_NAME: &str = "terminal";
+
 /// Read `screen` into a terminal object model: the bordered panes it draws with
 /// the lines they list, the sibling regions a vertical rule splits it into, the
-/// menu bar its top line carries, the buttons and textboxes it draws, and the
-/// status bar its bottom line carries.
+/// tables its sustained columns are, the menu bar its top line carries, the
+/// buttons and textboxes it draws, and the status bar its bottom line carries.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the terminal object model is serialized")
+/// @planks("the operator inspects {string}")
 pub fn build(screen: &VirtualScreen) -> Model {
     let grid = screen.rows();
     let rows = grid.len() as u16;
@@ -322,6 +370,7 @@ pub fn build(screen: &VirtualScreen) -> Model {
         children.push(plain_region(grid, 0, column, rows));
         children.push(plain_region(grid, column + 1, cols - column - 1, rows));
     }
+    children.extend(tables(grid, cols));
     if let Some(menu) = menu_bar(grid, cols, screen) {
         children.push(menu);
     }
@@ -337,7 +386,7 @@ pub fn build(screen: &VirtualScreen) -> Model {
     };
     let mut root = Region {
         role: Role::Application,
-        name: None,
+        name: Some(SCREEN_NAME.to_string()),
         text: None,
         selected: false,
         rect,
@@ -358,14 +407,16 @@ pub fn build(screen: &VirtualScreen) -> Model {
 /// program that has exited has finished speaking, so every line it wrote is read
 /// rather than the last screenful alone.
 ///
-/// The shape of the stream decides how it reads. Blank lines separate the output
-/// into blocks, and a stream of several blocks one of which runs to more than a
-/// line is a log, each block an article. Everything else is a list, one item per
-/// line, so a listing of filenames stays a listing whether or not a blank line
-/// fell between two of them.
+/// The shape of the stream decides how it reads. Output sustaining columns is a
+/// table, cell by cell. Otherwise blank lines separate the output into blocks,
+/// and a stream of several blocks one of which runs to more than a line is a
+/// log, each block an article. Everything else is a list, one item per line, so
+/// a listing of filenames stays a listing whether or not a blank line fell
+/// between two of them.
 ///
 /// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
 /// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command printing {string} and {string} on their own lines")
 /// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
 /// @planks("the operator inspects a command printing {string}, a blank line and {string}")
 /// @planks("the operator inspects a command that prints {string} in red")
@@ -383,6 +434,8 @@ pub fn read_stream(screen: &VirtualScreen) -> Model {
     let blocks = blocks_of(grid);
     let children = if blocks.is_empty() {
         Vec::new()
+    } else if let Some(table) = table_of(grid, cols, &blocks.concat()) {
+        vec![table]
     } else if blocks.len() > 1 && blocks.iter().any(|block| block.len() > 1) {
         vec![stream_log(grid, cols, rect, &blocks)]
     } else {
@@ -496,10 +549,13 @@ fn stream_list(grid: &[Vec<String>], cols: u16, rect: Rect, lines: &[usize]) -> 
 }
 
 /// One entry of a stream: the text it shows is both the text it carries and the
-/// name a locator matches it by.
+/// name a locator matches it by. A cell of a table and the header labelling its
+/// column are read the same way, the field's own text naming it.
 ///
 /// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
 /// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
+/// @planks("the operator inspects a command printing {string} and {string} on their own lines")
+/// @planks("the operator inspects {string}")
 fn stream_region(grid: &[Vec<String>], role: Role, text: String, rect: Rect) -> Region {
     Region {
         role,
@@ -518,6 +574,169 @@ fn stream_region(grid: &[Vec<String>], role: Role, text: String, rect: Rect) -> 
 /// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
 fn stream_line(grid: &[Vec<String>], row: usize) -> String {
     grid[row].concat().trim_end().to_string()
+}
+
+/// The fields the lines `rows` sustain: a column blank on every one of those
+/// lines is a gap, and a run of gap columns with drawn cells on both sides ends
+/// one field and begins the next. A real listing separates its fields with a
+/// single space and varies their widths, so the boundary is the position that
+/// stays blank rather than the width of the gap standing there. Prose breaks
+/// into words wherever it likes, so the blanks of one line fall where the next
+/// line draws, and a paragraph sustains no boundary at all.
+///
+/// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command printing {string} and {string} on their own lines")
+/// @planks("the operator inspects {string}")
+fn columns_of(grid: &[Vec<String>], rows: &[usize]) -> Vec<(usize, usize)> {
+    let width = grid[rows[0]].len();
+    let gap: Vec<bool> = (0..width)
+        .map(|col| rows.iter().all(|&row| grid[row][col].trim().is_empty()))
+        .collect();
+    let mut fields = Vec::new();
+    let mut start = None;
+    let mut col = 0;
+    while col < width {
+        if !gap[col] {
+            start = start.or(Some(col));
+            col += 1;
+            continue;
+        }
+        let end = (col..width).find(|&next| !gap[next]).unwrap_or(width);
+        if let Some(from) = start.take() {
+            fields.push((from, col));
+        }
+        col = end;
+    }
+    if let Some(from) = start {
+        fields.push((from, width));
+    }
+    fields
+}
+
+/// The lines `rows` read as a table, where they sustain columns across every one
+/// of them. A first row that labels the rest is read as the column headers, so a
+/// cell is addressed by the column that names it; where nothing labels them the
+/// table carries no headers at all and a cell is addressed by its position,
+/// which is what WAI-ARIA permits and what the screen shows.
+///
+/// A row of labels is a row carrying no number where the rows under it do,
+/// which is what tells the header of `ps` or `df` from the first line of a bare
+/// `ls -la` listing.
+///
+/// A field every one of the lines draws in is a column; a field some line leaves
+/// blank is a coincidence those lines did not sustain. Prose runs to whatever
+/// length it likes, so the blank the short line trails is blank on the long line
+/// too, and reading that as a boundary would hand back a table whose first row
+/// holds an empty cell.
+///
+/// @planks("the operator inspects a command printing {string}, {string} and {string} on their own lines")
+/// @planks("the operator inspects a command printing {string} and {string} on their own lines")
+/// @planks("the operator inspects {string}")
+fn table_of(grid: &[Vec<String>], cols: u16, rows: &[usize]) -> Option<Region> {
+    if rows.len() < 2 {
+        return None;
+    }
+    let fields = columns_of(grid, rows);
+    if fields.len() < 2 {
+        return None;
+    }
+    let cells_at = |row: usize| -> Vec<String> {
+        fields
+            .iter()
+            .map(|&(from, to)| grid[row][from..to].concat().trim().to_string())
+            .collect()
+    };
+    if rows
+        .iter()
+        .any(|&row| cells_at(row).iter().any(|cell| cell.is_empty()))
+    {
+        return None;
+    }
+    let first = cells_at(rows[0]);
+    let labels = first.iter().all(|cell| cell.parse::<f64>().is_err())
+        && rows[1..]
+            .iter()
+            .any(|&row| cells_at(row).iter().any(|cell| cell.parse::<f64>().is_ok()));
+    let mut children = Vec::new();
+    if labels {
+        children.extend(fields.iter().zip(&first).map(|(&(from, to), label)| {
+            let rect = Rect {
+                x: from as u16,
+                y: rows[0] as u16,
+                width: (to - from) as u16,
+                height: 1,
+            };
+            stream_region(grid, Role::Columnheader, label.clone(), rect)
+        }));
+    }
+    let body = if labels { &rows[1..] } else { rows };
+    children.extend(body.iter().map(|&row| table_row(grid, cols, &fields, row)));
+    let rect = Rect {
+        x: 0,
+        y: rows[0] as u16,
+        width: cols,
+        height: rows.len() as u16,
+    };
+    Some(Region {
+        role: Role::Table,
+        name: None,
+        text: None,
+        selected: false,
+        rect,
+        children,
+        style: None,
+        cells: cells_of(grid, rect),
+    })
+}
+
+/// One row of a table: the line it shows names it, and each field the table
+/// sustains is a cell inside it.
+///
+/// @planks("the {string} cell of the row naming {string} is {string}")
+/// @planks("the second cell of the row naming {string} is {string}")
+fn table_row(grid: &[Vec<String>], cols: u16, fields: &[(usize, usize)], row: usize) -> Region {
+    let children = fields
+        .iter()
+        .map(|&(from, to)| {
+            let rect = Rect {
+                x: from as u16,
+                y: row as u16,
+                width: (to - from) as u16,
+                height: 1,
+            };
+            let text = grid[row][from..to].concat().trim().to_string();
+            stream_region(grid, Role::Cell, text, rect)
+        })
+        .collect();
+    let rect = Rect {
+        x: 0,
+        y: row as u16,
+        width: cols,
+        height: 1,
+    };
+    let line = stream_line(grid, row);
+    Region {
+        role: Role::Row,
+        name: Some(line.clone()),
+        text: Some(line),
+        selected: false,
+        rect,
+        children,
+        style: None,
+        cells: cells_of(grid, rect),
+    }
+}
+
+/// The tables `grid` draws, one per run of lines that sustains columns. A
+/// program still running has drawn its columns onto the screen like anything
+/// else it shows, so the same reading serves a table there.
+///
+/// @planks("the operator inspects {string}")
+fn tables(grid: &[Vec<String>], cols: u16) -> Vec<Region> {
+    blocks_of(grid)
+        .iter()
+        .filter_map(|block| table_of(grid, cols, block))
+        .collect()
 }
 
 /// Read the presentation `region` and everything nested inside it is drawn with.
@@ -1099,24 +1318,33 @@ impl Locator {
     /// an ordinal addresses the region at that position among the ones it
     /// matches, so it binds one region or none.
     ///
+    /// A scope narrows the matches to the regions drawn inside the region it
+    /// names. Containment is read off the rectangles rather than off the tree,
+    /// because a region drawn inside a pane is not always filed under it: the
+    /// model reads controls off the whole screen, so a button drawn inside a
+    /// pane is a sibling of that pane. A scope means the part of the screen the
+    /// named region occupies, which is what an operator saw when they recorded
+    /// it.
+    ///
     /// @planks("the locator for the {string} named {string} is resolved")
     /// @planks("the locator for the {string} named {string} is resolved within the region named {string}")
     /// @planks("the locator addresses the first {string} of the region named {string}")
+    /// @planks("that plan is replayed")
     pub fn resolve(&self, model: &Model) -> Resolution {
-        let root = match &self.scope {
-            Some(scope) => model
+        let scope = self.scope.as_ref().map(|scope| {
+            model
                 .find_named(scope)
-                .unwrap_or_else(|| panic!("the model contains no region named {scope:?}")),
-            None => &model.root,
-        };
+                .unwrap_or_else(|| panic!("the model contains no region named {scope:?}"))
+        });
         let mut found = Vec::new();
-        root.collect(
+        model.root.collect(
             &|region| {
                 region.role() == self.role
                     && self
                         .name
                         .as_ref()
                         .is_none_or(|name| region.name.as_deref() == Some(name.as_str()))
+                    && scope.is_none_or(|scope| drawn_inside(scope.rect, region.rect))
             },
             &mut found,
         );
@@ -1132,6 +1360,19 @@ impl Locator {
             count => Resolution::Ambiguous(count),
         }
     }
+}
+
+/// Whether `inner` is drawn inside `outer`, read off the rectangles the model
+/// reports. A region is inside itself, so a scope stays a candidate for its own
+/// locator exactly as it was when a scope searched its own subtree.
+///
+/// @planks("the locator for the {string} named {string} is resolved within the region named {string}")
+/// @planks("that plan is replayed")
+fn drawn_inside(outer: Rect, inner: Rect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width
+        && inner.y + inner.height <= outer.y + outer.height
 }
 
 /// What resolving a locator against the model found.
@@ -1191,9 +1432,10 @@ pub struct Confirmation {
 /// screen yields. Confirmation runs at capture time only: it resolves the
 /// proposed role and name, narrows an ambiguity to the region containing the
 /// first match, and falls back to the ordinal address of the first region of
-/// that role inside a named region where the proposed name is not on the screen
-/// at all. A proposal that nothing deterministic addresses is refused, so a name
-/// the engine invented never reaches a plan.
+/// that role inside a named region, the screen's own root excluded, where the
+/// proposed name is not on the screen at all. A proposal that nothing
+/// deterministic addresses is refused, so a name the engine invented never
+/// reaches a plan.
 ///
 /// @planks("the inferred locator is round-tripped against the deterministic model")
 /// @planks("the locator is scoped to the region containing that item")
@@ -1205,7 +1447,7 @@ pub fn confirm(model: &Model, role: &str, name: &str) -> Option<Confirmation> {
             binding: Binding::Exact,
         }),
         Resolution::Ambiguous(_) => {
-            let scope = scope_of(&model.root, &|region| {
+            let scope = narrowing_scope(&model.root, &|region| {
                 region.role() == role && region.name.as_deref() == Some(name)
             })?;
             let locator = Locator::new(role, name).within(&scope);
@@ -1218,7 +1460,7 @@ pub fn confirm(model: &Model, role: &str, name: &str) -> Option<Confirmation> {
             }
         }
         Resolution::NoMatch => {
-            let scope = scope_of(&model.root, &|region| region.role() == role)?;
+            let scope = narrowing_scope(&model.root, &|region| region.role() == role)?;
             let locator = Locator::nth(role, 1).within(&scope);
             match locator.resolve(model) {
                 Resolution::One(_) => Some(Confirmation {
@@ -1229,6 +1471,24 @@ pub fn confirm(model: &Model, role: &str, name: &str) -> Option<Confirmation> {
             }
         }
     }
+}
+
+/// The scope a locator narrows to for a match somewhere under `root`, where the
+/// screen itself is never that scope. The root region covers the whole terminal,
+/// so scoping to it selects exactly what an unscoped locator already selects: it
+/// is a scope in name only, and confirming through it would report a narrowing
+/// that never happened. A proposal the screen carries nowhere but its own root
+/// yields none here and is refused, which is what keeps a name the engine
+/// invented from binding to whatever region of that role happens to be drawn
+/// first.
+///
+/// @planks("the inferred locator is round-tripped against the deterministic model")
+/// @planks("the locator is scoped to the region containing that item")
+/// @planks("the locator addresses the first {string} of the region named {string}")
+fn narrowing_scope(root: &Region, matches: &impl Fn(&Region) -> bool) -> Option<String> {
+    root.children
+        .iter()
+        .find_map(|child| scope_of(child, matches))
 }
 
 /// The name of the region containing the first region under `region` that

@@ -4,10 +4,27 @@
 
 use crate::process::PreparedProcess;
 use crate::sandbox::{CommandSpec, EnvOrigin, MountMode, Network, SandboxSpec};
+use crate::terminfo;
 use std::path::Path;
 
 /// Where the sandboxed program's home directory sits inside the sandbox.
 const SANDBOX_HOME: &str = "/sandbox";
+
+/// Where Tinman's curated terminfo database sits inside the sandbox, so a
+/// full-screen program can resolve its terminal type without the host's own
+/// database, which the sandbox never mounts.
+const SANDBOX_TERMINFO: &str = "/terminfo";
+
+/// How a host directory becomes the sandboxed program's home. A workspace the
+/// caller provisioned and owns is bound writable, so the caller collects what
+/// the program wrote. The operator's own tree is overlaid instead: the program
+/// reads it through the overlay's lower layer and every write it makes lands in
+/// an invisible tmpfs that goes when the sandbox goes.
+#[derive(Debug, Clone, Copy)]
+enum HomeMode {
+    Writable,
+    Overlay,
+}
 
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
 /// availability check can be exercised against a name that is off PATH.
@@ -51,19 +68,25 @@ impl BubblewrapBackend {
         self.args_with_home(spec, command, None, None)
     }
 
-    /// The same argument vector, with `home` bound writable at the sandbox home
-    /// when the caller provides one, so a session that keeps state writes into a
-    /// real directory the caller owns and reclaims. The program starts in `cwd`
-    /// under that home when the caller names one, so a command writing a
+    /// The same argument vector, with `home` mounted at the sandbox home when
+    /// the caller provides one, writable for a workspace the caller owns and
+    /// reclaims, overlaid for the operator's own tree. The program starts in
+    /// `cwd` under that home when the caller names one, so a command writing a
     /// relative path lands in the directory the plan named.
     ///
     /// @planks("the Tinman driver has a session running {string}")
     /// @planks("a flow whose only step runs {string} in the directory {string}")
+    /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator inspects a command that prints the contents of {string}")
+    /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator runs that plan")
+    /// @planks("the operator inspects a command that asks terminfo for the terminal width")
+    /// @planks("the operator inspects {string}")
     fn args_with_home(
         &self,
         spec: &SandboxSpec,
         command: &CommandSpec,
-        home: Option<&Path>,
+        home: Option<(&Path, HomeMode)>,
         cwd: Option<&str>,
     ) -> Vec<String> {
         let mut args = vec![
@@ -89,12 +112,23 @@ impl BubblewrapBackend {
         }
         // A temporary HOME, never the operator's real home. The sandboxed
         // process starts there, so relative paths it writes land in the host
-        // directory the caller bound, rather than in a directory the new mount
-        // namespace cannot reach.
-        if let Some(home) = home {
-            args.push("--bind".to_string());
-            args.push(home.display().to_string());
-            args.push(SANDBOX_HOME.to_string());
+        // directory the caller bound, or in the overlay standing over the
+        // operator's tree, rather than in a directory the new mount namespace
+        // cannot reach.
+        if let Some((home, mode)) = home {
+            match mode {
+                HomeMode::Writable => {
+                    args.push("--bind".to_string());
+                    args.push(home.display().to_string());
+                    args.push(SANDBOX_HOME.to_string());
+                }
+                HomeMode::Overlay => {
+                    args.push("--overlay-src".to_string());
+                    args.push(home.display().to_string());
+                    args.push("--tmp-overlay".to_string());
+                    args.push(SANDBOX_HOME.to_string());
+                }
+            }
             args.push("--chdir".to_string());
             args.push(match cwd {
                 Some(cwd) => format!("{SANDBOX_HOME}/{cwd}"),
@@ -104,6 +138,19 @@ impl BubblewrapBackend {
         args.push("--setenv".to_string());
         args.push("HOME".to_string());
         args.push(SANDBOX_HOME.to_string());
+        // Tinman's own curated terminfo database, bound read-only, so a
+        // full-screen program can resolve its terminal type without the host's
+        // database, which sits outside the directories the sandbox binds.
+        let terminfo_dir = terminfo::materialize();
+        args.push("--ro-bind".to_string());
+        args.push(terminfo_dir.display().to_string());
+        args.push(SANDBOX_TERMINFO.to_string());
+        args.push("--setenv".to_string());
+        args.push("TERM".to_string());
+        args.push(terminfo::TERM.to_string());
+        args.push("--setenv".to_string());
+        args.push("TERMINFO".to_string());
+        args.push(SANDBOX_TERMINFO.to_string());
         // The PATH the plan lists, and nothing else: an unlisted plan grants no
         // PATH beyond what --clearenv already leaves cleared.
         if !spec.path.is_empty() {
@@ -177,6 +224,47 @@ impl BubblewrapBackend {
         spec: &SandboxSpec,
         command: &CommandSpec,
         home: Option<&Path>,
+        cwd: Option<&str>,
+    ) -> Result<PreparedProcess, String> {
+        self.prepare_home(
+            spec,
+            command,
+            home.map(|home| (home, HomeMode::Writable)),
+            cwd,
+        )
+    }
+
+    /// Prepare a process whose home is an overlay over `tree`: the program reads
+    /// the real directory through the overlay's lower layer and every write it
+    /// makes lands in an invisible tmpfs that goes when the sandbox goes. This is
+    /// what an unfamiliar program gets when the home it is given is the
+    /// directory the operator is standing in.
+    ///
+    /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator inspects a command that prints the contents of {string}")
+    /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator runs that plan")
+    pub fn prepare_over_tree(
+        &self,
+        spec: &SandboxSpec,
+        command: &CommandSpec,
+        tree: &Path,
+        cwd: Option<&str>,
+    ) -> Result<PreparedProcess, String> {
+        self.prepare_home(spec, command, Some((tree, HomeMode::Overlay)), cwd)
+    }
+
+    /// Prepare a process with the home mount the caller chose.
+    ///
+    /// @planks("a process is prepared and launched")
+    /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
+    /// @planks("the operator runs that plan")
+    fn prepare_home(
+        &self,
+        spec: &SandboxSpec,
+        command: &CommandSpec,
+        home: Option<(&Path, HomeMode)>,
         cwd: Option<&str>,
     ) -> Result<PreparedProcess, String> {
         if !executable_available(&self.executable) {

@@ -28,6 +28,9 @@ pub struct Cli {
 /// @planks("the operator records the command {string}")
 /// @planks("the operator records the command {string} with {string}")
 /// @planks("the operator runs {string} with stdout redirected to a file")
+/// @planks("the operator executes {string}")
+/// @planks("each is requested from {string}")
+/// @planks("each is passed to the command parser")
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Capture a live session into an editable plan
@@ -56,14 +59,27 @@ pub enum Command {
     Driver,
     /// Show this help
     Help,
+    /// Write Tinman's manual page as roff on stdout
+    Man {
+        /// The command whose page is written, in place of Tinman's own
+        command: Option<String>,
+    },
+    /// Write a completion script for the named shell on stdout
+    Completions {
+        /// The shell the script is written for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// The arguments Tinman's parser takes from a command line: every token after
 /// the program name. A line naming a program other than `tinman`, or naming a
-/// command the parser does not accept, is refused.
+/// command the parser does not accept, is refused. A line naming no command is
+/// the bare invocation, which the parser takes.
 ///
 /// @planks("the operator asks {string}")
 /// @planks("the operator confirms the proposal")
+/// @planks("each is passed to the command parser")
 pub fn parse_command_line(line: &str) -> Result<Vec<String>, String> {
     let mut tokens = line.split_whitespace().map(str::to_string);
     let program = tokens
@@ -73,10 +89,9 @@ pub fn parse_command_line(line: &str) -> Result<Vec<String>, String> {
         return Err(format!("{program:?} is not a Tinman command line"));
     }
     let arguments: Vec<String> = tokens.collect();
-    let command = arguments
-        .first()
-        .ok_or_else(|| format!("{line:?} names no command"))?;
-    if !accepted_commands().contains(command) {
+    if let Some(command) = arguments.first()
+        && !accepted_commands().contains(command)
+    {
         return Err(format!("tinman has no {command:?} command"));
     }
     Ok(arguments)

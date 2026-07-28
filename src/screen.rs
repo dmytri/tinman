@@ -115,6 +115,7 @@ pub enum Colour {
 /// @planks("the region with the role {string} is drawn in the foreground colour {string}")
 /// @planks("that region is drawn in the background colour {string}")
 /// @planks("the child region showing {string} is drawn in the foreground colour {string}")
+/// @planks("the operator inspects a command that prints {string} {attribute}")
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
@@ -122,6 +123,13 @@ pub struct Style {
     pub background: Colour,
     pub bold: bool,
     pub reverse: bool,
+    pub dim: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub hidden: bool,
+    pub strikeout: bool,
+    #[serde(rename = "doubleUnderline")]
+    pub double_underline: bool,
 }
 
 /// The colour a parsed cell carries, named as the palette names it. The
@@ -230,6 +238,7 @@ impl VirtualScreen {
 
     /// @planks("the process is captured through a PTY")
     /// @planks("the operator inspects a command printing 200 numbered lines in a terminal 24 rows high")
+    /// @planks("the operator inspects a command that prints {string} {attribute}")
     fn parse(bytes: &[u8], columns: u16, rows: u16) -> VirtualScreen {
         let config = Config {
             scrolling_history: 0,
@@ -302,6 +311,12 @@ impl VirtualScreen {
                     background: colour_of(cell.bg),
                     bold: cell.flags.contains(Flags::BOLD),
                     reverse: inverses.last().copied().unwrap_or_default(),
+                    dim: cell.flags.contains(Flags::DIM),
+                    italic: cell.flags.contains(Flags::ITALIC),
+                    underline: cell.flags.contains(Flags::UNDERLINE),
+                    hidden: cell.flags.contains(Flags::HIDDEN),
+                    strikeout: cell.flags.contains(Flags::STRIKEOUT),
+                    double_underline: cell.flags.contains(Flags::DOUBLE_UNDERLINE),
                 });
                 continued.push(continuation);
             }

@@ -19,6 +19,18 @@ const ACRONYM_PROMPT: &str = include_str!("../assets/help/acronym-prompt.txt");
 /// time.
 const ASSISTANT_INSTRUCTION: &str = include_str!("../assets/help/assistant-instruction.txt");
 
+/// The user-facing scantlings the assistant answers shape questions from,
+/// inlined at build time, so a running Tinman carries the same schemas the
+/// repository ships.
+const SCANTLINGS: [&str; 6] = [
+    include_str!("../scantlings/harness-plan.schema.json"),
+    include_str!("../scantlings/sandbox-spec.schema.json"),
+    include_str!("../scantlings/tom.schema.json"),
+    include_str!("../scantlings/driver-protocol.schema.json"),
+    include_str!("../scantlings/interaction-log.schema.json"),
+    include_str!("../scantlings/skill.schema.json"),
+];
+
 /// The front matter of a skills.sh skill.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontMatter {
@@ -75,16 +87,23 @@ pub fn acronym_context() -> String {
 }
 
 /// The context the assistant answers from: the instruction the asset carries,
-/// then the skill's name and description, then the whole skill body.
+/// then the skill's name and description, then the whole skill body, then the
+/// user-facing scantlings.
 ///
 /// @planks("the assistant context is built")
 pub fn assistant_context() -> String {
     let skill = bundled();
+    let scantlings = SCANTLINGS
+        .iter()
+        .map(|scantling| scantling.trim())
+        .collect::<Vec<&str>>()
+        .join("\n\n");
     format!(
-        "{}\n\n{}\n{}\n{}",
+        "{}\n\n{}\n{}\n{}\n\n{}",
         ASSISTANT_INSTRUCTION.trim(),
         skill.front_matter.name,
         skill.front_matter.description,
-        skill.body
+        skill.body,
+        scantlings
     )
 }

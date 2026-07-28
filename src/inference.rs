@@ -17,6 +17,10 @@ const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 /// The model Tinman addresses when none is configured.
 const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 
+/// The source tldr pages are read from when none is configured: the
+/// tldr-pages project's own raw markdown.
+const DEFAULT_TLDR_BASE_URL: &str = "https://raw.githubusercontent.com/tldr-pages/tldr/main/pages";
+
 /// The ceiling on an availability probe, from connection to the last byte of
 /// the answer. A provider that accepts the connection and then withholds its
 /// answer ends the call only on a ceiling, so every call carries one. A probe
@@ -43,6 +47,15 @@ const TAGLINE_CEILING: std::time::Duration = std::time::Duration::from_secs(5);
 /// The acronym is cosmetic and optimizes for novelty.
 const ACRONYM_TEMPERATURE: f64 = 1.4;
 
+/// The letters an expansion must spell, in order, to be an acronym at all.
+const ACRONYM_LETTERS: &str = "tinman";
+
+/// How many times a provider is asked for an expansion that spells the name.
+/// An expansion that misses is replaced rather than dressed up, and the ask is
+/// counted as well as timed so a provider that keeps missing settles rather
+/// than spending the whole ceiling in front of an operator.
+const ACRONYM_ASKS: usize = 2;
+
 /// The assistant proposes commands a user may run, so it optimizes for
 /// correctness, determinism and instruction following.
 const ASSISTANT_TEMPERATURE: f64 = 0.1;
@@ -67,6 +80,7 @@ const TOM_INSTRUCTION: &str = concat!(
 /// The inference configuration a run resolved.
 ///
 /// @planks("Tinman resolves its inference credential")
+/// @planks("the page source is read")
 #[derive(Debug, Clone)]
 pub struct Settings {
     /// The provider credential, absent when nothing configures one.
@@ -75,6 +89,8 @@ pub struct Settings {
     pub base_url: String,
     /// The model Tinman addresses.
     pub model: String,
+    /// The source a naming pass reads a program's tldr page from.
+    pub tldr_base_url: String,
 }
 
 impl Settings {
@@ -82,6 +98,7 @@ impl Settings {
     /// environment overrides the file.
     ///
     /// @planks("Tinman resolves its inference credential")
+    /// @planks("the page source is read")
     pub fn resolve(env: &BTreeMap<String, String>, dir: &Path) -> Settings {
         let mut values: BTreeMap<String, String> = BTreeMap::new();
         let dotenv = dir.join(".env");
@@ -108,6 +125,10 @@ impl Settings {
                 .get("TINMAN_MODEL")
                 .cloned()
                 .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            tldr_base_url: values
+                .get("TINMAN_TLDR_BASE_URL")
+                .cloned()
+                .unwrap_or_else(|| DEFAULT_TLDR_BASE_URL.to_string()),
         }
     }
 
@@ -165,6 +186,9 @@ pub struct Request {
     authorization: Option<String>,
     temperature: f64,
     messages: Vec<(String, String)>,
+    /// Whether the provider is asked to reason, absent where the request sets
+    /// no reasoning control.
+    reasoning: Option<bool>,
 }
 
 impl Request {
@@ -208,10 +232,11 @@ impl Request {
 /// carries, the model it names, how it samples and the chat messages it sends.
 ///
 /// @planks("it conforms to the {string} schema in {string}")
+/// @planks("the request disables reasoning")
 impl serde::Serialize for Request {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut wire = serializer.serialize_struct("Request", 5)?;
+        let mut wire = serializer.serialize_struct("Request", 6)?;
         wire.serialize_field("url", &self.url())?;
         wire.serialize_field("authorization", &self.authorization)?;
         wire.serialize_field("model", &self.model)?;
@@ -222,6 +247,10 @@ impl serde::Serialize for Request {
             .map(|(role, content)| WireMessage { role, content })
             .collect();
         wire.serialize_field("messages", &wire_messages)?;
+        match self.reasoning {
+            Some(enabled) => wire.serialize_field("reasoning", &WireReasoning { enabled })?,
+            None => wire.skip_field("reasoning")?,
+        }
         wire.end()
     }
 }
@@ -235,17 +264,31 @@ struct WireMessage<'a> {
     content: &'a str,
 }
 
+/// The reasoning control on the wire.
+///
+/// @planks("the request disables reasoning")
+#[derive(serde::Serialize)]
+struct WireReasoning {
+    enabled: bool,
+}
+
 /// The acronym request: the bundled skill's name and description, sampled at a
 /// very high temperature.
 ///
 /// @planks("the acronym request is built")
 /// @planks("the acronym request and the assistant request are built")
+/// @planks("the request disables reasoning")
 pub fn acronym_request(settings: &Settings) -> Request {
-    request(
+    let mut request = request(
         settings,
         ACRONYM_TEMPERATURE,
         crate::skill::acronym_context(),
-    )
+    );
+    // A reasoning model spends its thinking budget on whatever it is asked, and
+    // the tagline asks for six words, so the request turns reasoning off rather
+    // than the ceiling growing to fit it.
+    request.reasoning = Some(false);
+    request
 }
 
 /// The assistant request: the whole bundled skill body and the operator's
@@ -358,6 +401,7 @@ fn request_from_messages(
         authorization: settings.api_key.as_ref().map(|key| format!("Bearer {key}")),
         temperature,
         messages,
+        reasoning: None,
     }
 }
 
@@ -367,8 +411,80 @@ fn request_from_messages(
 /// answered nothing within the tagline ceiling.
 ///
 /// @planks("the operator runs {string} in an interactive terminal")
+/// @planks("the tagline is generated")
 pub fn tagline_expansion(settings: &Settings) -> Option<String> {
-    generated_expansion(settings, TAGLINE_CEILING)
+    let deadline = std::time::Instant::now() + TAGLINE_CEILING;
+    for _ in 0..ACRONYM_ASKS {
+        let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+        let generated = generated_expansion(settings, remaining)?;
+        if let Some(raised) = raised(&generated) {
+            return Some(raised);
+        }
+    }
+    None
+}
+
+/// The tagline generation in flight, started before the help is drawn so the
+/// model works while the operator reads the rest. The ceiling runs from the
+/// moment the generation starts rather than from the moment the help asks for
+/// it, so the wait the help inherits is the ceiling less whatever the drawing
+/// took.
+///
+/// @planks("the operator runs {string} in an interactive terminal")
+pub fn pending_tagline(settings: &Settings) -> PendingTagline {
+    let deadline = std::time::Instant::now() + TAGLINE_CEILING;
+    let settings = settings.clone();
+    let (generated, expansion) = std::sync::mpsc::channel();
+    std::thread::spawn(move || generated.send(tagline_expansion(&settings)));
+    PendingTagline {
+        deadline,
+        expansion,
+    }
+}
+
+/// A tagline generation the help is waiting on.
+pub struct PendingTagline {
+    /// The instant the wait ends, whatever the provider is doing by then.
+    deadline: std::time::Instant,
+    /// The expansion the generation produced, absent where it produced none.
+    expansion: std::sync::mpsc::Receiver<Option<String>>,
+}
+
+impl PendingTagline {
+    /// The expansion, waited for no longer than the ceiling leaves. A provider
+    /// that has not answered by then is read as no answer, so the line settles
+    /// on the unavailable notice inside the ceiling rather than on whatever the
+    /// call takes to give up.
+    ///
+    /// @planks("the operator runs {string} in an interactive terminal")
+    pub fn settled(self) -> Option<String> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(std::time::Instant::now());
+        self.expansion.recv_timeout(remaining).ok().flatten()
+    }
+}
+
+/// `expansion` with the letters that spell the name raised, absent when its
+/// words do not begin with those letters in order. A model claims its words
+/// spell the name; this walks the expansion and checks the claim, and raising
+/// the letters shows the reader where they are.
+fn raised(expansion: &str) -> Option<String> {
+    let characters: Vec<char> = expansion.chars().collect();
+    let mut letters = ACRONYM_LETTERS.chars();
+    let mut wanted = letters.next();
+    let mut raised = String::with_capacity(expansion.len());
+    for (index, character) in characters.iter().enumerate() {
+        let begins_word =
+            character.is_alphabetic() && (index == 0 || !characters[index - 1].is_alphanumeric());
+        if begins_word && wanted == Some(character.to_ascii_lowercase()) {
+            raised.extend(character.to_uppercase());
+            wanted = letters.next();
+        } else {
+            raised.push(*character);
+        }
+    }
+    wanted.is_none().then_some(raised)
 }
 
 /// The acronym expansion the configured provider generated within `ceiling`,
@@ -447,11 +563,16 @@ fn complete(request: &Request, ceiling: std::time::Duration) -> Option<String> {
             )
         })
         .collect();
+    let reasoning = match request.reasoning {
+        Some(enabled) => format!(r#","reasoning":{{"enabled":{enabled}}}"#),
+        None => String::new(),
+    };
     let body = format!(
-        r#"{{"model":{},"temperature":{},"messages":[{}]}}"#,
+        r#"{{"model":{},"temperature":{},"messages":[{}]{}}}"#,
         json_string(&request.model),
         request.temperature,
-        messages.join(",")
+        messages.join(","),
+        reasoning
     );
     let mut call = ureq::post(&url)
         .config()

@@ -18,8 +18,9 @@ const EXIT_DEADLINE: Duration = Duration::from_secs(2);
 /// whole output is read; a program still running has not, so what it has drawn
 /// is read as a screen. Exiting is observable, so the reading follows the
 /// program rather than a flag. The inspected command is an unfamiliar program,
-/// so it runs isolated with `workspace` as its home, and the backend is the only
-/// thing that prepares it.
+/// so it runs isolated over `workspace`, reading that tree through an overlay
+/// whose writes never reach it, and the backend is the only thing that prepares
+/// it.
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects the fixture terminal program as JSON")
@@ -30,25 +31,47 @@ const EXIT_DEADLINE: Duration = Duration::from_secs(2);
 /// @planks("the operator inspects a command printing two two-line blocks separated by a blank line")
 /// @planks("the operator inspects a command printing {string}, a blank line and {string}")
 /// @planks("the operator inspects a command that prints {string} in red")
+/// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
+/// @planks("the operator inspects a command that prints the contents of {string}")
+/// @planks("the operator inspects {string}")
+/// @planks("the inspect output names the root region {string}")
 pub fn model(command: &str, workspace: &Path) -> Result<Model, String> {
-    let prepared = BubblewrapBackend::new().prepare_with_home(
+    let prepared = BubblewrapBackend::new().prepare_over_tree(
         &SandboxSpec::default(),
         &CommandSpec {
             program: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), command.to_string()],
         },
-        Some(workspace),
+        workspace,
         None,
     )?;
     let mut session = capture_interactive(&prepared)?;
     let deadline = Instant::now() + EXIT_DEADLINE;
     while !session.finished() {
         if Instant::now() >= deadline {
-            return Ok(build(&session.screen()));
+            return Ok(named(build(&session.screen()), command));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    Ok(read_stream(&session.stream()))
+    // A program that exited unsuccessfully before drawing anything never
+    // started, which is a different finding from one that ran and drew an
+    // empty screen. Reporting both as "no regions on screen" would send an
+    // operator looking for a drawing bug in a program that never launched.
+    if !session.exit_status().success() {
+        return Err(format!("the program {command:?} did not start"));
+    }
+    Ok(named(read_stream(&session.stream()), command))
+}
+
+/// Name the root region for the program the operator asked about. The root
+/// carries the `application` role, and a listener told the role and not the
+/// subject has been told half of it, so the model says which application this
+/// is.
+///
+/// @planks("the inspect output names the root region {string}")
+fn named(mut model: Model, command: &str) -> Model {
+    model.root.name = Some(command.to_string());
+    model
 }
 
 /// Render a model as the listing an operator reads: one line per region, nested
@@ -74,6 +97,7 @@ pub fn render(model: &Model) -> String {
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects a command that prints {string} in red")
+/// @planks("the operator inspects a command that prints {string} {attribute}")
 fn describe(region: &Region, depth: usize, lines: &mut Vec<String>) {
     let indent = "  ".repeat(depth);
     let role = region.role();
@@ -85,7 +109,12 @@ fn describe(region: &Region, depth: usize, lines: &mut Vec<String>) {
         Some(colour) => format!(" in {colour}"),
         None => String::new(),
     };
-    lines.push(format!("{indent}{role}{name}{colour}"));
+    let presentations = region
+        .presentations()
+        .iter()
+        .map(|presentation| format!(" {presentation}"))
+        .collect::<String>();
+    lines.push(format!("{indent}{role}{name}{colour}{presentations}"));
     for child in &region.children {
         describe(child, depth + 1, lines);
     }

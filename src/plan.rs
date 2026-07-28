@@ -5,15 +5,31 @@
 
 use crate::sandbox::SandboxSpec;
 
-/// A parsed harness plan: the sandbox the flow runs in, and the ordered flow.
+/// A parsed harness plan: the sandbox the flow runs in, the ordered flow, and
+/// what the plan was written from. A plan read from nothing outside the binary
+/// carries no sources, and none are written back.
 ///
 /// @planks("the two parsed plans are identical")
 /// @planks("it conforms to the {string} schema in {string}")
+/// @planks("a recorded plan is serialized and read back")
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Plan {
     pub sandbox: SandboxSpec,
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
     pub flow: Vec<FlowStep>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Source>,
+}
+
+/// One thing a plan was written from: the source read, and the terms that came
+/// with it. A source whose terms were not stated carries no licence.
+///
+/// @planks("a recorded plan is serialized and read back")
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Source {
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub licence: Option<String>,
 }
 
 /// One process in the flow: a plain command, or a terminal program driven by
@@ -121,6 +137,7 @@ pub struct TuiProcess {
 ///
 /// @planks("parsing fails and reports the unknown step keyword {string}")
 /// @planks("the written plan records a key press {string}")
+/// @planks("a recorded plan is serialized and read back")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
@@ -128,6 +145,22 @@ pub enum Action {
     Fill(Fill),
     Press(String),
     Expect(Expectation),
+    Capture(Capture),
+}
+
+/// Collect the items of a pane into named structured data: the role the pane
+/// plays, the role its items play, how much of the pane is read, and the name
+/// the collected items are kept under.
+///
+/// @planks("a recorded plan is serialized and read back")
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Capture {
+    pub role: String,
+    pub items: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(rename = "as")]
+    pub name: String,
 }
 
 /// Addresses a region of the terminal object model by name, and by role when
@@ -137,6 +170,8 @@ pub enum Action {
 /// @planks("the step's locator name is {string}")
 /// @planks("the step's locator names no role")
 /// @planks("the plan records the locator's binding as {string}")
+/// @planks("a recorded plan is serialized and read back")
+/// @planks("that plan is replayed")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "LocatorForm")]
 pub struct Locator {
@@ -144,7 +179,7 @@ pub struct Locator {
     pub role: Option<String>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
+    pub within: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
 }
@@ -153,6 +188,8 @@ pub struct Locator {
 /// the scope and binding a confirmed locator records.
 ///
 /// @planks("the step's locator names no role")
+/// @planks("a recorded plan is serialized and read back")
+/// @planks("that plan is replayed")
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum LocatorForm {
@@ -161,7 +198,7 @@ enum LocatorForm {
         role: Option<String>,
         name: String,
         #[serde(default)]
-        scope: Option<String>,
+        within: Option<String>,
         #[serde(default)]
         binding: Option<String>,
     },
@@ -172,23 +209,25 @@ impl From<LocatorForm> for Locator {
     ///
     /// @planks("the step's locator name is {string}")
     /// @planks("the step's locator names no role")
+    /// @planks("a recorded plan is serialized and read back")
+    /// @planks("that plan is replayed")
     fn from(form: LocatorForm) -> Locator {
         match form {
             LocatorForm::Name(name) => Locator {
                 role: None,
                 name,
-                scope: None,
+                within: None,
                 binding: None,
             },
             LocatorForm::Full {
                 role,
                 name,
-                scope,
+                within,
                 binding,
             } => Locator {
                 role,
                 name,
-                scope,
+                within,
                 binding,
             },
         }
@@ -270,6 +309,7 @@ impl From<ExpectationForm> for Expectation {
 /// and steps, with the sandbox section optional in both.
 ///
 /// @planks("parsing fails and reports a missing flow")
+/// @planks("a recorded plan is serialized and read back")
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlanForm {
@@ -279,6 +319,8 @@ struct PlanForm {
     tui: Option<String>,
     #[serde(default, with = "serde_yaml::with::singleton_map_recursive")]
     steps: Vec<Action>,
+    #[serde(default)]
+    sources: Vec<Source>,
 }
 
 /// Parse a harness plan, normalizing every shorthand into the canonical plan.
@@ -288,6 +330,7 @@ struct PlanForm {
 /// @planks("both plans are parsed")
 /// @planks("the harness plan at {string}")
 /// @planks("parsing fails and reports a missing flow")
+/// @planks("a recorded plan is serialized and read back")
 pub fn parse(source: &str) -> Result<Plan, String> {
     let form: PlanForm = serde_yaml::from_str(source).map_err(|e| e.to_string())?;
     let flow = if let Some(command) = form.tui {
@@ -302,6 +345,7 @@ pub fn parse(source: &str) -> Result<Plan, String> {
     Ok(Plan {
         sandbox: form.sandbox.unwrap_or_default(),
         flow,
+        sources: form.sources,
     })
 }
 

@@ -188,21 +188,23 @@ impl Default for RecordingSession {
 /// @planks("recording fails and reports the file already exists")
 /// @planks("the operator records a command that writes to the sentinel path and prints {string}")
 /// @planks("the operator records a command that prints {string} and the value of {string}")
+/// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
 pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> Result<(), String> {
     let path = workspace.join(output.unwrap_or(DEFAULT_PLAN));
     if path.exists() {
         return Err(format!("{} already exists", path.display()));
     }
     // The recorded program is the operator's target rather than a program this
-    // project wrote, so it is launched through the sandbox backend, with the
-    // workspace as its home, exactly as replaying the written plan launches it.
-    let prepared = BubblewrapBackend::new().prepare_with_home(
+    // project wrote, so it is launched through the sandbox backend, over the
+    // workspace it reads through an overlay whose writes never reach that tree,
+    // exactly as replaying the written plan launches it.
+    let prepared = BubblewrapBackend::new().prepare_over_tree(
         &SandboxSpec::default_for_record(),
         &CommandSpec {
             program: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), command_line(command)],
         },
-        Some(workspace),
+        workspace,
         None,
     )?;
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
@@ -251,6 +253,7 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
             command: command_line(command),
             steps,
         })],
+        sources: Vec::new(),
     };
     let written = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
     std::fs::write(&path, written)
@@ -281,7 +284,7 @@ pub fn plan_expecting(model: &Model, role: &str, name: &str) -> Result<Plan, Str
     let locator = crate::plan::Locator {
         role: Some(role.to_string()),
         name: name.to_string(),
-        scope: confirmed.locator.scope().map(str::to_string),
+        within: confirmed.locator.scope().map(str::to_string),
         binding: Some(confirmed.binding.as_str().to_string()),
     };
     Ok(Plan {
@@ -294,6 +297,7 @@ pub fn plan_expecting(model: &Model, role: &str, name: &str) -> Result<Plan, Str
                 locator: Some(locator),
             })],
         })],
+        sources: Vec::new(),
     })
 }
 
