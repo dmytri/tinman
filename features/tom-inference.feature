@@ -132,7 +132,15 @@ Feature: terminal object model inference
   Rule: an @inference scenario asserts Tinman's seam and never the provider's latency. The seam is the request Tinman builds, the call it makes and the reply it parses; how long a third party takes to answer is that party's behaviour, the same class as whether it obeys an instruction. A single real call returning nothing inside its ceiling is a transient of a hosted service, so the step retries toward a deadline rather than failing on one slow answer. The cost of getting this wrong is measured rather than argued: with production byte-identical across two custody attempts, the tier sweep moved from 85s green to 159s red, and a ceiling sized off a 76s observed tail was exceeded within a day of being set. Chasing that tail with a larger constant buys the next reprieve and no more.
 
   @inference
-  Scenario: the configured engine infers a conforming model from a real screen
+  Rule: what conforms is the model Tinman produces, never the reply a provider sent. Asserting the reply would be asserting the model's compliance, which this tier does not do and cannot enforce; shaping the request is not validating the response. The neighbouring scenarios already discard a reply that is not a model at all, and a reply that is a model with a region missing something the schema requires is the same case arriving in part rather than whole: the enrichment is refused for that region and the deterministic reading stands there. A real engine returns exactly that, a null name on a role whose name is required, so this is the ordinary case rather than an edge.
+
+  Scenario: the model Tinman produces from a real screen conforms
     Given the fixture terminal program is captured through a PTY
     When the terminal object model is inferred by the configured engine
-    Then it conforms to the "tom" schema in "scantlings/tom.schema.json"
+    Then the model Tinman produces conforms to the "tom" schema in "scantlings/tom.schema.json"
+
+  Scenario: a region the engine leaves unnamed keeps its deterministic reading
+    Given the fixture terminal program is captured through a PTY
+    And the engine answers with no name for a region whose role requires one
+    When the terminal object model is inferred by the configured engine
+    Then that region carries the name the deterministic reading gave it

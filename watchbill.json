@@ -189,7 +189,8 @@
       "features/interactive-help.feature:the setup form offers the defaults it would otherwise use",
       "features/interactive-help.feature:the key is masked as it is typed",
       "features/interactive-help.feature:the form names the environment as the other way in",
-      "features/interactive-help.feature:a saved credential is written where only its owner can read it"
+      "features/interactive-help.feature:a saved credential is written where only its owner can read it",
+      "features/tom-inference.feature:a region the engine leaves unnamed keeps its deterministic reading"
     ]
   },
   "watch22": {
