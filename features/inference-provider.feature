@@ -29,13 +29,20 @@ Feature: inference provider
 
   Rule: each timed seam carries a wall-clock ceiling, and a ceiling nobody measures is a guess that fails silently, because the seam it bounds degrades rather than erroring. One contract lists them and one scenario attests them all, so a new timed seam adds a line to the contract rather than a scenario to this file.
 
+  Rule: proving a ceiling by waiting it out costs the ceiling. Driving four seams against a stalled dependency spends the sum of their ceilings, 137 seconds, and doing it on the tier that carries every inner-loop run put that cost on every change anyone makes. Enforcement splits into two cheaper questions instead: whether each seam enforces the ceiling the contract declares, which is a comparison and costs nothing, and whether the enforcement mechanism ends a wait at all, which one short ceiling demonstrates. Paying all four proves nothing the pair does not.
+
   @contract
-  Scenario: every timed seam abandons its wait at its ceiling
+  Scenario: every timed seam enforces the ceiling the contract declares
     Given the seams and ceilings in "scantlings/latency-budgets.json"
-    And a dependency that never answers
-    When each seam is exercised and timed
-    Then every seam gave up at its ceiling
+    When the ceiling each seam enforces is read
+    Then every seam enforces the ceiling declared for it
     And the seams read are not empty
+
+  Scenario: a seam whose dependency never answers gives up at its ceiling
+    Given a dependency that never answers
+    And a seam whose ceiling is 200 milliseconds
+    When that seam is exercised
+    Then it gave up inside 200 milliseconds
 
   Rule: a reasoning model spends its thinking budget on whatever it is asked, and the tagline asks for six words. Measured against the configured provider, the request as first written returned nothing inside forty seconds, so the tagline never filled and the help simply rendered without it, which reads as a design choice rather than a failure. With reasoning disabled the same request answers in one to two seconds. The lever is the request, not the ceiling: raising a budget to fit a call that should never have been slow hides the cause and pays the latency for ever.
 

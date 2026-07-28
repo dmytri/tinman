@@ -238,8 +238,9 @@
   },
   "watch26": {
     "scenarios": [
-      "features/inspect-command.feature:a documented keypress example is written as a key step",
-      "features/inspect-command.feature:a keypress notation Tinman cannot send is reported as untestable"
+      "features/inference-provider.feature:every timed seam enforces the ceiling the contract declares",
+      "features/inference-provider.feature:a seam whose dependency never answers gives up at its ceiling",
+      "features/methodology-conformance.feature:the most recent sweep of each tier is within its declared budget"
     ]
   }
 }
