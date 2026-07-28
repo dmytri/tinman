@@ -241,5 +241,10 @@
       "features/inference-provider.feature:a seam whose dependency never answers gives up at its ceiling",
       "features/methodology-conformance.feature:the most recent sweep of each tier is within its declared budget"
     ]
+  },
+  "watch27": {
+    "scenarios": [
+      "@logic"
+    ]
   }
 }
