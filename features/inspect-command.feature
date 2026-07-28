@@ -153,10 +153,11 @@ Feature: inspect command
 
   @sandbox
   Scenario: a page the project does not carry reports no page
-    Given the configured tldr page source has no page for "obscurecmd"
-    When the operator inspects "obscurecmd" with its documented examples
+    Given the fixture terminal program's help carries the example "fixture --menu"
+    And the configured tldr page source has no page for the fixture terminal program
+    When the operator inspects the fixture terminal program with its documented examples
     Then the inspect output reports no tldr page was read
-    And the inspect output reports the examples the program's own help carries
+    And the inspect output lists a "menuitem" named "Settings"
 
   Rule: a tldr example is a template rather than a command line. Its style guide fixes the syntax, so "{{path/to/file}}" and "{{option1|option2}}" and "{{1..5}}" are holes a reader is expected to fill, and passing one to the program as written hands it an argument nobody meant. That failure would arrive wearing the costume of a finding: the program rejects the line, and inspection reports a documented example the program would not honour, which is this project's signature fault manufactured out of nothing but a template Tinman filled in wrong.
 
