@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.1.2/scantlings/interaction-log.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/interaction-log.schema.json",
   "title": "Tinman interaction log",
   "description": "The constrained YAML a recording session emits. Referenced by features/interaction-log.feature. This is the milestone-1 capture log, not the replay flow format.",
   "type": "object",

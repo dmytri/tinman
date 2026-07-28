@@ -1,6 +1,6 @@
 [package]
 name = "tinman"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 description = "Deterministic black-box testing framework for CLIs and full-screen TUIs — webrat/capybara/selenium for terminals. Drives real programs through a PTY under a Bubblewrap sandbox. Early prototype."
 license = "0BSD"
