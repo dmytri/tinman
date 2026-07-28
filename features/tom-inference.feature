@@ -122,16 +122,16 @@ Feature: terminal object model inference
 
   Scenario: a plan whose naming read a tldr page credits the project
     Given the configured tldr page source has a page for "git"
-    And a virtual screen showing an unbordered pane whose first line reads "Recent files"
-    And an engine that names that region "Recent files"
+    And a virtual screen showing two bordered panes each listing an item named "README"
+    And an engine that names the second item "README"
     When the plan for "git" is written
     Then the plan credits the tldr-pages project for the page it read
     And the plan names "CC-BY-4.0" as that page's licence
 
   Scenario: a plan whose naming read no tldr page credits nothing
     Given the configured tldr page source has no page for "obscurecmd"
-    And a virtual screen showing an unbordered pane whose first line reads "Recent files"
-    And an engine that names that region "Recent files"
+    And a virtual screen showing two bordered panes each listing an item named "README"
+    And an engine that names the second item "README"
     When the plan for "obscurecmd" is written
     Then the plan credits no page
 
