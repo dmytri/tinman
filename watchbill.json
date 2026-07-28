@@ -192,7 +192,12 @@
       "features/interactive-help.feature:a saved credential is written where only its owner can read it",
       "features/tom-inference.feature:a region the engine leaves unnamed keeps its deterministic reading",
       "features/inference-provider.feature:the tagline is generated inside its ceiling",
-      "features/tom-inference.feature:the model Tinman produces from a real screen conforms"
+      "features/tom-inference.feature:the model Tinman produces from a real screen conforms",
+      "features/sandboxed-launch.feature:an absent sandbox refuses before anything is executed",
+      "features/sandboxed-launch.feature:a sandbox older than the floor refuses and names both versions",
+      "features/sandboxed-launch.feature:a session that executes late refuses as it starts",
+      "features/sandboxed-launch.feature:the commands that execute nothing still answer without a sandbox",
+      "features/sandboxed-launch.feature:the refusal points at instructions that exist"
     ]
   },
   "watch22": {

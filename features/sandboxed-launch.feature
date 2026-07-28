@@ -97,6 +97,46 @@ Feature: sandboxed launch
     Then the inspect output reports the program did not start
     And the inspect output does not report no regions on screen
 
+  Rule: Bubblewrap cannot be bundled. It needs unprivileged user namespaces the kernel must already allow, and on many distributions it ships setuid or with file capabilities, none of which a downloaded archive can grant. So it is a system requirement, and the overlay options the workspace depends on arrived in 0.11.0, which makes the floor a version rather than a presence.
+
+  Rule: the floor excludes stock Debian stable and Ubuntu LTS, which ship 0.9.0, and that cost is taken deliberately. Degrading to a read-only workspace where the overlay is missing would put two isolation modes in the field, and scenarios passing under one and not the other is how the working directory stayed writable for a whole voyage without anything reddening.
+
+  Rule: refusing at the moment of execution is too late for a session that executes late. The driver constructs nothing until a launch request arrives, so it would bind a port, accept a caller's connection and let their suite set up before failing; the assistant would open, draw and take a question first. A command that can execute therefore refuses as it starts, while the prepared-process seam refuses anything that reaches it regardless. The two answer different questions, one whether this session can ever work and the other whether this particular launch is sandboxed, so the seam check being unreachable in practice is the negative control working rather than dead code.
+
+  Rule: the refusal is the only text most operators will ever read, so it carries the whole answer: which case it is, since absent means install and too old means upgrade, what was found against what is required, that Tinman never executes outside a sandbox so no flag will lift it, and a link that saves a human or an agent a search. An agent meeting a bare "unavailable" cannot tell a fatal requirement from a bug in Tinman.
+
+  @sandbox
+  Scenario: an absent sandbox refuses before anything is executed
+    Given the Bubblewrap binary is not on the path
+    When the operator inspects the fixture terminal program
+    Then the command exits with a non-zero status
+    And the failure reports the required Bubblewrap version
+    And no program was executed
+
+  @sandbox
+  Scenario: a sandbox older than the floor refuses and names both versions
+    Given the Bubblewrap binary reports version "0.9.0"
+    When the operator inspects the fixture terminal program
+    Then the command exits with a non-zero status
+    And the failure reports the version found and the version required
+
+  @sandbox
+  Scenario: a session that executes late refuses as it starts
+    Given the Bubblewrap binary is not on the path
+    When the operator starts the driver
+    Then the command exits with a non-zero status
+    And the driver accepted no connection
+
+  Scenario: the commands that execute nothing still answer without a sandbox
+    Given the Bubblewrap binary is not on the path
+    When the operator runs "tinman --help" with stdout redirected to a file
+    Then the output names every command the parser accepts
+
+  Scenario: the refusal points at instructions that exist
+    Given the refusal text in the assets
+    When the link it carries is read
+    Then it names a heading the file at "README.md" carries
+
   Rule: a prepared process is the only input the PTY runner launches, so whoever constructs one settles what isolation the launched program gets. A per-module reference contract reaches the modules someone remembered to write one for, and the modules that bypassed the backend were exactly the ones nobody had. A bound over the whole implementation tree is what leaves a command added later covered by a contract nobody edited.
 
   @contract

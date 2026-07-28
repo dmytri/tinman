@@ -50,6 +50,22 @@ manual path. Redirect `tinman man` into `/usr/local/share/man/man1/tinman.1`
 and run `mandb`, and `man tinman` works from then on. Emitting the page on
 demand is what keeps it from drifting away from the parser that enforces it.
 
+## Requirements
+
+Linux, and **Bubblewrap 0.11.2 or newer**. Tinman never executes a program outside a
+sandbox, so this is a hard requirement rather than an optional feature, and no flag
+lifts it.
+
+The version floor is real rather than cautious: Tinman mounts your working directory
+through an overlay so a probed program reads your files and writes into a disposable
+layer, and the `--overlay-src` and `--tmp-overlay` options that make that possible
+arrived in Bubblewrap 0.11.0.
+
+Debian stable and Ubuntu LTS currently ship 0.9.0, so those need backports or a newer
+distribution. Check what you have with `bwrap --version`.
+
+macOS support waits on a sandbox backend of its own. Windows is not planned; use WSL.
+
 ## The Terminal Object Model
 
 Tinman reads the rendered screen as a tree of nested regions carrying WAI-ARIA
