@@ -62,3 +62,45 @@ A coverage blind spot the summary does not announce: a scenario that drives `tin
 See `RIGGING.md` for the exact commands. Note the cucumber-rs constraint: `--name` and `--tags` are mutually exclusive, and the exclusion reaches the environment variable too, because `CUCUMBER_FILTER_TAGS` is that same `--tags` argument. A run passing both fails with `the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`, whichever route the tag expression arrives by. So `focused` genuinely cannot carry the tag exclusion the Rigging read contract asks of every verification command, and no rewrite of the value closes it.
 
 What stands in for the exclusion is the anchoring: `--name "^…$"` selects by exact scenario name, so a `@captain` or `@shipwright` skeleton is excluded by carrying a different name. That substitute rests on two properties of the specs, and a scenario name is a regex here, not a literal. A name repeated inside one feature file would run both scenarios, condemned or skeleton included, and a name carrying a regex metacharacter would match the wrong scenario or none. Both properties hold today and nothing enforces either, so they are the subject of a derived `@conformance` check. Tier enumeration sweeps use no `--name`, so they carry the exclusion through `CUCUMBER_FILTER_TAGS` as normal.
+
+## Releases
+
+**Captain owns the release version bump, and it is one coupled edit rather than a field.**
+
+Doctrine gives the bump no owner, so this project closes the gap locally. Shipwright holds the package manifests for dependency work and is a harbour role, while a release is mid-outbound. Crew is dispatched only for a failing target, and a bump has none. Boatswain writes hygiene rather than new content. The gap stays open upstream, so a release that waits for the rule to be worked out again waits every time.
+
+These move together or not at all:
+
+- `version` in `Cargo.toml`
+- `version` in `npm/package.json`
+- every published schema `$id` URI, nineteen as of 2026-07-29, across `scantlings/` and `assets/examples/`
+
+Two limits on what the checks around this can see, both paid for on 2026-07-29.
+
+`every published schema URI names the packaged version` compares the URIs against `Cargo.toml`, so it catches a forgotten URI and never a changed contract under an unchanged version. A schema whose content moves while the version stands leaves every URI still naming `@vX.Y.Z`, and the check stays green while that pinned URI serves something the repository no longer contains. The tree is in that state now: `sandbox-spec.schema.json` lost a required field with `Cargo.toml` still reading 0.2.0. The URI is pinned to a tag rather than to a branch, so publishing the next version is what resolves it, and a consumer reading the pinned URI meanwhile gets the older contract.
+
+`both packaged manifests name one version` is newly authored and on the watchbill. Before it nothing joined the two manifests at all, so a bump applied to one could reach a registry naming a version that described different contents.
+
+## Outbound
+
+Tinman ships two targets, and they release independently. `RIGGING.md` carries the exact `ship` and `verify` commands for each under `## Outbound`.
+
+**crates.io** ships the source crate. `cargo publish` from the repository root is the whole runbook.
+
+**npm** ships `@dk/tinman`, a prebuilt `linux`/`x64` release binary rather than the source tree. Its manifest is durable at `npm/package.json` and everything beside it is staged at ship time, so the staged paths are git-ignored: the `ship` command builds the release binary, installs it at `npm/bin/tinman`, copies `README.md` and `LICENSE` into `npm/`, and publishes that directory. Those four files are the published tarball, because `files` names `bin` and npm adds the manifest, the readme and the licence itself. The package was first published ad hoc from outside the repository at 0.2.0 on 2026-07-28; the manifest here reproduces what that publish shipped.
+
+The release profile sets `strip = true`, and that setting exists for this target. The binary is the package, and the intended invocation is the unversioned `npx @dk/tinman`, so anyone who has not pinned fetches it again on every run and debug symbols are weight none of them can use. Stripping took the binary from 7,221,104 to 5,610,464 bytes, the tarball from 2.7 MB to 2.5 MB, and the unpacked package from 7.2 MB to 5.6 MB. Verification is unaffected, because the scenarios drive the test-profile binary through `CARGO_BIN_EXE_tinman` rather than the release one.
+
+Two versions have to move together and nothing yet joins them: `version` in `Cargo.toml` and `version` in `npm/package.json`. The schema-URI conformance scenario already reads the packaged version from `Cargo.toml` alone, so a bumped crate and a forgotten npm manifest is a drift no check reports.
+
+**An outbound `verify` line installs and runs the artifact a user would receive. A registry lookup is not a verification.** A lookup answers whether a name resolves, which is a question nobody was asking; it says nothing about what the resolved artifact contains or whether it runs. Both lines here download the published package, install it, and execute the shipped binary, per the Outbound verification policy.
+
+Each line also names the version it expects rather than accepting whichever one answers. The crates.io line reads that version from `Cargo.toml`, so it reddens when the registry is behind the repository.
+
+This is not hypothetical. The previous line was `cargo search tinman`, which exits 0 whatever version comes back. The 0.2.0 release reached npm on 2026-07-28 and never reached crates.io, where 0.1.2 still stands, and `cargo search` reported success for a day across that gap. The replacement caught it on its first run.
+
+## Settled decisions
+
+Decisions a later harbour would otherwise re-derive from repository signals. A finding recorded only in Captain's private notes is invisible to every other role, so it is re-derived every harbour and re-argued every time; this section is where such a decision becomes durable. The watchbill-shape condemnation is recorded under Methodology checks above, in the same spirit.
+
+`pty::launch` and `pty::capture` are a settled keep. Reference analysis shows both have no production caller: every launch path reaches the PTY through `capture_interactive` or `capture_interactive_at`. They were kept at an earlier harbour on the negative-control argument, and the 2026-07-29 harbour re-derived them as unreachable because that decision lived only in Captain's notes. They are not dead code and are not a finding. A harbour that reports them again is repeating a settled decision.

@@ -1,0 +1,29 @@
+{
+  "name": "@dk/tinman",
+  "version": "0.2.0",
+  "description": "Deterministic black-box testing framework for CLIs and full-screen TUIs — webrat/capybara/selenium for terminals. Drives real programs through a PTY under a Bubblewrap sandbox. Early prototype.",
+  "license": "0BSD",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmytri/tinman.git"
+  },
+  "keywords": [
+    "testing",
+    "tui",
+    "cli",
+    "pty",
+    "sandbox"
+  ],
+  "bin": {
+    "tinman": "bin/tinman"
+  },
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ]
+}

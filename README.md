@@ -76,6 +76,10 @@ survives a layout change that would break a recorded keystroke.
 The full vocabulary is in the bundled skill at `assets/skill/SKILL.md`, which is
 also what a coding agent reads to learn Tinman.
 
+## Built with Shipshape
+
+This repository uses [Shipshape](https://github.com/dmytri/shipshape), a context-isolated spec-driven workflow for coding agents. Install with `npx skills add dmytri/shipshape --skill '*'`, or the experimental open-plugin build with `npx plugins add dmytri/shipshape`.
+
 ## License
 
 Licensed under the BSD Zero Clause License (0BSD). See `LICENSE`.

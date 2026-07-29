@@ -3,3 +3,9 @@
 .claude/settings.local.json
 .env
 .npmrc
+
+# The npm package is staged from build output and repository files at ship
+# time; only its manifest is durable.
+/npm/bin
+/npm/README.md
+/npm/LICENSE

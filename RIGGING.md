@@ -63,8 +63,6 @@
 - dependency: ast-grep
 - dependency: gplint
 - dependency: mandoc
-- dependency: tlrc
-- dependency: signal-hook
 - dependency: bwrap >= 0.11.2
 - dependency: tui-markdown, default-features = false
 - dependency: clap_mangen
@@ -73,4 +71,7 @@
 ## Outbound
 - outbound: crates.io
 - ship: `cargo publish`
-- verify: `cargo search tinman`
+- verify: `d=$(mktemp -d); cargo install tinman --version "$(rg -m1 '^version = ' Cargo.toml | cut -d'"' -f2)" --root "$d" --locked && "$d/bin/tinman" --version`
+- outbound: npm
+- ship: `cargo build --release && install -D target/release/tinman npm/bin/tinman && cp README.md LICENSE npm/ && npm publish npm --access public`
+- verify: `d=$(mktemp -d); npm install --prefix "$d" @dk/tinman@latest && "$d/node_modules/.bin/tinman" --version`
