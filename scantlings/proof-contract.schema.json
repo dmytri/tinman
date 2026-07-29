@@ -308,6 +308,59 @@
           "minLength": 1
         }
       }
+    },
+    {
+      "title": "Deserialization strictness contract",
+      "description": "Requires a derive attribute on every deserializable struct under the named paths, so a document key the model does not define is refused rather than silently dropped. Unit-variant enums are strict by construction, since an unrecognised value is already an unknown-variant error, so the requirement binds struct types and struct-variant enums.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$id",
+        "title",
+        "description",
+        "requiredDeriveAttribute",
+        "searchPaths"
+      ],
+      "properties": {
+        "$id": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiredDeriveAttribute": {
+          "type": "string",
+          "minLength": 1
+        },
+        "searchPaths": {
+          "description": "Repository-relative paths whose deserializable types the requirement binds.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exemptTypes": {
+          "description": "Types the requirement does not bind, each a deliberate decision rather than an oversight.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   ]
 }

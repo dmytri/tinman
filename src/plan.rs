@@ -25,7 +25,9 @@ pub struct Plan {
 /// with it. A source whose terms were not stated carries no licence.
 ///
 /// @planks("a recorded plan is serialized and read back")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Source {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,8 +53,9 @@ pub enum FlowStep {
 /// @planks("execution fails and reports the status {int}")
 /// @planks("the step's standard output is {string}")
 /// @planks("a flow whose only step runs {string} in the directory {string}")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "RunForm")]
+#[serde(from = "RunForm", deny_unknown_fields)]
 pub struct RunProcess {
     pub command: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,20 +73,50 @@ pub struct RunProcess {
 /// @planks("the flow passes")
 /// @planks("execution fails and reports the step that failed")
 /// @planks("a flow whose only step runs {string} in the directory {string}")
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
+/// @planks("parsing fails and reports the unknown field {string}")
 enum RunForm {
     Command(String),
     Boolean(bool),
-    Full {
-        command: String,
-        #[serde(default)]
-        cwd: Option<String>,
-        #[serde(default)]
-        status: i32,
-        #[serde(default)]
-        stdin: Option<String>,
-    },
+    Full(RunFull),
+}
+
+/// The map form of a run entry: the command, the directory it runs in, the exit
+/// status expected, and the standard input fed to it.
+///
+/// @planks("a flow whose only step runs {string} in the directory {string}")
+/// @planks("parsing fails and reports the unknown field {string}")
+/// @planks("the verifier checks the plan deserialization strictness contract")
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunFull {
+    command: String,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    status: i32,
+    #[serde(default)]
+    stdin: Option<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for RunForm {
+    /// Read a run entry by the shape it was written in. The written shape
+    /// selects the form, so the map form's own failure is the failure reported:
+    /// a field the map form does not define is named rather than lost behind a
+    /// report that no form matched.
+    ///
+    /// @planks("parsing fails and reports the unknown field {string}")
+    fn deserialize<D>(deserializer: D) -> Result<RunForm, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match serde_yaml::Value::deserialize(deserializer)? {
+            serde_yaml::Value::String(command) => Ok(RunForm::Command(command)),
+            serde_yaml::Value::Bool(flag) => Ok(RunForm::Boolean(flag)),
+            written => RunFull::deserialize(written)
+                .map(RunForm::Full)
+                .map_err(serde::de::Error::custom),
+        }
+    }
 }
 
 impl From<RunForm> for RunProcess {
@@ -107,16 +140,11 @@ impl From<RunForm> for RunProcess {
                 status: 0,
                 stdin: None,
             },
-            RunForm::Full {
-                command,
-                cwd,
-                status,
-                stdin,
-            } => RunProcess {
-                command,
-                cwd,
-                status,
-                stdin,
+            RunForm::Full(full) => RunProcess {
+                command: full.command,
+                cwd: full.cwd,
+                status: full.status,
+                stdin: full.stdin,
             },
         }
     }
@@ -125,7 +153,9 @@ impl From<RunForm> for RunProcess {
 /// A terminal program and the steps driving it.
 ///
 /// @planks("the flow's first step drives the command {string}")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TuiProcess {
     pub command: String,
     #[serde(default, with = "serde_yaml::with::singleton_map_recursive")]
@@ -153,7 +183,9 @@ pub enum Action {
 /// the collected items are kept under.
 ///
 /// @planks("a recorded plan is serialized and read back")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Capture {
     pub role: String,
     pub items: String,
@@ -172,8 +204,9 @@ pub struct Capture {
 /// @planks("the plan records the locator's binding as {string}")
 /// @planks("a recorded plan is serialized and read back")
 /// @planks("that plan is replayed")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "LocatorForm")]
+#[serde(from = "LocatorForm", deny_unknown_fields)]
 pub struct Locator {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -190,8 +223,9 @@ pub struct Locator {
 /// @planks("the step's locator names no role")
 /// @planks("a recorded plan is serialized and read back")
 /// @planks("that plan is replayed")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(serde::Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 enum LocatorForm {
     Name(String),
     Full {
@@ -237,7 +271,9 @@ impl From<LocatorForm> for Locator {
 /// Enter a value into the textbox carrying a label.
 ///
 /// @planks("the two parsed plans are identical")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fill {
     pub label: String,
     pub value: String,
@@ -251,8 +287,9 @@ pub struct Fill {
 /// @planks("the step expects the text {string}")
 /// @planks("the plan records the locator's binding as {string}")
 /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "ExpectationForm")]
+#[serde(from = "ExpectationForm", deny_unknown_fields)]
 pub struct Expectation {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,8 +304,9 @@ pub struct Expectation {
 ///
 /// @planks("the step expects the text {string}")
 /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(serde::Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 enum ExpectationForm {
     Text(String),
     Full {

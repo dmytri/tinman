@@ -76,7 +76,9 @@ impl MountMode {
 /// read-only, so a grant is never wider than the plan states.
 ///
 /// @planks("the mount's mode is {string}")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Mount {
     pub source: String,
     pub target: String,
@@ -98,7 +100,9 @@ pub enum EnvOrigin {
 /// the target, however the operator's own environment carries it.
 ///
 /// @planks("a process is prepared and launched")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvGrant {
     pub from: EnvOrigin,
 }
@@ -125,8 +129,9 @@ impl Backend {
 /// @planks("the parsed sandbox specification denies network access")
 /// @planks("the parsed sandbox specification provisions an empty home")
 /// @planks("a process is prepared and launched")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SandboxSpec {
     pub home: Home,
     pub network: Network,

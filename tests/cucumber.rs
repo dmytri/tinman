@@ -969,6 +969,13 @@ async fn verifier_checks_diagnostic_stream_boundary(world: &mut TinmanWorld) {
     ));
 }
 
+#[when("the verifier checks the plan deserialization strictness contract")]
+async fn verifier_checks_plan_deserialization_strictness(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_deserialization_strictness(
+        "scantlings/plan-deserialization-strictness.json",
+    ));
+}
+
 #[when(expr = "the verifier checks the seams named in {string}")]
 async fn verifier_checks_named_seams(world: &mut TinmanWorld, contract: String) {
     world.boundary_counterexamples = Some(support::check_seam_references(&contract));
@@ -6769,6 +6776,20 @@ async fn a_plan_whose_first_step_uses_keyword(world: &mut TinmanWorld, keyword: 
         .push(plan_with_only_step(&format!("{keyword}: Settings")));
 }
 
+#[given(expr = "a harness plan whose run step carries the field {string} where {string} was meant")]
+async fn a_plan_whose_run_step_carries_the_field(
+    world: &mut TinmanWorld,
+    written: String,
+    _intended: String,
+) {
+    // The plan carries what the operator wrote. What they meant is the
+    // scenario's data rather than the parser's: a field the model does not
+    // define is refused whichever field it was mistyped from.
+    world.plan_sources.push(format!(
+        "flow:\n  - run:\n      command: printf READY\n      {written}: Saved\n"
+    ));
+}
+
 #[given("a harness plan that defines no flow")]
 async fn a_plan_that_defines_no_flow(world: &mut TinmanWorld) {
     world
@@ -6831,6 +6852,21 @@ async fn parsing_reports_unknown_keyword(world: &mut TinmanWorld, keyword: Strin
     assert!(
         message.to_lowercase().contains("unknown"),
         "the parse failure does not report the keyword as unknown: {message}"
+    );
+}
+
+#[then(expr = "parsing fails and reports the unknown field {string}")]
+async fn parsing_reports_unknown_field(world: &mut TinmanWorld, field: String) {
+    let message = world.parse_error.as_deref().unwrap_or_else(|| {
+        panic!("the plan parsed rather than failing: the field {field:?} was accepted and dropped")
+    });
+    assert!(
+        message.contains(&field),
+        "the parse failure does not name {field:?}: {message}"
+    );
+    assert!(
+        message.to_lowercase().contains("unknown field"),
+        "the parse failure does not report {field:?} as an unknown field: {message}"
     );
 }
 
@@ -6995,21 +7031,21 @@ async fn a_sandbox_section_mounting_with_mode(
 async fn a_sandbox_section_naming_no_environment(world: &mut TinmanWorld) {
     world
         .plan_sources
-        .push("backend: auto\nhome: empty\nnetwork: deny\n".to_string());
+        .push("home: empty\nnetwork: deny\n".to_string());
 }
 
 #[given(expr = "a plan sandbox section that injects {string} from the host")]
 async fn a_sandbox_section_injecting_from_the_host(world: &mut TinmanWorld, name: String) {
     world.plan_sources.push(format!(
-        "backend: auto\nhome: empty\nnetwork: deny\nenv:\n  {name}:\n    from: host\n"
+        "home: empty\nnetwork: deny\nenv:\n  {name}:\n    from: host\n"
     ));
 }
 
 #[given(expr = "a plan sandbox section whose path lists {string}")]
 async fn a_sandbox_section_whose_path_lists(world: &mut TinmanWorld, entry: String) {
-    world.plan_sources.push(format!(
-        "backend: auto\nhome: empty\nnetwork: deny\npath:\n  - {entry}\n"
-    ));
+    world
+        .plan_sources
+        .push(format!("home: empty\nnetwork: deny\npath:\n  - {entry}\n"));
 }
 
 #[given(expr = "the operator's environment defines {string} as {string}")]
@@ -11003,8 +11039,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all twenty name that version")]
-async fn all_twenty_name_that_version(world: &mut TinmanWorld) {
+#[then("all twenty-one name that version")]
+async fn all_twenty_one_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -11015,8 +11051,8 @@ async fn all_twenty_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        20,
-        "twenty schema URIs are published, found {}: {}",
+        21,
+        "twenty-one schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -11041,7 +11077,7 @@ async fn all_twenty_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the nine scantlings that declare no JSON Schema dialect")]
+#[given("the ten scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -11067,16 +11103,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all nine validate")]
-async fn all_nine_validate(world: &mut TinmanWorld) {
+#[then("all ten proof contracts validate")]
+async fn all_ten_proof_contracts_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        9,
-        "nine scantlings declare no dialect, found {}: {}",
+        10,
+        "ten scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

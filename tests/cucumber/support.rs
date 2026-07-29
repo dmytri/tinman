@@ -90,6 +90,21 @@ pub struct SeamReferenceContract {
     pub forbidden_references: Vec<String>,
 }
 
+/// A deserialization strictness contract: the derive attribute every bound type
+/// must carry, the paths whose deserializable types the requirement binds, and
+/// the types it does not bind.
+/// `scantlings/plan-deserialization-strictness.json` is read into this shape.
+/// The contract bounds paths rather than listing types, so a type a later
+/// feature adds is guarded by a contract nobody edited.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeserializationStrictness {
+    pub required_derive_attribute: String,
+    pub search_paths: Vec<String>,
+    #[serde(default)]
+    pub exempt_types: Vec<String>,
+}
+
 /// The wall-clock ceiling one timed seam must be observed to meet.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3669,6 +3684,162 @@ pub fn check_construction_boundary(contract_path: &str) -> Vec<String> {
         ));
     }
     bad
+}
+
+/// Check every deserializable type under the contract's paths for the derive
+/// attribute that refuses a field the model does not define. Returns
+/// counterexamples; an empty list means every bound type is strict.
+///
+/// The requirement binds struct types and struct-variant enums. A unit-variant
+/// enum is strict by construction, since an unrecognised value is already an
+/// unknown-variant error, and a newtype-variant enum carries no fields of its
+/// own. A scan that reached no bound type would report a clean bill, so the
+/// floor is asserted here: the search paths carry at least one bound type, and a
+/// contract that found none is itself a counterexample.
+pub fn check_deserialization_strictness(contract_path: &str) -> Vec<String> {
+    let contract: DeserializationStrictness = read_policy(contract_path);
+    let mut bad = Vec::new();
+    let mut bound = 0usize;
+    for path in &contract.search_paths {
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(e) => {
+                bad.push(format!("search path {path} unreadable: {e}"));
+                continue;
+            }
+        };
+        for item in deserializable_items(&source) {
+            if !item.bound || contract.exempt_types.contains(&item.name) {
+                continue;
+            }
+            bound += 1;
+            if !item
+                .attributes
+                .contains(&contract.required_derive_attribute)
+            {
+                bad.push(format!(
+                    "{path}:{} {} deserializes an operator's plan without {}",
+                    item.line, item.name, contract.required_derive_attribute
+                ));
+            }
+        }
+    }
+    if bound == 0 {
+        bad.push(format!(
+            "no bound deserializable type was found under {}, so the scan asserted nothing",
+            contract.search_paths.join(", ")
+        ));
+    }
+    bad
+}
+
+/// One deserializable type a source declares: its name, the line it is declared
+/// on, the attributes attached to it, and whether the strictness requirement
+/// binds it.
+struct DeserializableItem {
+    name: String,
+    line: usize,
+    attributes: String,
+    bound: bool,
+}
+
+/// Every type in `source` that derives `Deserialize`, with the attributes
+/// attached to its declaration.
+///
+/// Attributes are siblings of the item they attach to rather than children, so
+/// the reader accumulates them until a declaration arrives and clears them
+/// after. A doc comment carries no attribute, so a comment naming the required
+/// attribute in prose never stands in for the attribute itself.
+fn deserializable_items(source: &str) -> Vec<DeserializableItem> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut found = Vec::new();
+    let mut attributes = String::new();
+    let mut open = 0usize;
+    for (index, raw) in lines.iter().enumerate() {
+        let line = raw.trim();
+        if open > 0 {
+            attributes.push_str(line);
+            open += line.matches('[').count();
+            open = open.saturating_sub(line.matches(']').count());
+            continue;
+        }
+        if line.starts_with("#[") {
+            attributes.push_str(line);
+            open = line
+                .matches('[')
+                .count()
+                .saturating_sub(line.matches(']').count());
+            continue;
+        }
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+        if let Some((name, kind)) = declared_type(line)
+            && attributes.contains("Deserialize")
+        {
+            let bound = match kind {
+                TypeKind::Struct => true,
+                TypeKind::Enum => enum_has_struct_variant(&lines[index..]),
+            };
+            found.push(DeserializableItem {
+                name,
+                line: index + 1,
+                attributes: attributes.clone(),
+                bound,
+            });
+        }
+        attributes.clear();
+    }
+    found
+}
+
+/// The two declaration forms the strictness requirement reads differently.
+enum TypeKind {
+    Struct,
+    Enum,
+}
+
+/// The type a declaration line declares, as its name and its form. A line
+/// declaring neither a struct nor an enum answers nothing.
+fn declared_type(line: &str) -> Option<(String, TypeKind)> {
+    let body = line
+        .strip_prefix("pub(crate) ")
+        .or_else(|| line.strip_prefix("pub "))
+        .unwrap_or(line);
+    let (kind, rest) = match body.strip_prefix("struct ") {
+        Some(rest) => (TypeKind::Struct, rest),
+        None => (TypeKind::Enum, body.strip_prefix("enum ")?),
+    };
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some((name, kind))
+}
+
+/// Whether the enum declared on `lines[0]` carries a variant with a field
+/// block. Such a variant deserializes named fields of its own, so the
+/// strictness requirement binds it; a unit or newtype variant names none.
+fn enum_has_struct_variant(lines: &[&str]) -> bool {
+    let mut depth = 0usize;
+    for (index, raw) in lines.iter().enumerate() {
+        let line = raw.trim();
+        if index > 0
+            && depth == 1
+            && let Some(head) = line.split('{').next()
+            && line.contains('{')
+            && !head.trim().is_empty()
+            && head.trim().chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            return true;
+        }
+        depth += line.matches('{').count();
+        depth = depth.saturating_sub(line.matches('}').count());
+        if index > 0 && depth == 0 {
+            return false;
+        }
+    }
+    false
 }
 
 /// The backend identity that names no sandbox at all.
