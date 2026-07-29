@@ -115,3 +115,11 @@ Feature: command surface
     When the operator inspects that command with the streams captured separately
     Then the error stream reports the failure
     And the data stream carries nothing
+
+  Rule: the three scenarios above each prove one path and say nothing about the path beside it, which is how a fourth survived them. It sat in the inspect --examples arms and was found by a command rather than by eye, after all three were green. A bound over the implementation tree is the form that reaches it and reaches the fifth a later command adds, so the scenarios stay as the operator-facing proof and the contract below carries exhaustiveness.
+
+  @contract
+  Scenario: no failure reaches the data stream
+    Given the implementation sources
+    When the verifier checks the diagnostic stream boundary
+    Then no counterexample is found

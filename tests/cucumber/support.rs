@@ -3726,28 +3726,87 @@ pub fn check_seam_references(contract_path: &str) -> Vec<String> {
         ));
     }
     for path in &contract.search_paths {
-        let source = match std::fs::read_to_string(path) {
-            Ok(source) => source,
-            Err(e) => {
-                bad.push(format!("seam source {path} unreadable: {e}"));
-                continue;
+        let sources = if std::path::Path::new(path).is_dir() {
+            let found = rust_sources_under(path);
+            if found.is_empty() {
+                bad.push(format!(
+                    "seam search path {path} holds no Rust source, so the scan asserted nothing"
+                ));
             }
+            found
+        } else {
+            vec![path.clone()]
         };
-        for (index, line) in source.lines().enumerate() {
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
-            for reference in &contract.forbidden_references {
-                if line.contains(reference) {
-                    bad.push(format!(
-                        "{path}:{} carries the forbidden construct {reference}",
-                        index + 1
-                    ));
+        for source_path in sources {
+            let source = match std::fs::read_to_string(&source_path) {
+                Ok(source) => source,
+                Err(e) => {
+                    bad.push(format!("seam source {source_path} unreadable: {e}"));
+                    continue;
+                }
+            };
+            for (index, line) in source.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for reference in &contract.forbidden_references {
+                    if carries_token(line, reference) {
+                        bad.push(format!(
+                            "{source_path}:{} carries the forbidden construct {reference}",
+                            index + 1
+                        ));
+                    }
                 }
             }
         }
     }
     bad
+}
+
+/// Whether `line` carries `reference` as a whole token rather than as a
+/// fragment of a longer identifier.
+///
+/// A plain substring test reports `println!("{failure}")` inside
+/// `eprintln!("{failure}")`, so a contract forbidding a write to the data stream
+/// reddens on every correct write to the error stream, and the seams the
+/// contract exists to protect are the ones it accuses. An occurrence counts only
+/// where the characters flanking it are not identifier characters, checked at
+/// whichever end of the reference is itself an identifier character.
+fn carries_token(line: &str, reference: &str) -> bool {
+    let identifier = |c: char| c.is_alphanumeric() || c == '_';
+    let guard_start = reference.chars().next().is_some_and(identifier);
+    let guard_end = reference.chars().next_back().is_some_and(identifier);
+    line.match_indices(reference).any(|(start, _)| {
+        let before_ok = !guard_start || !line[..start].chars().next_back().is_some_and(identifier);
+        let after_ok = !guard_end
+            || !line[start + reference.len()..]
+                .chars()
+                .next()
+                .is_some_and(identifier);
+        before_ok && after_ok
+    })
+}
+
+/// Every Rust source under `root`, depth first and sorted. A search path naming
+/// a tree rather than one file is expanded here, so a contract that guards a
+/// whole implementation directory reaches a module added later that nobody
+/// listed. A root that cannot be read yields nothing, and the caller's floor
+/// reports that as a counterexample rather than a clean bill.
+fn rust_sources_under(root: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(rust_sources_under(&path.to_string_lossy()));
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            found.push(path.to_string_lossy().into_owned());
+        }
+    }
+    found.sort();
+    found
 }
 
 /// The timed seams and their ceilings, as the latency budget contract declares

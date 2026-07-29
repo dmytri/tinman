@@ -14,7 +14,7 @@ Feature: methodology conformance
     Then no rule in the set reports a match
     And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules
 
-  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; seven scantlings carry no dialect because they are proof contracts discharged by their own checkers.
+  Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; the proof contracts carry no dialect because they are discharged by their own checkers instead. The counts live in the scenario steps, where a run checks them; restating one here would only decay, since nothing about a sentence changes when a scantling is added.
 
   @conformance
   Scenario: every scantling declaring a dialect satisfies it
@@ -26,9 +26,9 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all nineteen name that version
+    Then all twenty name that version
 
-  Rule: the project ships two artifacts from one tree, the crate and the npm package, and each carries its own version field. Nothing joins them. A bump applied to one is invisible to the other, and the schema-URI check above reads the crate manifest alone, so a forgotten npm manifest passes every gate and reaches the registry naming a version that describes different contents. The registry is where that is discovered, which is after it is published and cannot be taken back.
+  Rule: the project ships two artifacts from one tree, the crate and the npm package, and each carries its own version field. A bump applied to one is invisible to the other, and the schema-URI check above reads the crate manifest alone, so before the scenario below a forgotten npm manifest passed every gate and reached the registry naming a version that described different contents. The registry is where that would be discovered, which is after it is published and cannot be taken back.
 
   @conformance
   Scenario: both packaged manifests name one version
@@ -101,13 +101,13 @@ Feature: methodology conformance
     And no staging directory outlives the run that created it
     And the inventory searched every temporary-directory prefix the implementation creates
 
-  Rule: eight scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
+  Rule: the proof contracts carry no JSON Schema dialect because they are discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the eight scantlings that declare no JSON Schema dialect
+    Given the nine scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all eight validate
+    Then all nine validate
     And the meta-schema forbids a property it does not name
 
   Rule: a scantling creates no work until something references it, so an unreferenced one is a contract nobody discharges while every attestation stays green. Four of the boundary contracts are reached through a path literal in a step definition rather than through a path named in a scenario, which is the sound route and the reason this join reads both. The floor guards the reader: a listing that finds no scantlings and a directory that holds none both report zero.

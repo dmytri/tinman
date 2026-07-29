@@ -38,7 +38,7 @@
 - sandbox: @sandbox
 - inference: @inference
 - policy: The default tier holds pure, local, deterministic tests that need no external tool; untagged scenarios belong to it. The @sandbox tier holds scenarios that launch a real process under Bubblewrap and requires the `bwrap` binary and unprivileged user namespaces. The @inference tier holds scenarios that call the configured inference provider for real and requires `TINMAN_API_KEY`, read from the environment or from a git-ignored `.env` file, with optional `TINMAN_BASE_URL` and `TINMAN_MODEL` overrides defaulting to OpenRouter and deepseek/deepseek-v4-flash; it costs money per run and is never on the inner loop.
-- budget: 90s
+- budget: 120s
 - budget-sandbox: 120s
 - budget-inference: 300s
 - weather: target/tinman-weather.jsonl

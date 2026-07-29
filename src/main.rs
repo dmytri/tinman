@@ -145,12 +145,12 @@ fn main() {
                             && let Err(failure) =
                                 tinman::examples::write_plan(&probe.plan, &workspace.join(path))
                         {
-                            println!("{failure}");
+                            eprintln!("{failure}");
                             std::process::exit(1);
                         }
                     }
                     Err(failure) => {
-                        println!("{failure}");
+                        eprintln!("{failure}");
                         std::process::exit(1);
                     }
                 }

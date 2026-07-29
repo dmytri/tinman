@@ -459,7 +459,7 @@ Feature: interactive help
 
   Rule: the assistant box reads its title and its key hints from assets/help/assistant-prompt.txt, and the setup form beside it held the same kinds of copy as constants in src/setup.rs. One screen carried two catalogues, and only one of them was a catalogue an operator or a translator could edit without touching the implementation. The form now reads assets/help/setup-form.txt for its title, its key hints, and the sentence naming the environment variable it reads.
 
-  Rule: the label on the credential field stays a constant, and it is the one piece of that copy deliberately left behind. Its value ends in a space that the field's width arithmetic counts, so carrying it in a line-oriented text asset would make a trailing space the difference between a correct form and a misaligned one, invisible in every editor that trims on save. A catalogue an operator can edit is the goal, and a value they cannot see the end of is not one.
+  Rule: the label on the credential field is the one piece of that copy the asset does not carry, and the reason is arithmetic rather than oversight. Its value ends in a space the field's width calculation counts, so a line-oriented text asset would make a trailing space the difference between a correct form and a misaligned one, invisible in every editor that trims on save. A catalogue an operator can edit is what the move was for, and a value whose end they cannot see is not one.
 
   Scenario: the setup form draws the title and key hints the assets carry
     Given the operator has opened the setup form

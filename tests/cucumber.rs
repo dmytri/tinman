@@ -962,6 +962,13 @@ async fn verifier_checks_construction_boundary(world: &mut TinmanWorld) {
     ));
 }
 
+#[when("the verifier checks the diagnostic stream boundary")]
+async fn verifier_checks_diagnostic_stream_boundary(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_seam_references(
+        "scantlings/diagnostic-stream-boundary.json",
+    ));
+}
+
 #[when(expr = "the verifier checks the seams named in {string}")]
 async fn verifier_checks_named_seams(world: &mut TinmanWorld, contract: String) {
     world.boundary_counterexamples = Some(support::check_seam_references(&contract));
@@ -10996,8 +11003,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all nineteen name that version")]
-async fn all_nineteen_name_that_version(world: &mut TinmanWorld) {
+#[then("all twenty name that version")]
+async fn all_twenty_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -11008,8 +11015,8 @@ async fn all_nineteen_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        19,
-        "nineteen schema URIs are published, found {}: {}",
+        20,
+        "twenty schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -11034,7 +11041,7 @@ async fn all_nineteen_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the eight scantlings that declare no JSON Schema dialect")]
+#[given("the nine scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -11060,16 +11067,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all eight validate")]
-async fn all_eight_validate(world: &mut TinmanWorld) {
+#[then("all nine validate")]
+async fn all_nine_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        8,
-        "eight scantlings declare no dialect, found {}: {}",
+        9,
+        "nine scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

@@ -3,9 +3,9 @@ Feature: sandbox backend selection
   I want Tinman to choose the sandbox backend for the platform it runs on
   So that no program is ever launched outside a sandbox
 
-  Rule: the backend is Tinman's choice and never the plan's. A plan author says what the program under test needs, not what isolates it, so the sandbox specification carries no backend field and a plan naming one is refused by the schema rather than ignored. What the abstraction earns is a place for a second backend to land: macOS needs one of its own, and resolution is the seam that keeps adding it from being four edits at four launch sites.
+  Rule: a plan author says what the program under test needs, not what isolates it. The sandbox specification carried a backend field naming four values while no launch path read any of them, so a plan could name one and get Bubblewrap regardless. What the abstraction earns once that field is gone is a place for a second backend to land: macOS needs one of its own, and resolution is the seam that keeps adding it from being four edits at four launch sites.
 
-  Rule: there is no unsandboxed route. Construction of the one type the PTY runner launches is already bounded to the Bubblewrap backend over the whole implementation tree, so the property holds structurally rather than by an option nobody may set. The enum carried a "none" value and the resolver an unsafe parameter, and neither had a caller; an escape hatch a published schema advertises is a promise to the operator whether or not the code behind it exists.
+  Rule: construction of the one type the PTY runner launches is bounded to the Bubblewrap backend over the whole implementation tree, which is where the absence of an unsandboxed route already rested. The enum carried a "none" value and the resolver an unsafe parameter, and neither had a caller; an escape hatch a published schema advertises is a promise to the operator whether or not code stands behind it. The scenario below is what makes that absence checkable rather than incidental.
 
   Scenario: the backend resolved for Linux is Bubblewrap
     Given the running platform is Linux

@@ -9,6 +9,24 @@ This project uses **Shipshape**, a spec-driven, context-isolated workflow. Bindi
 - Specifications are durable. Production code under `src/` is disposable from the specs.
 - Verification is our dev rigging: cucumber-rs, run as a `cargo test` binary. It is real by default and exercises real Tinman seams. This real-by-default rule governs how we test Tinman; it is distinct from Tinman's own mandate, which is to drive real TUIs.
 
+### Writing durable prose
+
+**Durable prose never references watchbill membership.** Read this before writing a doc line beside a new scenario, which is where the temptation lands.
+
+A watchbill is transient by design: custody strikes it the moment the voyage closes. A sentence saying a scenario is on the watchbill therefore begins decaying at that instant, and it decays silently, because nothing about the prose changes when the file disappears. The reader meets a confident claim with nothing left to contradict it. This file has already carried that drift twice.
+
+Record that the scenario exists and what it asserts. How it was scheduled is history, and history lives in git.
+
+Dated records of what was decided when are durable and wanted: "condemned at the 2026-07-25 harbour" stays true forever. It is only the claim that something is *currently* scheduled that rots. The test is whether the sentence is still true after custody closes the voyage.
+
+**Durable prose names the check that carries a count rather than restating the number.** Same failure, one step further out.
+
+A hardcoded count decays exactly as a watchbill reference does, and silently for the same reason: nothing about the sentence changes when a scantling is added, so it goes quiet rather than wrong. This file has carried a stale schema-URI count at seven, at eight, at nine and at nineteen. Each was true when written.
+
+The count already has an owner, and it is the scenario. It is checked on every run and cannot drift without reddening, which is a guarantee prose can never offer. So point at it: "joined to the packaged version by `every published schema URI names the packaged version`" stays true at any count, while "nineteen" is true only until the next voyage adds one.
+
+The test is the same one, applied further out: is the sentence still true after the next voyage? A measurement with a date is exempt, because it is a record rather than a claim about now: "7,221,104 bytes on 2026-07-29" stays true forever. So is a small enumeration the sentence itself spells out, where the reader can count the items and see the number is right.
+
 ## Isolation
 
 Sandboxed execution is the default. `tinman record` launches its target inside a sandbox; the only Linux backend is Bubblewrap. Unsandboxed execution is a hard failure unless an explicit unsafe option is set. The operator's real home, environment, and PATH are never inherited by default. The PTY runner accepts only a prepared process and never constructs backend arguments itself.
@@ -39,7 +57,7 @@ Two facts cucumber-rs does not give us: it emits no per-scenario duration, so we
 
 ## Methodology checks
 
-Methodology breaches surface as failing verification rather than as review comments. The rule set lives in `scantlings/verification-conformance` and is discharged by the `conformance` command, `ast-grep scan`, configured by `sgconfig.yml`. It carries four rules: plank form, plank presence, perturbation quiescence, and forbidden doubles. The scenarios that run it are tagged `@conformance` in `features/methodology-conformance.feature`.
+Methodology breaches surface as failing verification rather than as review comments. The rule set lives in `scantlings/verification-conformance` and is discharged by the `conformance` command, `ast-grep scan`, configured by `sgconfig.yml`. It carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules, which is the floor `the verification-conformance rule set reports no match` asserts. The scenarios that run it are tagged `@conformance` in `features/methodology-conformance.feature`.
 
 Watchbill-shape conformance is deliberately absent. Shipwright derived it and Captain condemned it at the 2026-07-25 harbour, on the decision that the watchbill stays hand-checked rather than schema-backed. A later harbour that re-derives it is repeating a settled decision, not finding a gap.
 
@@ -57,7 +75,7 @@ That derivation covers the pattern side of the trace only. The last hop, which s
 
 Two derived checks report a known weakness, per the Check tooling rule. `plank-inventory` and the `plank-form` rule match a `line_comment` carrying `@planks`, so they see the `///` shape but cannot read what the comment says; rustc's own rule that a doc comment must attach to an item, with clippy run at `-D warnings`, is what makes the placement half of plank form executable. The `forbidden-doubles` rule keys on a type name matching `Mock`, `Fake`, `Stub` or `Dummy`, so a double named anything else is invisible to it: `LocalProvider` in verification support is a real double, correctly marked `@exceptional-double`, that the rule would not have reddened unmarked. Closing that needs a rule keyed on the double's shape rather than its name.
 
-A coverage blind spot the summary does not announce: a scenario that drives `tinman` as a child process and then SIGKILLs it loses that child's coverage entirely, because a killed instrumented process never flushes its counters. `src/driver.rs` therefore reads 0.00% across every tier while the 24 scenarios binding its planks pass, and `fn main()` reads 0 executions in a run where seven driver scenarios are green. Read that 0% as unattributed, never as unreached: judge reachability from the import and call graph, per the "Current design only" Article.
+A coverage blind spot the summary does not announce: a scenario that drives `tinman` as a child process and then SIGKILLs it loses that child's coverage entirely, because a killed instrumented process never flushes its counters. `src/driver.rs` therefore reads 0.00% across every tier while the scenarios binding its planks pass, and `fn main()` reads 0 executions in a run where the driver scenarios are green. Read that 0% as unattributed, never as unreached: judge reachability from the import and call graph, per the "Current design only" Article.
 
 See `RIGGING.md` for the exact commands. Note the cucumber-rs constraint: `--name` and `--tags` are mutually exclusive, and the exclusion reaches the environment variable too, because `CUCUMBER_FILTER_TAGS` is that same `--tags` argument. A run passing both fails with `the argument '--name <regex>' cannot be used with '--tags <tagexpr>'`, whichever route the tag expression arrives by. So `focused` genuinely cannot carry the tag exclusion the Rigging read contract asks of every verification command, and no rewrite of the value closes it.
 
@@ -73,13 +91,13 @@ These move together or not at all:
 
 - `version` in `Cargo.toml`
 - `version` in `npm/package.json`
-- every published schema `$id` URI, nineteen as of 2026-07-29, across `scantlings/` and `assets/examples/`
+- every published schema `$id` URI, across `scantlings/` and `assets/examples/`, which `every published schema URI names the packaged version` joins to the packaged version and counts
 
-Two limits on what the checks around this can see, both paid for on 2026-07-29.
+Two facts about the checks around this coupling, both paid for on 2026-07-29.
 
 `every published schema URI names the packaged version` compares the URIs against `Cargo.toml`, so it catches a forgotten URI and never a changed contract under an unchanged version. A schema whose content moves while the version stands leaves every URI still naming `@vX.Y.Z`, and the check stays green while that pinned URI serves something the repository no longer contains. The tree is in that state now: `sandbox-spec.schema.json` lost a required field with `Cargo.toml` still reading 0.2.0. The URI is pinned to a tag rather than to a branch, so publishing the next version is what resolves it, and a consumer reading the pinned URI meanwhile gets the older contract.
 
-`both packaged manifests name one version` is newly authored and on the watchbill. Before it nothing joined the two manifests at all, so a bump applied to one could reach a registry naming a version that described different contents.
+`both packaged manifests name one version` joins the two manifest versions and reddens when they diverge. Before it nothing joined them at all, so a bump applied to one could reach a registry naming a version that described different contents.
 
 ## Outbound
 
@@ -91,7 +109,7 @@ Tinman ships two targets, and they release independently. `RIGGING.md` carries t
 
 The release profile sets `strip = true`, and that setting exists for this target. The binary is the package, and the intended invocation is the unversioned `npx @dk/tinman`, so anyone who has not pinned fetches it again on every run and debug symbols are weight none of them can use. Stripping took the binary from 7,221,104 to 5,610,464 bytes, the tarball from 2.7 MB to 2.5 MB, and the unpacked package from 7.2 MB to 5.6 MB. Verification is unaffected, because the scenarios drive the test-profile binary through `CARGO_BIN_EXE_tinman` rather than the release one.
 
-Two versions have to move together and nothing yet joins them: `version` in `Cargo.toml` and `version` in `npm/package.json`. The schema-URI conformance scenario already reads the packaged version from `Cargo.toml` alone, so a bumped crate and a forgotten npm manifest is a drift no check reports.
+Two versions have to move together: `version` in `Cargo.toml` and `version` in `npm/package.json`. The conformance scenario `both packaged manifests name one version` joins them and reddens when they diverge. The schema-URI conformance scenario reads the packaged version from `Cargo.toml` alone, so that join is what stands between a bumped crate and a forgotten npm manifest reaching a registry.
 
 **An outbound `verify` line installs and runs the artifact a user would receive. A registry lookup is not a verification.** A lookup answers whether a name resolves, which is a question nobody was asking; it says nothing about what the resolved artifact contains or whether it runs. Both lines here download the published package, install it, and execute the shipped binary, per the Outbound verification policy.
 
