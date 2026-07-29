@@ -34,7 +34,6 @@ pub enum Backend {
     Auto,
     Bubblewrap,
     Mac,
-    None,
 }
 
 /// How the sandbox home directory is provisioned.
@@ -113,7 +112,6 @@ impl Backend {
             "auto" => Some(Backend::Auto),
             "bubblewrap" => Some(Backend::Bubblewrap),
             "mac" => Some(Backend::Mac),
-            "none" => Some(Backend::None),
             _ => None,
         }
     }
@@ -130,7 +128,6 @@ impl Backend {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SandboxSpec {
-    pub backend: Backend,
     pub home: Home,
     pub network: Network,
     pub mounts: Vec<Mount>,
@@ -139,14 +136,14 @@ pub struct SandboxSpec {
 }
 
 impl SandboxSpec {
-    /// The default sandbox specification for a recorded run: auto backend, an
-    /// empty home, and network denied, so isolation is the starting point.
+    /// The default sandbox specification for a recorded run: an empty home and
+    /// network denied, so isolation is the starting point. The backend is
+    /// Tinman's choice, so the specification carries none.
     ///
     /// @planks("a sandbox specification that denies network access")
     /// @planks("the default sandbox specification for {string}")
     pub fn default_for_record() -> SandboxSpec {
         SandboxSpec {
-            backend: Backend::Auto,
             home: Home::Empty,
             network: Network::Deny,
             mounts: Vec::new(),

@@ -1504,11 +1504,25 @@ pub fn standing_session_dirs(driver_pid: u32) -> Vec<std::path::PathBuf> {
 pub struct SandboxInventory {
     /// The sources the sweep read, named as it read them.
     pub searched: Vec<String>,
+    /// The temporary-directory name prefixes the sweep recognizes, named as it
+    /// declares them rather than derived from the implementation, so a prefix
+    /// the implementation gains and this list does not is a difference the
+    /// scenario can see.
+    pub searched_prefixes: Vec<String>,
     pub searched_dirs: Vec<String>,
     pub searched_processes: Vec<String>,
     pub orphan_dirs: Vec<String>,
     pub orphan_processes: Vec<String>,
 }
+
+/// The temporary-directory name prefixes this sweep searches.
+///
+/// The implementation decides which prefixes exist, and the scenario joins this
+/// declared list against the prefixes read from the implementation tree, so a
+/// prefix added there and not added here reddens rather than accumulating
+/// unswept. Longer prefixes come first: the bare `tinman-` prefix is a prefix of
+/// the others, so it stands last as the catch-all.
+pub const SWEPT_TEMP_PREFIXES: &[&str] = &["tinman-copy-mount-", "tinman-terminfo-", "tinman-"];
 
 static STAGING_RECLAIMED: std::sync::Once = std::sync::Once::new();
 
@@ -1544,13 +1558,57 @@ fn process_is_live(pid: u32) -> bool {
 }
 
 /// The process identifier a Tinman temporary directory's name carries. Tinman
-/// names one `tinman-<kind>-<pid>-<nanos>`, so the run that made it is named in
-/// the directory itself rather than in a record a killed run never wrote.
+/// names one `<prefix><pid>-<tail>`, so the run that made it is named in the
+/// directory itself rather than in a record a killed run never wrote. A kind
+/// carries dashes of its own, such as the copy-mount staging prefix, so the
+/// owner is the first component after the prefix that reads as an identifier
+/// rather than a component counted from the front.
 fn staging_dir_owner(name: &str) -> Option<u32> {
-    let rest = name.strip_prefix("tinman-")?;
-    let (_, tail) = rest.split_once('-')?;
-    let (pid, _) = tail.split_once('-')?;
-    pid.parse().ok()
+    let prefix = SWEPT_TEMP_PREFIXES
+        .iter()
+        .find(|prefix| name.starts_with(**prefix))?;
+    name[prefix.len()..]
+        .split('-')
+        .find_map(|part| part.parse::<u32>().ok())
+}
+
+/// The temporary-directory name prefixes the implementation creates, read from
+/// the implementation tree. Each creation site joins a `format!` literal onto
+/// the system temporary directory, so the prefix is that literal up to its first
+/// interpolation.
+pub fn implementation_temp_prefixes() -> Vec<String> {
+    let mut found = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir("src").expect("the implementation directory is readable") {
+        let path = entry.expect("an implementation directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let display = path.display().to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("implementation source {display} unreadable: {e}"));
+        for (index, _) in text.match_indices("temp_dir()") {
+            // The creation site is the join that follows, so the literal is read
+            // from a bounded tail rather than from the rest of the file: a
+            // `temp_dir()` used for anything else finds no literal of its own
+            // instead of borrowing the next one in the file.
+            let mut end = (index + 200).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let tail = &text[index..end];
+            let Some(open) = tail.find('"') else { continue };
+            let after = &tail[open + 1..];
+            let Some(close) = after.find('"') else {
+                continue;
+            };
+            let literal = &after[..close];
+            let prefix = literal.split('{').next().unwrap_or(literal);
+            if prefix.starts_with("tinman-") {
+                found.insert(prefix.to_string());
+            }
+        }
+    }
+    found.into_iter().collect()
 }
 
 /// The parent of `pid`, read from the process table. `None` when the process is
@@ -1565,7 +1623,13 @@ fn parent_of(pid: u32) -> Option<u32> {
 
 /// One sweep of the temporary directory and the process table.
 fn sweep_sandbox_resources() -> SandboxInventory {
-    let mut found = SandboxInventory::default();
+    let mut found = SandboxInventory {
+        searched_prefixes: SWEPT_TEMP_PREFIXES
+            .iter()
+            .map(|prefix| (*prefix).to_string())
+            .collect(),
+        ..SandboxInventory::default()
+    };
     let temp = std::env::temp_dir();
     if let Ok(entries) = std::fs::read_dir(&temp) {
         found.searched.push(temp.display().to_string());
@@ -1638,6 +1702,7 @@ pub fn standing_sandbox_resources() -> SandboxInventory {
             .cloned()
             .collect(),
         searched: second.searched,
+        searched_prefixes: second.searched_prefixes,
         searched_dirs: second.searched_dirs,
         searched_processes: second.searched_processes,
     }
@@ -2010,8 +2075,12 @@ pub fn start_interruptible(
         line.push(' ');
         line.push_str(&shell_quote(arg));
     }
+    // The shell's own status is the last command's, which would be the trailing
+    // `stty`, so the program's status is kept before the terminal is read and
+    // the shell leaves with it. Without this the session reports success
+    // whatever the program did.
     line.push_str(&format!(
-        "; printf '\\n{TERMINAL_STATE_MARKER}\\n'; stty -a"
+        "; __tinman_status=$?; printf '\\n{TERMINAL_STATE_MARKER}\\n'; stty -a; exit $__tinman_status"
     ));
     TerminalSession::start_shell_line(dir, &line, env, TERMINAL_COLS)
 }
@@ -3129,6 +3198,44 @@ fn scantling_documents() -> Vec<(String, serde_json::Value)> {
     found
 }
 
+/// Every scantling path under the scantlings directory, ordered by path.
+pub fn scantling_paths() -> Vec<String> {
+    scantling_documents()
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect()
+}
+
+/// The scantling paths that no scenario and no step definition names.
+///
+/// A scantling creates no work until something references it, so an unreferenced
+/// one is a contract nobody discharges while every attestation stays green. A
+/// boundary contract reached through a path literal in a step definition is
+/// reached as soundly as one named in a scenario, so both surfaces are read.
+pub fn unreached_scantlings(paths: &[String]) -> Vec<String> {
+    let mut sources = Vec::new();
+    for entry in std::fs::read_dir("features").expect("the specs directory is readable") {
+        let path = entry.expect("a specs directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) == Some("feature") {
+            sources.push(path);
+        }
+    }
+    sources.push(std::path::PathBuf::from("tests/cucumber.rs"));
+    sources.push(std::path::PathBuf::from("tests/cucumber/support.rs"));
+    let texts: Vec<String> = sources
+        .iter()
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("source {} unreadable: {e}", path.display()))
+        })
+        .collect();
+    paths
+        .iter()
+        .filter(|scantling| !texts.iter().any(|text| text.contains(scantling.as_str())))
+        .cloned()
+        .collect()
+}
+
 /// Every scantling that declares a JSON Schema dialect, as `(path, document)`
 /// pairs. A scantling carrying no `$schema` declares no dialect: it is a proof
 /// contract discharged by its own checker rather than a schema, so it is not a
@@ -3390,10 +3497,25 @@ pub fn published_schema_uris() -> Vec<(String, String)> {
     found
 }
 
-/// The version the package declares under `[package]` in its manifest.
+/// The version the package declares in its manifest.
+///
+/// Two packaged manifests are read here, the Cargo manifest and the npm
+/// manifest, so the reader dispatches on the manifest's own form rather than on
+/// the one the crate happens to use. A JSON manifest read as TOML declares no
+/// version by construction, which is the reading that cannot tell a manifest
+/// that disagrees from one that was never parsed.
 pub fn package_version(manifest_path: &str) -> String {
     let text = std::fs::read_to_string(manifest_path)
         .unwrap_or_else(|e| panic!("manifest {manifest_path} unreadable: {e}"));
+    if manifest_path.ends_with(".json") {
+        let document: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("manifest {manifest_path} did not parse: {e}"));
+        return document
+            .get("version")
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| panic!("manifest {manifest_path} declares no package version"))
+            .to_string();
+    }
     let mut in_package = false;
     for line in text.lines() {
         let line = line.trim();
@@ -3547,6 +3669,44 @@ pub fn check_construction_boundary(contract_path: &str) -> Vec<String> {
         ));
     }
     bad
+}
+
+/// The backend identity that names no sandbox at all.
+pub const UNSANDBOXED_BACKEND: &str = "none";
+
+/// Every outcome the backend resolution seam can return, as the names it
+/// constructs a resolved backend with, read from the seam's own source.
+///
+/// The seam is read rather than exercised because an outcome no caller reaches
+/// is still an outcome the seam offers. The type's own declaration names its
+/// field rather than a value, so a construction is read only where a string
+/// literal follows the field name.
+pub fn resolution_outcomes() -> Vec<String> {
+    let path = "src/backend.rs";
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("the backend resolution seam {path} unreadable: {e}"));
+    let mut found = Vec::new();
+    for (index, _) in source.match_indices("ResolvedBackend {") {
+        let mut end = (index + 400).min(source.len());
+        while !source.is_char_boundary(end) {
+            end -= 1;
+        }
+        let tail = &source[index..end];
+        let Some(field) = tail.find("name:") else {
+            continue;
+        };
+        let after = tail[field + "name:".len()..].trim_start();
+        let Some(rest) = after.strip_prefix('"') else {
+            continue;
+        };
+        let Some(close) = rest.find('"') else {
+            continue;
+        };
+        found.push(rest[..close].to_string());
+    }
+    found.sort();
+    found.dedup();
+    found
 }
 
 /// Check every seam the contract names against the references it forbids.

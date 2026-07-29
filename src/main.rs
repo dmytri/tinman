@@ -28,11 +28,14 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator runs {string} in an interactive terminal with stdin redirected from a file")
 /// @planks("the operator executes {string}")
 /// @planks("the operator tests that plan")
+/// @planks("the operator tests that plan with the streams captured separately")
+/// @planks("the operator tests the plan {string}")
 /// @planks("the operator runs that plan")
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects the fixture terminal program as JSON")
 /// @planks("the operator inspects the command {string}")
 /// @planks("the operator inspects {string}")
+/// @planks("the operator inspects that command with the streams captured separately")
 /// @planks("the operator inspects {string} with its documented examples")
 /// @planks("the operator inspects {string} with its documented examples and writes a plan")
 /// @planks("the operator inspects the fixture terminal program with its documented examples")
@@ -45,6 +48,7 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator records the command {string} with {string}")
 /// @planks("the operator records the fixture terminal program")
 /// @planks("the operator records that program")
+/// @planks("the operator records {string} to that file with the streams captured separately")
 /// @planks("the Tinman driver is running")
 /// @planks("the operator starts the driver")
 fn main() {
@@ -94,18 +98,28 @@ fn main() {
             };
             let workspace = std::env::current_dir().expect("the working directory is read");
             if let Err(failure) = tinman::record::record(&spec, &workspace, output.as_deref()) {
-                println!("{failure}");
+                eprintln!("{failure}");
                 std::process::exit(1);
             }
         }
         Some(Command::Test { plan }) => {
-            let source = std::fs::read_to_string(&plan)
-                .unwrap_or_else(|e| panic!("the plan {} was not read: {e}", plan.display()));
-            let plan = tinman::plan::parse(&source)
-                .unwrap_or_else(|e| panic!("the plan did not parse: {e}"));
+            let source = match std::fs::read_to_string(&plan) {
+                Ok(source) => source,
+                Err(e) => {
+                    eprintln!("the plan {} was not read: {e}", plan.display());
+                    std::process::exit(1);
+                }
+            };
+            let plan = match tinman::plan::parse(&source) {
+                Ok(plan) => plan,
+                Err(e) => {
+                    eprintln!("the plan did not parse: {e}");
+                    std::process::exit(1);
+                }
+            };
             let workspace = std::env::current_dir().expect("the working directory is read");
             if let Err(failure) = tinman::flow::execute_over_tree(&plan, &workspace, None) {
-                println!("{failure}");
+                eprintln!("{failure}");
                 std::process::exit(1);
             }
         }
@@ -155,7 +169,7 @@ fn main() {
                     }
                 }
                 Err(failure) => {
-                    println!("{failure}");
+                    eprintln!("{failure}");
                     std::process::exit(1);
                 }
             }

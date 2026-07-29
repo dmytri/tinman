@@ -137,6 +137,16 @@ Feature: sandboxed launch
     When the link it carries is read
     Then it names a heading the file at "README.md" carries
 
+  Rule: the scenario above reads the refusal asset as a document and asserts its link resolves. Nothing asserts an operator ever sees it. The asset at assets/help/sandbox-unavailable.txt carries two placeholders, the required version and the version found, matching the two values src/bwrap.rs interpolates into a one-line message of its own. No implementation module reads that asset, so the explanation that no flag lifts the sandbox requirement, the install link, and the note that the commands executing nothing still work reach nobody. The scenario below asserts the copy the operator meets is the copy the catalogue holds.
+
+  Scenario: the refusal an absent sandbox prints is the copy the assets carry
+    Given the Bubblewrap binary is not on the path
+    When the operator inspects the fixture terminal program
+    Then the refusal names the required Bubblewrap version
+    And the refusal explains that no flag lifts the sandbox requirement
+    And the refusal carries the install instructions link
+    And the refusal names the commands that still answer without a sandbox
+
   Rule: a prepared process is the only input the PTY runner launches, so whoever constructs one settles what isolation the launched program gets. A per-module reference contract reaches the modules someone remembered to write one for, and the modules that bypassed the backend were exactly the ones nobody had. A bound over the whole implementation tree is what leaves a command added later covered by a contract nobody edited.
 
   @contract

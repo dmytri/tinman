@@ -1,0 +1,13 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/backend-construction-boundary.json",
+  "title": "Sandbox backend construction boundary",
+  "description": "Only backend resolution constructs a sandbox backend. Tinman chooses the backend for the platform it runs on, so a launch path naming a concrete backend has decided the platform question for itself and will keep deciding it wrongly on the next platform. Discharged by the construction-boundary checker in verification support, which scans the implementation tree for construction expressions naming the type and reports any outside the permitted set. Attested by the @contract scenario in features/sandbox-backend-selection.feature.",
+  "constructedType": "BubblewrapBackend",
+  "permittedModules": [
+    "src/backend.rs"
+  ],
+  "searchPaths": [
+    "src"
+  ],
+  "rationale": "Resolution existed, carried a macOS variant and an unsupported-backend error, and had no caller: all four launch paths named the Bubblewrap backend directly, so the resolver was verified as a function while no operator could reach it. On macOS that is a clean compile, a successful launch attempt and a confusing failure when a binary is missing, where the honest answer is the unsupported-backend error the enum already carries. Bounding construction over the tree is what makes the second backend one edit rather than four, and it covers a launch path added later that nobody remembers to route."
+}

@@ -55,3 +55,11 @@ Feature: record command
     Given the file "session.yaml" already exists
     When the operator records the command "printf READY" with "--output session.yaml"
     Then recording fails and reports the file already exists
+
+  Rule: ending a recording sends the end-of-transmission character once every twenty milliseconds until the recorded program exits, and nothing bounds that loop. Every other wait in the recorder carries a ceiling, and the opening screen is taken as it stands once its deadline passes. A program that ignores the end of its input leaves the operator with a command that never returns and a terminal still in raw mode, which is the state the recorder took and only returns after the loop it never leaves.
+
+  Scenario: a recorded program that ignores the end of input ends at its deadline
+    Given the operator records a program that never exits when its input ends
+    When the operator ends the input
+    Then recording fails and reports the session reached its deadline
+    And the terminal is out of raw mode

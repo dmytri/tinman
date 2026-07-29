@@ -26,13 +26,24 @@ enum HomeMode {
     Overlay,
 }
 
+/// What a specification and command translate into: the Bubblewrap argument
+/// vector, the environment pairs the sandbox grants the program, and the
+/// staging directories the translation created, which the runner reclaims once
+/// the process has ended.
+#[derive(Debug)]
+struct Launch {
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    cleanup: Vec<String>,
+}
+
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
 /// availability check can be exercised against a name that is off PATH.
 ///
 /// @planks("the Bubblewrap executable is absent")
 #[derive(Debug, Clone)]
 pub struct BubblewrapBackend {
-    executable: String,
+    pub(crate) executable: String,
 }
 
 impl Default for BubblewrapBackend {
@@ -65,15 +76,20 @@ impl BubblewrapBackend {
     /// @planks("a Bubblewrap-prepared process that prints its home directory and the value of {string}")
     /// @planks("a Bubblewrap-prepared process that probes for a network route")
     pub fn generate_args(&self, spec: &SandboxSpec, command: &CommandSpec) -> Vec<String> {
-        self.args_with_home(spec, command, None, None)
+        self.launch_with_home(spec, command, None, None).args
     }
 
     /// The same argument vector, with `home` mounted at the sandbox home when
     /// the caller provides one, writable for a workspace the caller owns and
     /// reclaims, overlaid for the operator's own tree. The program starts in
     /// `cwd` under that home when the caller names one, so a command writing a
-    /// relative path lands in the directory the plan named.
+    /// relative path lands in the directory the plan named. The environment the
+    /// sandbox grants and the staging directories a copy mount created travel
+    /// out beside the arguments, so the prepared process reports both rather
+    /// than burying them in a flag vector nobody reads back.
     ///
+    /// @planks("the prepared process names {string} among its environment pairs")
+    /// @planks("the prepared process names that staging directory among the resources to reclaim")
     /// @planks("the Tinman driver has a session running {string}")
     /// @planks("a flow whose only step runs {string} in the directory {string}")
     /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
@@ -82,13 +98,15 @@ impl BubblewrapBackend {
     /// @planks("the operator runs that plan")
     /// @planks("the operator inspects a command that asks terminfo for the terminal width")
     /// @planks("the operator inspects {string}")
-    fn args_with_home(
+    fn launch_with_home(
         &self,
         spec: &SandboxSpec,
         command: &CommandSpec,
         home: Option<(&Path, HomeMode)>,
         cwd: Option<&str>,
-    ) -> Vec<String> {
+    ) -> Launch {
+        let mut granted = Vec::new();
+        let mut cleanup = Vec::new();
         let mut args = vec![
             "--unshare-all".to_string(),
             "--clearenv".to_string(),
@@ -167,7 +185,8 @@ impl BubblewrapBackend {
                     if let Ok(value) = std::env::var(name) {
                         args.push("--setenv".to_string());
                         args.push(name.clone());
-                        args.push(value);
+                        args.push(value.clone());
+                        granted.push((name.clone(), value));
                     }
                 }
             }
@@ -176,7 +195,11 @@ impl BubblewrapBackend {
         // writable bind or a private writable copy.
         for mount in &spec.mounts {
             let source = match mount.mode {
-                MountMode::Copy => writable_copy_of(&mount.source),
+                MountMode::Copy => {
+                    let staging = writable_copy_of(&mount.source);
+                    cleanup.push(staging.display().to_string());
+                    staging
+                }
                 MountMode::Readonly | MountMode::Writable => {
                     std::path::PathBuf::from(&mount.source)
                 }
@@ -192,7 +215,11 @@ impl BubblewrapBackend {
         // The command to run inside the sandbox.
         args.push(command.program.clone());
         args.extend(command.args.iter().cloned());
-        args
+        Launch {
+            args,
+            env: granted,
+            cleanup,
+        }
     }
 
     /// Prepare a process for the PTY runner. An unavailable Bubblewrap is a hard
@@ -254,8 +281,13 @@ impl BubblewrapBackend {
         self.prepare_home(spec, command, Some((tree, HomeMode::Overlay)), cwd)
     }
 
-    /// Prepare a process with the home mount the caller chose.
+    /// Prepare a process with the home mount the caller chose. The prepared
+    /// process carries the environment the sandbox grants and the staging
+    /// directories the translation created, so the runner launches it and
+    /// reclaims what it left behind without reading a Bubblewrap flag.
     ///
+    /// @planks("the prepared process names {string} among its environment pairs")
+    /// @planks("the prepared process names that staging directory among the resources to reclaim")
     /// @planks("a process is prepared and launched")
     /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
     /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
@@ -270,13 +302,13 @@ impl BubblewrapBackend {
         if !executable_available(&self.executable) {
             return Err("Bubblewrap is unavailable".to_string());
         }
-        let args = self.args_with_home(spec, command, home, cwd);
+        let launch = self.launch_with_home(spec, command, home, cwd);
         Ok(PreparedProcess {
             program: self.executable.clone(),
-            args,
-            env: Vec::new(),
+            args: launch.args,
+            env: launch.env,
             cwd: None,
-            cleanup: Vec::new(),
+            cleanup: launch.cleanup,
         })
     }
 }
@@ -326,27 +358,46 @@ fn executable_available(executable: &str) -> bool {
 /// installation must clear before anything is launched under it.
 const REQUIRED_VERSION: &str = "0.11.2";
 
+/// The refusal an unavailable sandbox prints, inlined at build time. The copy
+/// is the operator's, so the catalogue holds it and this module fills its two
+/// placeholders rather than writing a message of its own.
+const UNAVAILABLE: &str = include_str!("../assets/help/sandbox-unavailable.txt");
+
 /// Confirm Bubblewrap is on the path at a version at least `REQUIRED_VERSION`.
 /// A command that will launch a sandboxed program calls this before it does
 /// anything else, so an absent or too-old Bubblewrap refuses before a port is
-/// bound, a connection accepted, or a program executed. The message names what
-/// was found against what is required, so an absent Bubblewrap reads as
-/// "install" and a too-old one reads as "upgrade".
+/// bound, a connection accepted, or a program executed. The refusal is the
+/// asset's copy with what was found put against what is required, so an absent
+/// Bubblewrap reads as "install" and a too-old one reads as "upgrade".
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator starts the driver")
 /// @planks("the failure reports the required Bubblewrap version")
 /// @planks("the failure reports the version found and the version required")
+/// @planks("the refusal names the required Bubblewrap version")
+/// @planks("the refusal explains that no flag lifts the sandbox requirement")
+/// @planks("the refusal carries the install instructions link")
+/// @planks("the refusal names the commands that still answer without a sandbox")
 pub fn require_available() -> Result<(), String> {
     match installed_version("bwrap") {
-        None => Err(format!(
-            "Bubblewrap was not found on the path; Tinman requires Bubblewrap {REQUIRED_VERSION} or newer"
-        )),
+        None => Err(refusal("Bubblewrap was not found on the path.")),
         Some(found) if version_at_least(&found, REQUIRED_VERSION) => Ok(()),
-        Some(found) => Err(format!(
-            "Bubblewrap {found} was found but Tinman requires {REQUIRED_VERSION} or newer"
-        )),
+        Some(found) => Err(refusal(&format!("Bubblewrap {found} was found."))),
     }
+}
+
+/// The refusal asset with its placeholders filled: the version required, and
+/// `found` saying which case the operator met.
+///
+/// @planks("the refusal names the required Bubblewrap version")
+/// @planks("the refusal explains that no flag lifts the sandbox requirement")
+/// @planks("the refusal carries the install instructions link")
+/// @planks("the refusal names the commands that still answer without a sandbox")
+fn refusal(found: &str) -> String {
+    UNAVAILABLE
+        .trim()
+        .replace("{{required}}", REQUIRED_VERSION)
+        .replace("{{found}}", found)
 }
 
 /// The version `executable` reports for itself, read from the last

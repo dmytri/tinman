@@ -1,7 +1,7 @@
 //! The inspect command: read the terminal object model of a running program and
 //! render it for an operator discovering the roles and names to address.
 
-use crate::bwrap::BubblewrapBackend;
+use crate::backend::resolve;
 use crate::pty::capture_interactive;
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
@@ -60,12 +60,16 @@ pub fn run(spec: &SandboxSpec, command: &str, workspace: &Path) -> Result<Run, S
 ///
 /// @planks("the inspect output reports {string} as the ground-truth example")
 /// @planks("the inspect output reports the examples the program's own help carries")
+/// @planks("the verifier checks the backend construction boundary")
 pub fn run_program(
     spec: &SandboxSpec,
     command: &CommandSpec,
     workspace: &Path,
 ) -> Result<Run, String> {
-    let prepared = BubblewrapBackend::new().prepare_over_tree(spec, command, workspace, None)?;
+    let resolved = resolve(std::env::consts::OS).map_err(|e| format!("{e:?}"))?;
+    let prepared = resolved
+        .backend()
+        .prepare_over_tree(spec, command, workspace, None)?;
     let mut session = capture_interactive(&prepared)?;
     let deadline = Instant::now() + EXIT_DEADLINE;
     while !session.finished() {

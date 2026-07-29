@@ -94,3 +94,24 @@ Feature: command surface
     When each is passed to the command parser
     Then the parser accepts every command line
     And the command lines read are not empty
+
+  Rule: three commands write output a program reads, the JSON model, the manual page and the completion script, so stdout is a data stream rather than a place to talk to the operator. A diagnostic on stdout lands in the middle of whatever the consumer is parsing. Failures reached both streams: an unavailable sandbox went to stderr from inspect and driver, while a failing plan, a refused recording and a failed inspect were printed to stdout. Each of those three carries its own scenario below, because one fixed path proves nothing about the two beside it and a Rule naming them is context rather than a requirement.
+
+  Scenario: a failure is reported on the error stream rather than the data stream
+    Given a harness plan driving the fixture terminal program whose final step expects the text "Deployed"
+    When the operator tests that plan with the streams captured separately
+    Then the error stream reports the step expecting "Deployed"
+    And the data stream carries nothing
+
+  Scenario: a refused recording reports on the error stream
+    Given the file "session.yaml" already exists
+    When the operator records "printf READY" to that file with the streams captured separately
+    Then the error stream reports the file already exists
+    And the data stream carries nothing
+
+  @sandbox
+  Scenario: a failed inspection reports on the error stream
+    Given a command the sandbox cannot execute
+    When the operator inspects that command with the streams captured separately
+    Then the error stream reports the failure
+    And the data stream carries nothing

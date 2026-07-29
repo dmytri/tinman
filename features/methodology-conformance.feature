@@ -26,7 +26,16 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all eighteen name that version
+    Then all nineteen name that version
+
+  Rule: the project ships two artifacts from one tree, the crate and the npm package, and each carries its own version field. Nothing joins them. A bump applied to one is invisible to the other, and the schema-URI check above reads the crate manifest alone, so a forgotten npm manifest passes every gate and reaches the registry naming a version that describes different contents. The registry is where that is discovered, which is after it is published and cannot be taken back.
+
+  @conformance
+  Scenario: both packaged manifests name one version
+    Given the package version in "Cargo.toml"
+    And the package version in "npm/package.json"
+    When the two are compared
+    Then they are the same version
 
   Rule: the plank joins below need two sources joined, the plank inventory and the step-usage pattern set, so their logic lives in step definitions rather than in an ast-grep rule. The pattern set comes from the derived step-usage command, which reports each step-definition pattern literal untruncated; the join is exact string membership, with no normalization on either side.
 
@@ -80,7 +89,9 @@ Feature: methodology conformance
     Then they are the same set
     And the properties read are not empty
 
-  Rule: a sandboxed scenario creates a real process and a real staging directory, and a run that is killed or crashes cannot be trusted to have torn either down. Reclaim at suite start is the safety net for exactly that, and a net nobody checks reports the same clean bill whether it is holding or not. What it costs when it stops holding is not tidiness: an orphaned sandbox keeps a bind mount alive against a directory the operator may be editing, and staging directories accumulate silently until the disk answers for them. The floor guards the reader, because an inventory that matches nothing and a genuinely empty one both report zero.
+  Rule: a sandboxed scenario creates a real process and a real staging directory, and a run that is killed or crashes cannot be trusted to have torn either down. Reclaim at suite start is the safety net for exactly that, and a net nobody checks reports the same clean bill whether it is holding or not. What it costs when it stops holding is not tidiness: an orphaned sandbox keeps a bind mount alive against a directory the operator may be editing, and staging directories accumulate silently until the disk answers for them.
+
+  Rule: the floor here is the prefix set rather than the count, and the earlier floor is why. Reporting that the inventory searched something distinguishes an unread inventory from an empty one, and it cannot distinguish an inventory that searched the wrong place: this check stayed green across four days while ninety-nine directories accumulated, sixty-one of them under a copy-mount prefix the search never named and thirty-three under a terminfo prefix, beside an orphaned sandbox process three days old holding a bind mount. The implementation is what decides which prefixes exist, so the implementation is what the search is measured against; a prefix added later that nobody adds here reddens rather than accumulating in silence.
 
   @conformance
   Scenario: no sandbox resource outlives the run that created it
@@ -88,13 +99,22 @@ Feature: methodology conformance
     When each is matched against the runs that are still live
     Then no sandbox process outlives the run that created it
     And no staging directory outlives the run that created it
-    And the inventory reports the paths and processes it searched
+    And the inventory searched every temporary-directory prefix the implementation creates
 
-  Rule: seven scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
+  Rule: eight scantlings carry no JSON Schema dialect because they are proof contracts discharged by their own checkers in verification support. Their own shape is unchecked: the checkers read them into typed structs, so a required key that is misspelled fails loudly, but a key the struct defaults fails silently. A misspelled requiredReferences empties half the assistant boundary contract and the attestation stays green.
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the seven scantlings that declare no JSON Schema dialect
+    Given the eight scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all seven validate
+    Then all eight validate
     And the meta-schema forbids a property it does not name
+
+  Rule: a scantling creates no work until something references it, so an unreferenced one is a contract nobody discharges while every attestation stays green. Four of the boundary contracts are reached through a path literal in a step definition rather than through a path named in a scenario, which is the sound route and the reason this join reads both. The floor guards the reader: a listing that finds no scantlings and a directory that holds none both report zero.
+
+  @conformance
+  Scenario: every scantling is reached by a scenario or a step definition
+    Given the scantling paths under the scantlings directory
+    When each is matched against the specs and the step definitions that read it
+    Then every scantling path is reached by at least one of them
+    And the scantling paths read are not empty

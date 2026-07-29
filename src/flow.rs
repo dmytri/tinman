@@ -2,7 +2,7 @@
 //! workspace, so a later step sees what an earlier step wrote. The first step
 //! that fails stops the flow and names itself.
 
-use crate::bwrap::BubblewrapBackend;
+use crate::backend::resolve;
 use crate::plan::{Action, FlowStep, Locator, Plan};
 use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::CommandSpec;
@@ -102,13 +102,15 @@ pub fn execute_over_tree(
 /// @planks("the operator tests that plan")
 /// @planks("the plan is replayed")
 /// @planks("the capture carries a {string} named {string}")
+/// @planks("the verifier checks the backend construction boundary")
 fn run_flow(
     plan: &Plan,
     workspace: &Path,
     columns: Option<u16>,
     overlaid: bool,
 ) -> Result<FlowOutcome, String> {
-    let backend = BubblewrapBackend::new();
+    let resolved = resolve(std::env::consts::OS).map_err(|e| format!("{e:?}"))?;
+    let backend = resolved.backend();
     let mut steps = Vec::new();
     let mut bindings = Vec::new();
     let mut captures = BTreeMap::new();

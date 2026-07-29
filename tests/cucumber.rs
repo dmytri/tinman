@@ -14,7 +14,9 @@ mod support;
 use tinman::backend::{ResolveError, ResolvedBackend, resolve};
 use tinman::bwrap::BubblewrapBackend;
 use tinman::process::PreparedProcess;
-use tinman::sandbox::{Backend, CommandSpec, Network, SandboxSpec};
+use tinman::sandbox::{
+    Backend, CommandSpec, EnvGrant, EnvOrigin, Mount, MountMode, Network, SandboxSpec,
+};
 
 /// Shared scenario state. Fields are populated by the step definitions that
 /// need them. `Option` fields stay `None` until a `Given`/`When` sets them.
@@ -25,6 +27,10 @@ struct TinmanWorld {
     // backend selection
     requested_backend: Option<Backend>,
     resolution: Option<Result<ResolvedBackend, ResolveError>>,
+    // the platform a scenario names, as the identifier the implementation uses,
+    // and the outcomes read from the resolution seam itself
+    platform: Option<String>,
+    resolution_outcomes: Option<Vec<String>>,
     // bwrap availability + launch
     backend: Option<BubblewrapBackend>,
     spec: Option<SandboxSpec>,
@@ -41,6 +47,13 @@ struct TinmanWorld {
     boundary_counterexamples: Option<Vec<String>>,
     // schema-conformance: the serialized artifact under test, as JSON
     serialized: Option<serde_json::Value>,
+    // the variable a specification grants from the host, the fixture tree a
+    // mount exposes, and the staging directory a copy mount created
+    // the plan file a scenario named and made sure is absent
+    missing_plan: Option<String>,
+    granted_env: Option<String>,
+    fixture_tree: Option<support::ScratchDir>,
+    staging_dir: Option<std::path::PathBuf>,
     // capture pipeline
     prepared: Option<PreparedProcess>,
     screen: Option<tinman::screen::VirtualScreen>,
@@ -82,6 +95,13 @@ struct TinmanWorld {
     meta_schema_results: Option<Vec<(String, Option<String>)>>,
     package_version: Option<String>,
     published_uris: Option<Vec<(String, String)>>,
+    // the packaged manifests read, in the order the scenario names them, so two
+    // artifacts shipped from one tree are compared against each other
+    package_versions: Vec<(String, String)>,
+    // the scantling paths listed, and the ones no scenario and no step
+    // definition names
+    scantling_paths: Option<Vec<String>>,
+    unreached_scantlings: Option<Vec<String>>,
     // the style properties each scantling requires, kept in the order the
     // scenario names them, so two restatements of one shape are compared
     style_property_sets: Vec<(String, Vec<String>)>,
@@ -136,6 +156,12 @@ struct TinmanWorld {
     run_stdout: Option<String>,
     run_stderr: Option<String>,
     run_status: Option<i32>,
+    // the file a scenario put in a run's way, so a step reading "that file"
+    // addresses the one the starting state created
+    existing_file: Option<String>,
+    // the command a scenario staged for the sandbox to refuse, so a step
+    // reading "that command" addresses the one the starting state staged
+    unexecutable_command: Option<String>,
     // how long the command the operator ran took to complete, so a ceiling a
     // scenario puts on it is read off the wall clock rather than assumed
     run_elapsed: Option<std::time::Duration>,
@@ -397,23 +423,27 @@ async fn requested_backend(world: &mut TinmanWorld, name: String) {
     world.requested_backend = Some(Backend::from_name(&name).expect("known backend name"));
 }
 
-#[when("the backend is resolved on Linux")]
-async fn resolved_on_linux(world: &mut TinmanWorld) {
-    // The suite runs on Linux, so real resolution exercises the Linux path.
-    let requested = world.requested_backend.expect("a backend was requested");
-    world.resolution = Some(resolve(requested, false));
+/// The operating-system identifier the implementation names a platform by, for
+/// the platform a scenario names in the operator's own terms.
+fn platform_identifier(named: &str) -> &'static str {
+    match named {
+        "Linux" => "linux",
+        "macOS" => "macos",
+        other => {
+            panic!("the scenario names the platform {other}, which carries no identifier here")
+        }
+    }
 }
 
-#[when("the backend is resolved")]
-async fn resolved(world: &mut TinmanWorld) {
-    let requested = world.requested_backend.expect("a backend was requested");
-    world.resolution = Some(resolve(requested, false));
+#[given(expr = "the running platform is {word}")]
+async fn the_running_platform_is(world: &mut TinmanWorld, named: String) {
+    world.platform = Some(platform_identifier(&named).to_string());
 }
 
-#[when("the backend is resolved without the unsafe option")]
-async fn resolved_without_unsafe(world: &mut TinmanWorld) {
-    let requested = world.requested_backend.expect("a backend was requested");
-    world.resolution = Some(resolve(requested, false));
+#[when("the backend is resolved for that platform")]
+async fn the_backend_is_resolved_for_that_platform(world: &mut TinmanWorld) {
+    let platform = world.platform.as_ref().expect("a platform was named");
+    world.resolution = Some(resolve(platform));
 }
 
 #[then(expr = "the resolved backend is {string}")]
@@ -441,17 +471,58 @@ async fn fails_unsupported(world: &mut TinmanWorld) {
     );
 }
 
-#[then("resolution fails and reports that the unsafe option is required")]
-async fn fails_unsafe_required(world: &mut TinmanWorld) {
+#[then("the failure names the platform it could not serve")]
+async fn the_failure_names_the_platform(world: &mut TinmanWorld) {
+    let platform = world.platform.as_ref().expect("a platform was named");
     let err = world
         .resolution
         .as_ref()
         .expect("resolution ran")
         .as_ref()
         .expect_err("resolution failed");
+    let reported = format!("{err:?}");
     assert!(
-        matches!(err, ResolveError::UnsafeRequired),
-        "expected unsafe-required error, got {err:?}"
+        reported.to_lowercase().contains(&platform.to_lowercase()),
+        "the failure {reported:?} does not name the platform {platform} it could not serve"
+    );
+}
+
+#[given("the backend resolution seam")]
+async fn the_backend_resolution_seam(world: &mut TinmanWorld) {
+    world.resolution_outcomes = Some(support::resolution_outcomes());
+}
+
+#[when("every outcome resolution can return is enumerated")]
+async fn every_resolution_outcome_is_enumerated(world: &mut TinmanWorld) {
+    // The seam is read rather than exercised: an outcome no caller reaches is
+    // still an outcome the seam offers, and an escape hatch a published surface
+    // advertises is a promise whether or not a caller takes it.
+    let outcomes = world
+        .resolution_outcomes
+        .as_ref()
+        .expect("the resolution seam was read");
+    assert!(
+        !outcomes.is_empty(),
+        "the resolution seam yielded no outcome to enumerate"
+    );
+}
+
+#[then("every outcome names a sandbox backend")]
+async fn every_outcome_names_a_sandbox_backend(world: &mut TinmanWorld) {
+    let outcomes = world
+        .resolution_outcomes
+        .as_ref()
+        .expect("the resolution seam was read");
+    let unsandboxed: Vec<String> = outcomes
+        .iter()
+        .filter(|name| name.as_str() == support::UNSANDBOXED_BACKEND)
+        .cloned()
+        .collect();
+    assert!(
+        unsandboxed.is_empty(),
+        "resolution can return {} outcome(s) naming no sandbox: {}; it returns {outcomes:?}",
+        unsandboxed.len(),
+        unsandboxed.join(", ")
     );
 }
 
@@ -605,13 +676,13 @@ async fn no_staging_directory_outlives_its_run(world: &mut TinmanWorld) {
     );
 }
 
-#[then("the inventory reports the paths and processes it searched")]
-async fn the_inventory_reports_what_it_searched(world: &mut TinmanWorld) {
+#[then("the inventory searched every temporary-directory prefix the implementation creates")]
+async fn the_inventory_searched_every_implementation_prefix(world: &mut TinmanWorld) {
     // A sweep that read neither source reports a clean bill for a system it
-    // never looked at, so the floor is what makes the two assertions above mean
-    // anything. It is the sources the sweep read that are named here, not what
-    // it found in them: a run that leaked nothing finds nothing, and a floor on
-    // what was found would redden on a clean system.
+    // never looked at, so the sources are named first. Naming them cannot say
+    // the sweep read the right directory under the right names, which is the
+    // reading that stays green while resources accumulate: the implementation
+    // decides which prefixes exist, so it is what the sweep is measured against.
     let inventory = sandbox_inventory(world);
     assert!(
         inventory
@@ -624,6 +695,63 @@ async fn the_inventory_reports_what_it_searched(world: &mut TinmanWorld) {
         inventory.searched.contains(&"/proc".to_string()),
         "the sweep did not read the process table; it read {:?}",
         inventory.searched
+    );
+    let created = support::implementation_temp_prefixes();
+    assert!(
+        !created.is_empty(),
+        "the implementation tree yielded no temporary-directory prefix to measure the sweep against"
+    );
+    let unswept: Vec<String> = created
+        .iter()
+        .filter(|prefix| !inventory.searched_prefixes.contains(prefix))
+        .cloned()
+        .collect();
+    assert!(
+        unswept.is_empty(),
+        "the implementation creates {} temporary-directory prefix(es) the sweep does not search: {}; the sweep searches {:?}",
+        unswept.len(),
+        unswept.join(", "),
+        inventory.searched_prefixes
+    );
+}
+
+#[given("the scantling paths under the scantlings directory")]
+async fn the_scantling_paths_under_the_scantlings_directory(world: &mut TinmanWorld) {
+    world.scantling_paths = Some(support::scantling_paths());
+}
+
+#[when("each is matched against the specs and the step definitions that read it")]
+async fn each_scantling_is_matched_against_its_readers(world: &mut TinmanWorld) {
+    let paths = world
+        .scantling_paths
+        .as_ref()
+        .expect("the scantling paths were listed");
+    world.unreached_scantlings = Some(support::unreached_scantlings(paths));
+}
+
+#[then("every scantling path is reached by at least one of them")]
+async fn every_scantling_path_is_reached(world: &mut TinmanWorld) {
+    let unreached = world
+        .unreached_scantlings
+        .as_ref()
+        .expect("each scantling path was matched");
+    assert!(
+        unreached.is_empty(),
+        "{} scantling(s) are named by no scenario and no step definition: {}",
+        unreached.len(),
+        unreached.join(", ")
+    );
+}
+
+#[then("the scantling paths read are not empty")]
+async fn the_scantling_paths_read_are_not_empty(world: &mut TinmanWorld) {
+    let paths = world
+        .scantling_paths
+        .as_ref()
+        .expect("the scantling paths were listed");
+    assert!(
+        !paths.is_empty(),
+        "the scantlings directory listing found no scantling to match"
     );
 }
 
@@ -820,6 +948,13 @@ async fn the_implementation_sources(_world: &mut TinmanWorld) {
     // stage here.
 }
 
+#[when("the verifier checks the backend construction boundary")]
+async fn verifier_checks_backend_construction_boundary(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_construction_boundary(
+        "scantlings/backend-construction-boundary.json",
+    ));
+}
+
 #[when("the verifier checks the prepared-process construction boundary")]
 async fn verifier_checks_construction_boundary(world: &mut TinmanWorld) {
     world.boundary_counterexamples = Some(support::check_construction_boundary(
@@ -873,15 +1008,129 @@ async fn it_conforms_to_schema(world: &mut TinmanWorld, _schema_id: String, path
 // prepared process schema conformance
 // ---------------------------------------------------------------------------
 
+#[given(expr = "a sandbox specification granting {string} from the host")]
+async fn spec_granting_from_the_host(world: &mut TinmanWorld, name: String) {
+    let mut spec = SandboxSpec::default_for_record();
+    spec.env.insert(
+        name.clone(),
+        EnvGrant {
+            from: EnvOrigin::Host,
+        },
+    );
+    world.granted_env = Some(name);
+    world.spec = Some(spec);
+}
+
+#[given(expr = "a sandbox specification mounting the fixture tree in {string} mode")]
+async fn spec_mounting_the_fixture_tree(world: &mut TinmanWorld, mode: String) {
+    // A real tree with a real file in it, so a copy mount has something to copy
+    // and the target has something to read.
+    let tree = support::ScratchDir::new("fixture-tree");
+    std::fs::write(tree.path().join("notes.txt"), "hello from the fixture tree")
+        .expect("the fixture tree is seeded");
+    let mut spec = SandboxSpec::default_for_record();
+    spec.mounts.push(Mount {
+        source: tree.path().display().to_string(),
+        target: "/fixture".to_string(),
+        mode: match mode.as_str() {
+            "readonly" => MountMode::Readonly,
+            "copy" => MountMode::Copy,
+            "writable" => MountMode::Writable,
+            other => panic!("the scenario names the mount mode {other}, which is not a mode"),
+        },
+    });
+    world.spec = Some(spec);
+    world.fixture_tree = Some(tree);
+}
+
 #[when("the Bubblewrap backend prepares the process")]
 async fn bwrap_prepares_process(world: &mut TinmanWorld) {
-    let command = world.command.as_ref().expect("a command specification");
-    let spec = SandboxSpec::default_for_record();
+    // A scenario naming a specification is asserting on what the sandbox grants
+    // rather than on a command of its own, so it gets the process that reports
+    // what it was granted. A scenario staging a command keeps it.
+    let command = match world.command.as_ref() {
+        Some(command) => command.clone(),
+        None => reporting_process(world.granted_env.as_deref().unwrap_or("PATH")),
+    };
+    let spec = world
+        .spec
+        .clone()
+        .unwrap_or_else(SandboxSpec::default_for_record);
     let backend = BubblewrapBackend::new();
     let prepared = backend
-        .prepare(&spec, command)
+        .prepare(&spec, &command)
         .expect("the Bubblewrap backend prepares the process");
     world.serialized = Some(to_json(&prepared));
+    world.prepared = Some(prepared);
+}
+
+#[then(expr = "the prepared process names {string} among its environment pairs")]
+async fn prepared_names_environment_pair(world: &mut TinmanWorld, name: String) {
+    let prepared = world.prepared.as_ref().expect("a process was prepared");
+    let named: Vec<&str> = prepared.env.iter().map(|(key, _)| key.as_str()).collect();
+    assert!(
+        named.contains(&name.as_str()),
+        "the prepared process carries no environment pair for {name}; it carries {named:?}"
+    );
+}
+
+#[then(expr = "the launched program reads {string} from that variable")]
+async fn launched_program_reads_from_that_variable(world: &mut TinmanWorld, value: String) {
+    let prepared = world.prepared.as_ref().expect("a process was prepared");
+    world.screen = Some(tinman::pty::capture(prepared).expect("the process is captured"));
+    let read = reported_field(world, "ENVVAL");
+    assert_eq!(
+        read, value,
+        "the launched program read {read:?} from the granted variable rather than {value:?}"
+    );
+}
+
+#[then("the prepared process names that staging directory among the resources to reclaim")]
+async fn prepared_names_the_staging_directory(world: &mut TinmanWorld) {
+    let prepared = world.prepared.as_ref().expect("a process was prepared");
+    let tree = world
+        .fixture_tree
+        .as_ref()
+        .expect("a fixture tree was made");
+    let source = tree.path().display().to_string();
+    // The staging directory is a copy the backend made of the source tree, so it
+    // is a resource the run created and none of the paths the scenario supplied.
+    let staged: Vec<&str> = prepared
+        .cleanup
+        .iter()
+        .map(|path| path.as_str())
+        .filter(|path| *path != source)
+        .collect();
+    assert_eq!(
+        staged.len(),
+        1,
+        "the prepared process names {} staging director(ies) to reclaim, expected the one the copy \
+         mount created; it names {:?}",
+        staged.len(),
+        prepared.cleanup
+    );
+    let staging = std::path::PathBuf::from(staged[0]);
+    assert!(
+        staging.is_dir(),
+        "the prepared process names {} to reclaim, which is no directory",
+        staging.display()
+    );
+    world.staging_dir = Some(staging);
+}
+
+#[then("that directory no longer exists once the process has ended")]
+async fn that_directory_no_longer_exists(world: &mut TinmanWorld) {
+    let staging = world
+        .staging_dir
+        .clone()
+        .expect("a staging directory was named");
+    let prepared = world.prepared.as_ref().expect("a process was prepared");
+    tinman::pty::capture(prepared).expect("the process is captured");
+    assert!(
+        !staging.exists(),
+        "the staging directory {} outlived the process it was staged for",
+        staging.display()
+    );
 }
 
 #[then(expr = "the prepared process conforms to the {string} schema in {string}")]
@@ -2200,6 +2449,81 @@ async fn the_failure_reports_found_and_required(world: &mut TinmanWorld) {
 
 /// The asset carrying the refusal an unavailable sandbox prints.
 const SANDBOX_REFUSAL_ASSET: &str = "assets/help/sandbox-unavailable.txt";
+
+/// The refusal the operator met, read from both streams: the scenario asserts
+/// the copy reached them, and which stream carried it is a separate concern.
+fn refusal_shown(world: &TinmanWorld) -> String {
+    run_all_output(world)
+}
+
+/// The paragraph of the refusal asset that carries `marker`, as one line with
+/// its wrapping removed. The asset wraps its prose for a terminal, so a
+/// paragraph is compared as the words it carries rather than as the lines the
+/// file happens to break them into.
+fn refusal_paragraph(marker: &str) -> String {
+    let body = asset_body(SANDBOX_REFUSAL_ASSET);
+    let paragraph = body
+        .split("\n\n")
+        .find(|paragraph| paragraph.contains(marker))
+        .unwrap_or_else(|| {
+            panic!("the refusal asset carries no paragraph naming {marker:?}; it reads:\n{body}")
+        });
+    paragraph.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `text` with its line breaks flattened, so copy wrapped at one width is
+/// compared against the same copy wrapped at another.
+fn flattened(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[then("the refusal names the required Bubblewrap version")]
+async fn the_refusal_names_the_required_version(world: &mut TinmanWorld) {
+    let required = required_bwrap_version();
+    let shown = refusal_shown(world);
+    assert!(
+        shown.contains(&required),
+        "the refusal does not name {required:?} as the Bubblewrap version required; \
+         it reads:\n{shown}"
+    );
+}
+
+#[then("the refusal explains that no flag lifts the sandbox requirement")]
+async fn the_refusal_explains_no_flag_lifts_it(world: &mut TinmanWorld) {
+    let wanted = refusal_paragraph("no flag lifts it");
+    let shown = flattened(&refusal_shown(world));
+    assert!(
+        shown.contains(&wanted),
+        "the refusal does not carry the asset's explanation {wanted:?}; it reads:\n{shown}"
+    );
+}
+
+#[then("the refusal carries the install instructions link")]
+async fn the_refusal_carries_the_install_link(world: &mut TinmanWorld) {
+    let body = asset_body(SANDBOX_REFUSAL_ASSET);
+    let link = body
+        .split_whitespace()
+        .find(|word| word.starts_with("https://"))
+        .unwrap_or_else(|| panic!("the refusal asset carries no link; it reads:\n{body}"))
+        .trim_end_matches(['.', ','])
+        .to_string();
+    let shown = refusal_shown(world);
+    assert!(
+        shown.contains(&link),
+        "the refusal does not carry the install instructions link {link:?}; it reads:\n{shown}"
+    );
+}
+
+#[then("the refusal names the commands that still answer without a sandbox")]
+async fn the_refusal_names_the_commands_that_still_answer(world: &mut TinmanWorld) {
+    let wanted = refusal_paragraph("still works");
+    let shown = flattened(&refusal_shown(world));
+    assert!(
+        shown.contains(&wanted),
+        "the refusal does not name the commands that still answer, as the asset carries them \
+         {wanted:?}; it reads:\n{shown}"
+    );
+}
 
 #[given("the refusal text in the assets")]
 async fn the_refusal_text_in_the_assets(world: &mut TinmanWorld) {
@@ -7211,6 +7535,94 @@ async fn the_operator_tests_that_plan(world: &mut TinmanWorld) {
     run_tinman_command(world, &["test", &path.to_string_lossy()]);
 }
 
+#[when("the operator tests that plan with the streams captured separately")]
+async fn the_operator_tests_that_plan_with_streams_separated(world: &mut TinmanWorld) {
+    let source = world
+        .replay_plan_source
+        .clone()
+        .expect("a harness plan was given");
+    let dir = working_dir(world);
+    let path = dir.join("plan.yaml");
+    std::fs::write(&path, &source)
+        .unwrap_or_else(|e| panic!("the plan {} was not written: {e}", path.display()));
+    run_tinman_command(world, &["test", &path.to_string_lossy()]);
+}
+
+#[given(expr = "no file named {string} exists")]
+async fn no_file_named_exists(world: &mut TinmanWorld, name: String) {
+    let path = working_dir(world).join(&name);
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .unwrap_or_else(|e| panic!("the file {} was not removed: {e}", path.display()));
+    }
+    world.missing_plan = Some(name);
+}
+
+#[when(expr = "the operator tests the plan {string}")]
+async fn the_operator_tests_the_plan_named(world: &mut TinmanWorld, name: String) {
+    run_tinman_command(world, &["test", &name]);
+}
+
+#[given("a plan file that is not valid YAML")]
+async fn a_plan_file_that_is_not_valid_yaml(world: &mut TinmanWorld) {
+    // A document no YAML parser can read: a flow sequence that is never closed.
+    world.replay_plan_source = Some("tui: [unclosed\nsteps: {\n".to_string());
+}
+
+#[then("the failure names the plan file that was not read")]
+async fn the_failure_names_the_plan_file(world: &mut TinmanWorld) {
+    let name = world.missing_plan.as_ref().expect("a plan file was named");
+    let reported = run_errors(world);
+    assert!(
+        reported.contains(name.as_str()),
+        "the failure does not name the plan file {name}; it reads:\n{reported}"
+    );
+}
+
+#[then("the failure reports the plan did not parse")]
+async fn the_failure_reports_the_plan_did_not_parse(world: &mut TinmanWorld) {
+    let reported = run_errors(world);
+    assert!(
+        reported.to_lowercase().contains("parse"),
+        "the failure does not report that the plan did not parse; it reads:\n{reported}"
+    );
+}
+
+#[then("the output carries no panic")]
+async fn the_output_carries_no_panic(world: &mut TinmanWorld) {
+    // A panic reaches whichever stream the runtime writes it to, so both are
+    // read: a handled failure on one stream beside an abort on the other is the
+    // reading a single-stream check would pass.
+    let streams = [
+        ("the data stream", run_output(world).to_string()),
+        ("the error stream", run_errors(world).to_string()),
+    ];
+    for (stream, text) in streams {
+        assert!(
+            !text.contains("panicked"),
+            "{stream} carries a panic where a reported failure belongs; it reads:\n{text}"
+        );
+    }
+}
+
+#[then(expr = "the error stream reports the step expecting {string}")]
+async fn the_error_stream_reports_the_step_expecting(world: &mut TinmanWorld, text: String) {
+    let reported = run_errors(world);
+    assert!(
+        reported.contains(text.as_str()),
+        "the error stream does not report the step expecting {text:?}; it reads:\n{reported}"
+    );
+}
+
+#[then("the data stream carries nothing")]
+async fn the_data_stream_carries_nothing(world: &mut TinmanWorld) {
+    let data = run_output(world);
+    assert!(
+        data.trim().is_empty(),
+        "the data stream carries a diagnostic where a consumer reads only data; it reads:\n{data}"
+    );
+}
+
 /// Run the real `tinman` binary in the scenario's working directory, keeping
 /// what it wrote and the status it left.
 fn run_tinman_command(world: &mut TinmanWorld, args: &[&str]) {
@@ -7307,6 +7719,42 @@ async fn the_operator_inspects(world: &mut TinmanWorld, program: String) {
     run_tinman_command(world, &["inspect", &program]);
 }
 
+#[given("a command the sandbox cannot execute")]
+async fn a_command_the_sandbox_cannot_execute(world: &mut TinmanWorld) {
+    // A program staged in the scenario's own workspace without the executable
+    // bit. Inspection binds that workspace, so the sandbox finds the program
+    // and still cannot run it, which is the failure the scenario is about, and
+    // it is the scenario's own file rather than a name the host happens to
+    // lack.
+    let workspace = working_dir(world);
+    let path = workspace.join("not-executable");
+    std::fs::write(&path, "printf READY\n")
+        .unwrap_or_else(|e| panic!("the staged program {} was not written: {e}", path.display()));
+    world.unexecutable_command = Some("./not-executable".to_string());
+}
+
+#[when("the operator inspects that command with the streams captured separately")]
+async fn the_operator_inspects_that_command_with_streams_separated(world: &mut TinmanWorld) {
+    let command = world
+        .unexecutable_command
+        .clone()
+        .expect("the starting state staged the command the sandbox cannot execute");
+    run_tinman_command(world, &["inspect", &command]);
+}
+
+#[then("the error stream reports the failure")]
+async fn the_error_stream_reports_the_failure(world: &mut TinmanWorld) {
+    let command = world
+        .unexecutable_command
+        .clone()
+        .expect("the starting state staged the command the sandbox cannot execute");
+    let reported = run_errors(world);
+    assert!(
+        reported.contains(command.as_str()),
+        "the error stream does not report the failure of {command:?}; it reads:\n{reported}"
+    );
+}
+
 #[when("the operator inspects a command that asks terminfo for the terminal width")]
 async fn the_operator_inspects_a_terminfo_query(world: &mut TinmanWorld) {
     // `tput cols` is how an ordinary program asks the terminfo database what its
@@ -7364,7 +7812,11 @@ async fn the_hosts_terminal_database_is_unavailable(world: &mut TinmanWorld) {
 
 #[then("the inspect output reports the program did not start")]
 async fn the_inspect_output_reports_the_program_did_not_start(world: &mut TinmanWorld) {
-    let output = run_output(world);
+    // What the command reported is read across both its streams. A diagnostic
+    // belongs on the error stream, which `features/command-surface.feature`
+    // states, so a check reading only the data stream would be asserting which
+    // stream the report reached rather than that it was reported at all.
+    let output = format!("{}\n{}", run_output(world), run_errors(world));
     // The scenario's own words are the message. The project already says "could
     // not start" of a launch that failed, so either wording names what happened.
     assert!(
@@ -7749,9 +8201,18 @@ async fn the_inspect_output_reports(world: &mut TinmanWorld, expected: String) {
     );
 }
 
+/// Everything the last run of the real binary wrote, both streams together. A
+/// scenario naming "the output" means what the command wrote to the operator;
+/// which stream carried it is the separate concern that
+/// `features/command-surface.feature` asserts on, and reading one stream here
+/// would make these two readings contradict.
+fn run_all_output(world: &TinmanWorld) -> String {
+    format!("{}{}", run_output(world), run_errors(world))
+}
+
 #[then(expr = "the output reports the step expecting {string}")]
 async fn the_output_reports_the_step_expecting(world: &mut TinmanWorld, text: String) {
-    let output = run_output(world);
+    let output = run_all_output(world);
     let reported = output
         .lines()
         .any(|line| line.contains("expect") && line.contains(&text));
@@ -7763,7 +8224,7 @@ async fn the_output_reports_the_step_expecting(world: &mut TinmanWorld, text: St
 
 #[then(expr = "the output contains the text {string}")]
 async fn the_output_contains_the_text(world: &mut TinmanWorld, text: String) {
-    let output = run_output(world);
+    let output = run_all_output(world);
     assert!(
         output.contains(&text),
         "the output does not contain {text:?}:\n{output}"
@@ -7987,6 +8448,39 @@ async fn the_file_already_exists(world: &mut TinmanWorld, name: String) {
     let path = working_dir(world).join(&name);
     std::fs::write(&path, "already here\n")
         .unwrap_or_else(|e| panic!("the file {} was not created: {e}", path.display()));
+    world.existing_file = Some(name);
+}
+
+#[when(expr = "the operator records {string} to that file with the streams captured separately")]
+async fn the_operator_records_to_that_file_with_streams_separated(
+    world: &mut TinmanWorld,
+    command: String,
+) {
+    let name = world
+        .existing_file
+        .clone()
+        .expect("the starting state named the file already in the way");
+    // The refusal is issued before the recorder takes the terminal, so this run
+    // needs no PTY. It runs with its streams on separate pipes, which is what a
+    // scenario about which stream a diagnostic reaches has to read: a terminal
+    // merges the two and could not tell them apart.
+    let mut owned = vec!["record".to_string(), "--output".to_string(), name];
+    owned.extend(command.split_whitespace().map(str::to_string));
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    run_tinman_command(world, &args);
+}
+
+#[then("the error stream reports the file already exists")]
+async fn the_error_stream_reports_the_file_already_exists(world: &mut TinmanWorld) {
+    let name = world
+        .existing_file
+        .clone()
+        .expect("the starting state named the file already in the way");
+    let reported = run_errors(world);
+    assert!(
+        reported.contains("already exists") && reported.contains(name.as_str()),
+        "the error stream does not report that {name} already exists; it reads:\n{reported}"
+    );
 }
 
 #[when(expr = "the operator records the command {string} and presses {string}")]
@@ -8007,6 +8501,47 @@ async fn the_operator_records_the_fixture(world: &mut TinmanWorld) {
     let workspace = working_dir(world);
     let program = support::stage_fixture_in(&workspace);
     run_record(world, &program, &["q"]);
+}
+
+#[given("the operator records a program that never exits when its input ends")]
+async fn records_a_program_that_ignores_the_end_of_input(world: &mut TinmanWorld) {
+    // A program that draws and then never returns. Ending its input tells it
+    // nothing, so the recorder's own deadline is the only thing that can end the
+    // session. The recording runs under a shell that outlives it, so the
+    // terminal can be asked afterwards what state it was left in.
+    let program = stage_recorded_program(
+        world,
+        "ignores-end-of-input",
+        "printf 'READY\\n'\nwhile :; do sleep 1; done\n",
+    );
+    let dir = working_dir(world);
+    let env = configured_env(world);
+    let session = support::start_interruptible(&dir, &["record", &program], &env)
+        .unwrap_or_else(|e| panic!("starting the recording on a terminal failed: {e}"));
+    // The recorder captures its target into a virtual screen and draws nothing
+    // of its own to this terminal, so there is no output to gate on. None is
+    // owed: the terminal buffers what is typed at it, so the end of input the
+    // scenario delivers is read when the recorder reaches its input loop,
+    // whether it has got there yet or not.
+    world.terminal_session = Some(session);
+}
+
+#[then("recording fails and reports the session reached its deadline")]
+async fn recording_reports_it_reached_its_deadline(world: &mut TinmanWorld) {
+    let status = world.run_status.expect("the recording ended");
+    assert_ne!(
+        status, 0,
+        "the recording exited successfully where it should have failed at its deadline"
+    );
+    let output = world
+        .terminal_session
+        .as_ref()
+        .expect("an interactive terminal session")
+        .output();
+    assert!(
+        output.to_lowercase().contains("deadline"),
+        "the recording does not report that the session reached its deadline; it produced:\n{output}"
+    );
 }
 
 #[given("a fixture terminal program whose pane titles change between draws")]
@@ -9594,6 +10129,65 @@ async fn the_form_names_the_environment_variable(world: &mut TinmanWorld, variab
     );
 }
 
+/// The setup form's own copy, as the asset carries it: the title on line one,
+/// the key hints on line two, and the sentence naming the environment variable
+/// it reads on line three. The steps below take the copy from the asset rather
+/// than restating it, so an edit to the catalogue an operator or a translator
+/// works in is what the assertion is read against.
+fn setup_form_asset() -> Vec<String> {
+    let body = asset_body("assets/help/setup-form.txt");
+    let lines: Vec<String> = body.lines().map(str::to_string).collect();
+    assert!(
+        lines.len() >= 3,
+        "the setup form asset carries no title, key hints and environment sentence; it reads:\n{body}"
+    );
+    lines
+}
+
+/// The key a hint line names as the one that performs `action`, read as the
+/// word before `to <action>`, which is the form these hints are written in.
+fn key_named_for(hint: &str, action: &str) -> String {
+    let phrase = format!("to {action}");
+    let at = hint
+        .find(&phrase)
+        .unwrap_or_else(|| panic!("the hint {hint:?} names no key that {action}s"));
+    hint[..at]
+        .split_whitespace()
+        .next_back()
+        .unwrap_or_else(|| panic!("the hint {hint:?} names no key before {phrase:?}"))
+        .to_string()
+}
+
+#[then("the form title is the title the setup asset carries")]
+async fn the_form_title_is_the_title_the_asset_carries(world: &mut TinmanWorld) {
+    let title = setup_form_asset()[0].clone();
+    let (model, contents) = drawn_model(world);
+    assert!(
+        model.find_named(&title).is_some(),
+        "the setup form draws no region titled {title:?}, the title the asset carries; screen:\n{contents}"
+    );
+}
+
+#[then("the form names the keys that asset carries as the keys that save and leave")]
+async fn the_form_names_the_keys_the_asset_carries(world: &mut TinmanWorld) {
+    let hint = setup_form_asset()[1].clone();
+    let text = setup_form_text(world);
+    for action in ["save", "leave"] {
+        let key = key_named_for(&hint, action);
+        assert_prompt_names_key(&text, &key, action);
+    }
+}
+
+#[then("the form names the environment variable that asset carries")]
+async fn the_form_names_the_environment_variable_the_asset_carries(world: &mut TinmanWorld) {
+    let sentence = setup_form_asset()[2].clone();
+    let text = setup_form_text(world);
+    assert!(
+        text.contains(&sentence),
+        "the setup form does not carry {sentence:?}, the environment sentence the asset carries; it reads:\n{text}"
+    );
+}
+
 #[given("the operator has opened the setup form")]
 async fn the_operator_has_opened_the_setup_form(world: &mut TinmanWorld) {
     staged_config_home(world);
@@ -10359,7 +10953,42 @@ async fn all_ten_validate(world: &mut TinmanWorld) {
 
 #[given(expr = "the package version in {string}")]
 async fn the_package_version_in(world: &mut TinmanWorld, manifest: String) {
-    world.package_version = Some(support::package_version(&manifest));
+    let version = support::package_version(&manifest);
+    world.package_version = Some(version.clone());
+    world.package_versions.push((manifest, version));
+}
+
+#[when("the two are compared")]
+async fn the_two_manifest_versions_are_compared(world: &mut TinmanWorld) {
+    // Both manifests are read by the steps above, so what this step settles is
+    // that two were read: one manifest compared against itself agrees always.
+    let read = &world.package_versions;
+    assert_eq!(
+        read.len(),
+        2,
+        "two packaged manifests are compared, {} was read: {}",
+        read.len(),
+        read.iter()
+            .map(|(manifest, _)| manifest.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+#[then("they are the same version")]
+async fn they_are_the_same_version(world: &mut TinmanWorld) {
+    let read = &world.package_versions;
+    let (first_manifest, first_version) = read.first().expect("a manifest version was read");
+    let disagreeing: Vec<String> = read
+        .iter()
+        .filter(|(_, version)| version != first_version)
+        .map(|(manifest, version)| format!("{manifest} names {version}"))
+        .collect();
+    assert!(
+        disagreeing.is_empty(),
+        "{first_manifest} names {first_version}, but {}",
+        disagreeing.join(", ")
+    );
 }
 
 #[when("the schema URIs in the scantlings and the example plans are read")]
@@ -10367,8 +10996,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all eighteen name that version")]
-async fn all_eighteen_name_that_version(world: &mut TinmanWorld) {
+#[then("all nineteen name that version")]
+async fn all_nineteen_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -10379,8 +11008,8 @@ async fn all_eighteen_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        18,
-        "eighteen schema URIs are published, found {}: {}",
+        19,
+        "nineteen schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -10405,7 +11034,7 @@ async fn all_eighteen_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the seven scantlings that declare no JSON Schema dialect")]
+#[given("the eight scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -10431,16 +11060,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all seven validate")]
-async fn all_seven_validate(world: &mut TinmanWorld) {
+#[then("all eight validate")]
+async fn all_eight_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        7,
-        "seven scantlings declare no dialect, found {}: {}",
+        8,
+        "eight scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

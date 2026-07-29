@@ -3,7 +3,7 @@
 //! collects key presses and screen snapshots into a constrained interaction
 //! log.
 
-use crate::bwrap::BubblewrapBackend;
+use crate::backend::resolve;
 use crate::inference::Settings;
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
 use crate::pty::{InteractiveCapture, capture_interactive_at};
@@ -187,9 +187,11 @@ impl Default for RecordingSession {
 /// @planks("the written plan carries an expectation on the text {string}")
 /// @planks("the plan is written to {string}")
 /// @planks("recording fails and reports the file already exists")
+/// @planks("recording fails and reports the session reached its deadline")
 /// @planks("the operator records a command that writes to the sentinel path and prints {string}")
 /// @planks("the operator records a command that prints {string} and the value of {string}")
 /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
+/// @planks("the verifier checks the backend construction boundary")
 pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> Result<(), String> {
     let path = workspace.join(output.unwrap_or(DEFAULT_PLAN));
     if path.exists() {
@@ -199,7 +201,8 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
     // project wrote, so it is launched through the sandbox backend, over the
     // workspace it reads through an overlay whose writes never reach that tree,
     // exactly as replaying the written plan launches it.
-    let prepared = BubblewrapBackend::new().prepare_over_tree(
+    let resolved = resolve(std::env::consts::OS).map_err(|e| format!("{e:?}"))?;
+    let prepared = resolved.backend().prepare_over_tree(
         &SandboxSpec::default_for_record(),
         &CommandSpec {
             program: "/bin/sh".to_string(),
@@ -228,7 +231,12 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
     }
     crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
 
-    capture.end_session();
+    if !capture.end_session() {
+        return Err(
+            "the session reached its deadline: the recorded program did not exit when its input ended"
+                .to_string(),
+        );
+    }
     let final_screen = capture.screen();
     let closing = build(&final_screen);
     if let Some(name) = renamed_region(&opening, &closing) {

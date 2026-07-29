@@ -1,0 +1,3 @@
+Set up inference
+enter to save, esc to leave
+TINMAN_API_KEY in the environment or a .env file is read too

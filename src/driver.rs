@@ -3,7 +3,7 @@
 //! error object carrying a reserved code. A failed expectation is a result
 //! whose `ok` is false, because the call succeeded and the product disagreed.
 
-use crate::bwrap::BubblewrapBackend;
+use crate::backend::resolve;
 use crate::pty::{InteractiveCapture, capture_interactive};
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
@@ -215,6 +215,7 @@ fn no_session(id: Value) -> Value {
 /// @planks("the driver replies to request {int} with a failed result")
 /// @planks("the failure names the program it could not start")
 /// @planks("the failure reports the selection did not reach the {string} named {string}")
+/// @planks("the verifier checks the backend construction boundary")
 fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     let Some(command) = params["command"].as_str() else {
         return fault(
@@ -245,7 +246,19 @@ fn launch(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
             }),
         );
     }
-    let prepared = match BubblewrapBackend::new().prepare_with_home(
+    let resolved = match resolve(std::env::consts::OS) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            return reply(
+                id,
+                json!({
+                    "ok": false,
+                    "failure": format!("the session's sandbox backend was not resolved: {e:?}"),
+                }),
+            );
+        }
+    };
+    let prepared = match resolved.backend().prepare_with_home(
         &SandboxSpec::default_for_record(),
         &CommandSpec {
             program: "/bin/sh".to_string(),

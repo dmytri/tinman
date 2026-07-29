@@ -456,3 +456,13 @@ Feature: interactive help
     Given the interactive assistant source
     When the verifier checks the assistant command boundary
     Then no counterexample is found
+
+  Rule: the assistant box reads its title and its key hints from assets/help/assistant-prompt.txt, and the setup form beside it held the same kinds of copy as constants in src/setup.rs. One screen carried two catalogues, and only one of them was a catalogue an operator or a translator could edit without touching the implementation. The form now reads assets/help/setup-form.txt for its title, its key hints, and the sentence naming the environment variable it reads.
+
+  Rule: the label on the credential field stays a constant, and it is the one piece of that copy deliberately left behind. Its value ends in a space that the field's width arithmetic counts, so carrying it in a line-oriented text asset would make a trailing space the difference between a correct form and a misaligned one, invisible in every editor that trims on save. A catalogue an operator can edit is the goal, and a value they cannot see the end of is not one.
+
+  Scenario: the setup form draws the title and key hints the assets carry
+    Given the operator has opened the setup form
+    Then the form title is the title the setup asset carries
+    And the form names the keys that asset carries as the keys that save and leave
+    And the form names the environment variable that asset carries

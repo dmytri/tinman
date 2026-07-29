@@ -5,12 +5,8 @@
   "description": "The portable, backend-neutral shape every sandbox backend reads. Referenced by features/sandbox-specification.feature. No Bubblewrap mechanics appear here.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["backend", "home", "network"],
+  "required": ["home", "network"],
   "properties": {
-    "backend": {
-      "description": "Which backend prepares the process.",
-      "enum": ["auto", "bubblewrap", "mac", "none"]
-    },
     "home": {
       "description": "How the sandbox home directory is provisioned.",
       "enum": ["empty"]

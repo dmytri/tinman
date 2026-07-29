@@ -1,14 +1,17 @@
-//! Backend selection: resolve a requested backend identity into the backend
-//! that will run the process, or a clear error.
+//! Backend selection: resolve the platform Tinman runs on into the backend that
+//! will run the process, or a clear error.
 
-use crate::sandbox::Backend;
+use crate::bwrap::BubblewrapBackend;
 
-/// The backend selected to run a process.
+/// The backend selected to run a process, and the backend itself, so a launch
+/// path takes what isolates its program from resolution rather than naming one.
 ///
 /// @planks("the resolved backend is {string}")
+/// @planks("the verifier checks the backend construction boundary")
 #[derive(Debug)]
 pub struct ResolvedBackend {
     name: String,
+    backend: BubblewrapBackend,
 }
 
 impl ResolvedBackend {
@@ -18,39 +21,41 @@ impl ResolvedBackend {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+
+    /// The backend that prepares the process.
+    ///
+    /// @planks("the verifier checks the backend construction boundary")
+    pub fn backend(&self) -> &BubblewrapBackend {
+        &self.backend
+    }
 }
 
-/// Why backend resolution failed.
+/// Why backend resolution failed. The platform is carried so the failure names
+/// what it could not serve.
 ///
 /// @planks("resolution fails with an unsupported-backend error")
-/// @planks("resolution fails and reports that the unsafe option is required")
+/// @planks("the failure names the platform it could not serve")
 #[derive(Debug)]
 pub enum ResolveError {
-    UnsupportedBackend {},
-    UnsafeRequired,
+    UnsupportedBackend { platform: String },
 }
 
-/// Resolve a requested backend into the backend that will run the process.
-/// Sandboxed execution is the default; the unsafe local backend requires an
-/// explicit opt-in.
+/// Resolve the platform Tinman runs on into the backend that will run the
+/// process. Linux is served by Bubblewrap; every other platform is refused,
+/// because there is no unsandboxed route.
 ///
-/// @planks("the backend is resolved on Linux")
-/// @planks("the backend is resolved")
-/// @planks("the backend is resolved without the unsafe option")
-pub fn resolve(requested: Backend, allow_unsafe: bool) -> Result<ResolvedBackend, ResolveError> {
-    match requested {
-        Backend::Auto | Backend::Bubblewrap => Ok(ResolvedBackend {
+/// @planks("the backend is resolved for that platform")
+/// @planks("the verifier checks the backend construction boundary")
+pub fn resolve(platform: &str) -> Result<ResolvedBackend, ResolveError> {
+    match platform {
+        "linux" => Ok(ResolvedBackend {
             name: "bubblewrap".to_string(),
+            backend: BubblewrapBackend {
+                executable: "bwrap".to_string(),
+            },
         }),
-        Backend::Mac => Err(ResolveError::UnsupportedBackend {}),
-        Backend::None => {
-            if allow_unsafe {
-                Ok(ResolvedBackend {
-                    name: "none".to_string(),
-                })
-            } else {
-                Err(ResolveError::UnsafeRequired)
-            }
-        }
+        other => Err(ResolveError::UnsupportedBackend {
+            platform: other.to_string(),
+        }),
     }
 }

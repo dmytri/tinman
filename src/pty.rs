@@ -8,6 +8,17 @@ use crate::screen::VirtualScreen;
 use portable_pty::{Child, CommandBuilder, ExitStatus, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// How long ending a session waits for the program to exit before it gives the
+/// wait up. A program that ignores the end of its input answers the
+/// end-of-transmission character with nothing, so its exit cannot be the only
+/// thing that ends the wait.
+const SESSION_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How often the end-of-transmission character is sent while the program is
+/// still reading.
+const END_INPUT_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Launch a prepared process on a PTY and wait for it to exit.
 ///
@@ -33,9 +44,12 @@ pub fn launch(prepared: &PreparedProcess) -> Result<(), String> {
 }
 
 /// Launch a prepared process on a PTY, read its output until it exits, and
-/// parse that output into a virtual screen.
+/// parse that output into a virtual screen. The resources the prepared process
+/// names are reclaimed once the process has ended, so nothing the launch staged
+/// outlives it.
 ///
 /// @planks("the process is captured through a PTY")
+/// @planks("that directory no longer exists once the process has ended")
 pub fn capture(prepared: &PreparedProcess) -> Result<VirtualScreen, String> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -53,6 +67,9 @@ pub fn capture(prepared: &PreparedProcess) -> Result<VirtualScreen, String> {
     let mut output = Vec::new();
     reader.read_to_end(&mut output).map_err(|e| e.to_string())?;
     child.wait().map_err(|e| e.to_string())?;
+    for resource in &prepared.cleanup {
+        std::fs::remove_dir_all(resource).map_err(|e| e.to_string())?;
+    }
     Ok(VirtualScreen::from_pty_output(&output))
 }
 
@@ -190,17 +207,27 @@ impl InteractiveCapture {
     /// screen: the exit is observed before the last bytes the program wrote
     /// have necessarily been read.
     ///
+    /// The wait carries a ceiling, so a program that ignores the end of its
+    /// input ends the session at that deadline instead of holding it open for
+    /// as long as the program runs. Reports whether the program exited.
+    ///
     /// @planks("the operator records the fixture terminal program")
     /// @planks("the operator records that program")
-    pub fn end_session(&mut self) {
+    /// @planks("recording fails and reports the session reached its deadline")
+    pub fn end_session(&mut self) -> bool {
+        let deadline = Instant::now() + SESSION_DEADLINE;
         while !self.finished() {
+            if Instant::now() >= deadline {
+                return false;
+            }
             self.writer.write_all(&[0x04]).expect("end the PTY input");
             self.writer.flush().expect("flush the PTY");
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(END_INPUT_INTERVAL);
         }
         if let Some(drain) = self.reader.take() {
             drain.join().expect("join the PTY output reader");
         }
+        true
     }
 
     /// The current virtual screen, parsed from all output read so far, at the
