@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/panic-free-seams.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/panic-free-seams.json",
   "title": "Panic-free seams",
   "description": "Constructs that abort the process, forbidden in the seams that must answer instead of dying. Discharged by the reference-boundary checker in verification support and attested by the @contract scenario in features/driver-session.feature.",
   "searchPaths": [

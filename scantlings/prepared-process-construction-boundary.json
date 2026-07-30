@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/prepared-process-construction-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/prepared-process-construction-boundary.json",
   "title": "Prepared process construction boundary",
   "description": "Only a sandbox backend constructs a prepared process. A prepared process is the sole input the PTY runner launches, so whoever constructs one decides what isolation the launched program gets, and a construction outside a sandbox backend is a program launched with the operator's real home, environment, path and network. Discharged by the prepared-process-construction-boundary checker in verification support, which scans the implementation tree for construction expressions naming the type and reports any outside the permitted set. Attested by the @contract scenario in features/sandboxed-launch.feature.",
   "constructedType": "PreparedProcess",

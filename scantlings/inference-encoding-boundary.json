@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/inference-encoding-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/inference-encoding-boundary.json",
   "title": "Inference encoding boundary",
   "description": "The inference module encodes and decodes JSON with the JSON library the project already depends on. It does not hand-roll an escaper and it does not reach for the YAML parser. Discharged by the reference-boundary checker in verification support, which scans the module source. Attested by the @contract scenario in features/inference-provider.feature.",
   "module": "src/inference.rs",

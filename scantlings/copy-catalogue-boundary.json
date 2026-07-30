@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/copy-catalogue-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/copy-catalogue-boundary.json",
   "title": "Copy catalogue boundary",
   "description": "Operator-facing copy is drawn from the asset catalogue. Every asset that carries copy an operator reads is referenced by the implementation, so the drawn text has one source and no second copy exists to drift from it. Discharged by the reference-boundary checker in verification support, which scans the implementation tree. Attested by the @contract scenario in features/interactive-help.feature.",
   "searchPaths": [

@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/command-dispatch-completeness.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/command-dispatch-completeness.json",
   "title": "Command dispatch completeness",
   "description": "Every command the parser declares reaches an implementation. The dispatch source MUST NOT carry a wildcard match arm, so the compiler's own exhaustiveness check decides completeness: a command added to the parser with no arm is a build failure rather than a command that exits successfully having done nothing. Discharged by the command-dispatch-completeness checker in verification support, which scans the dispatch source. Attested by the @contract scenario in features/command-dispatch.feature.",
   "module": "src/main.rs",
