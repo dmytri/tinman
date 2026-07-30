@@ -32,7 +32,11 @@ const SCANTLINGS: [&str; 6] = [
 ];
 
 /// The front matter of a skills.sh skill.
+///
+/// @planks("the skill front matter is parsed")
+/// @planks("the verifier checks the plan deserialization strictness contract")
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FrontMatter {
     /// The skill's identifier, in kebab-case.
     pub name: String,

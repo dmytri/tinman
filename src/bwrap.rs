@@ -5,6 +5,7 @@
 use crate::process::PreparedProcess;
 use crate::sandbox::{CommandSpec, EnvOrigin, MountMode, Network, SandboxSpec};
 use crate::terminfo;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Where the sandboxed program's home directory sits inside the sandbox.
@@ -38,12 +39,16 @@ struct Launch {
 }
 
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
-/// availability check can be exercised against a name that is off PATH.
+/// availability check can be exercised against a name that is off PATH, and the
+/// environment a host grant reads, so the caller hands the seam a table rather
+/// than the seam reading the one table the whole process shares.
 ///
 /// @planks("the Bubblewrap executable is absent")
+/// @planks("the Bubblewrap backend prepares the process")
 #[derive(Debug, Clone)]
 pub struct BubblewrapBackend {
     pub(crate) executable: String,
+    pub(crate) environment: BTreeMap<String, String>,
 }
 
 impl Default for BubblewrapBackend {
@@ -59,6 +64,7 @@ impl BubblewrapBackend {
     pub fn new() -> Self {
         Self {
             executable: "bwrap".to_string(),
+            environment: std::env::vars().collect(),
         }
     }
 
@@ -66,7 +72,21 @@ impl BubblewrapBackend {
     ///
     /// @planks("the Bubblewrap executable is absent")
     pub fn with_executable(executable: String) -> Self {
-        Self { executable }
+        Self {
+            executable,
+            environment: std::env::vars().collect(),
+        }
+    }
+
+    /// The Bubblewrap backend reading its host grants from the environment it is
+    /// handed, so a caller stages a grant by handing over a table of its own.
+    ///
+    /// @planks("the Bubblewrap backend prepares the process")
+    pub fn with_environment(environment: BTreeMap<String, String>) -> Self {
+        Self {
+            executable: "bwrap".to_string(),
+            environment,
+        }
     }
 
     /// Generate the Bubblewrap argument vector that enforces isolation for the
@@ -98,6 +118,7 @@ impl BubblewrapBackend {
     /// @planks("the operator runs that plan")
     /// @planks("the operator inspects a command that asks terminfo for the terminal width")
     /// @planks("the operator inspects {string}")
+    /// @planks("the Bubblewrap backend prepares the process")
     fn launch_with_home(
         &self,
         spec: &SandboxSpec,
@@ -176,17 +197,17 @@ impl BubblewrapBackend {
             args.push("PATH".to_string());
             args.push(spec.path.join(":"));
         }
-        // Named environment variables the plan grants from the host, read fresh
-        // so a grant never outlives what the operator's own environment
-        // currently holds.
+        // Named environment variables the plan grants from the host, read from
+        // the environment the backend was handed, so a grant carries what its
+        // caller holds rather than what the process table happens to hold.
         for (name, grant) in &spec.env {
             match grant.from {
                 EnvOrigin::Host => {
-                    if let Ok(value) = std::env::var(name) {
+                    if let Some(value) = self.environment.get(name) {
                         args.push("--setenv".to_string());
                         args.push(name.clone());
                         args.push(value.clone());
-                        granted.push((name.clone(), value));
+                        granted.push((name.clone(), value.clone()));
                     }
                 }
             }

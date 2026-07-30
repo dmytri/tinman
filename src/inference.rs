@@ -239,24 +239,54 @@ impl Request {
 }
 
 /// The wire form of a request: the endpoint it addresses, the credential it
-/// carries, the model it names, how it samples and the chat messages it sends.
+/// carries, and the body the provider receives. The endpoint and the
+/// credential are transport rather than payload, so they sit beside the body
+/// instead of inside it.
 ///
 /// @planks("it conforms to the {string} schema in {string}")
-/// @planks("the request disables reasoning")
 impl serde::Serialize for Request {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut wire = serializer.serialize_struct("Request", 6)?;
+        let mut wire = serializer.serialize_struct("Request", 3)?;
         wire.serialize_field("url", &self.url())?;
         wire.serialize_field("authorization", &self.authorization)?;
-        wire.serialize_field("model", &self.model)?;
-        wire.serialize_field("temperature", &self.temperature)?;
-        let wire_messages: Vec<WireMessage> = self
+        let messages: Vec<WireMessage> = self
             .messages
             .iter()
             .map(|(role, content)| WireMessage { role, content })
             .collect();
-        wire.serialize_field("messages", &wire_messages)?;
+        wire.serialize_field(
+            "body",
+            &WireBody {
+                model: &self.model,
+                temperature: self.temperature,
+                messages,
+                reasoning: self.reasoning,
+            },
+        )?;
+        wire.end()
+    }
+}
+
+/// The JSON document sent as the request body: the whole of what the provider
+/// receives, nested under the wire form's `body` field.
+///
+/// @planks("it conforms to the {string} schema in {string}")
+/// @planks("the request disables reasoning")
+struct WireBody<'a> {
+    model: &'a str,
+    temperature: f64,
+    messages: Vec<WireMessage<'a>>,
+    reasoning: Option<bool>,
+}
+
+impl<'a> serde::Serialize for WireBody<'a> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut wire = serializer.serialize_struct("WireBody", 4)?;
+        wire.serialize_field("model", self.model)?;
+        wire.serialize_field("temperature", &self.temperature)?;
+        wire.serialize_field("messages", &self.messages)?;
         match self.reasoning {
             Some(enabled) => wire.serialize_field("reasoning", &WireReasoning { enabled })?,
             None => wire.skip_field("reasoning")?,
@@ -606,30 +636,13 @@ pub fn is_available_within(settings: &Settings, ceiling: std::time::Duration) ->
 /// Send a request to the configured provider and return the content it
 /// generated. Absent when the provider cannot be reached, rejects the request,
 /// or answers with nothing.
+///
+/// @planks("the acronym request is sent to that endpoint")
 fn complete(request: &Request, ceiling: std::time::Duration) -> Option<String> {
     let url = request.url();
-    let messages: Vec<String> = request
-        .messages
-        .iter()
-        .map(|(role, content)| {
-            format!(
-                r#"{{"role":{},"content":{}}}"#,
-                json_string(role),
-                json_string(content)
-            )
-        })
-        .collect();
-    let reasoning = match request.reasoning {
-        Some(enabled) => format!(r#","reasoning":{{"enabled":{enabled}}}"#),
-        None => String::new(),
-    };
-    let body = format!(
-        r#"{{"model":{},"temperature":{},"messages":[{}]{}}}"#,
-        json_string(&request.model),
-        request.temperature,
-        messages.join(","),
-        reasoning
-    );
+    let wire = serde_json::to_value(request).ok()?;
+    let body = wire.get("body")?;
+    let body = serde_json::to_string(body).ok()?;
     let mut call = ureq::post(&url)
         .config()
         .timeout_global(Some(ceiling))
@@ -640,7 +653,7 @@ fn complete(request: &Request, ceiling: std::time::Duration) -> Option<String> {
     }
     let mut response = call.send(&body).ok()?;
     let text = response.body_mut().read_to_string().ok()?;
-    let completion: Completion = serde_yaml::from_str(&text).ok()?;
+    let completion: Completion = serde_json::from_str(&text).ok()?;
     completion
         .choices
         .into_iter()
@@ -648,27 +661,8 @@ fn complete(request: &Request, ceiling: std::time::Duration) -> Option<String> {
         .map(|choice| choice.message.content)
 }
 
-/// A JSON string literal carrying `value`.
-fn json_string(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// The provider's reply. JSON is a subset of YAML, so the rigged YAML
-/// deserializer reads it.
+/// The provider's reply, decoded with the JSON library already in the
+/// dependency graph.
 #[derive(Debug, Deserialize)]
 struct Completion {
     choices: Vec<Choice>,

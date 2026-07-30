@@ -52,6 +52,7 @@ pub fn resolve(platform: &str) -> Result<ResolvedBackend, ResolveError> {
             name: "bubblewrap".to_string(),
             backend: BubblewrapBackend {
                 executable: "bwrap".to_string(),
+                environment: std::env::vars().collect(),
             },
         }),
         other => Err(ResolveError::UnsupportedBackend {

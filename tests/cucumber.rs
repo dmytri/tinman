@@ -52,6 +52,10 @@ struct TinmanWorld {
     // the plan file a scenario named and made sure is absent
     missing_plan: Option<String>,
     granted_env: Option<String>,
+    // The environment the backend is handed, in place of the process table. One
+    // table serves the whole process, so staging a grant by mutating it changes
+    // what every concurrent scenario reads.
+    handed_env: Option<std::collections::BTreeMap<String, String>>,
     fixture_tree: Option<support::ScratchDir>,
     staging_dir: Option<std::path::PathBuf>,
     // capture pipeline
@@ -548,7 +552,7 @@ async fn prepared_and_launched(world: &mut TinmanWorld) {
             .secret_name
             .clone()
             .unwrap_or_else(|| "PATH".to_string());
-        let prepared = BubblewrapBackend::new()
+        let prepared = staged_backend(world)
             .prepare(&spec, &reporting_process(&name))
             .unwrap_or_else(|e| panic!("the Bubblewrap backend did not prepare the process: {e}"));
         world.screen = Some(tinman::pty::capture(&prepared).expect("the process is captured"));
@@ -976,6 +980,26 @@ async fn verifier_checks_plan_deserialization_strictness(world: &mut TinmanWorld
     ));
 }
 
+#[given("the inference module source")]
+async fn the_inference_module_source(_world: &mut TinmanWorld) {
+    // The encoding boundary contract names the module it guards; nothing to
+    // stage here.
+}
+
+#[when("the verifier checks the inference encoding boundary")]
+async fn verifier_checks_inference_encoding_boundary(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_seam_references(
+        "scantlings/inference-encoding-boundary.json",
+    ));
+}
+
+#[when("the verifier checks the copy catalogue boundary")]
+async fn verifier_checks_copy_catalogue_boundary(world: &mut TinmanWorld) {
+    world.boundary_counterexamples = Some(support::check_seam_references(
+        "scantlings/copy-catalogue-boundary.json",
+    ));
+}
+
 #[when(expr = "the verifier checks the seams named in {string}")]
 async fn verifier_checks_named_seams(world: &mut TinmanWorld, contract: String) {
     world.boundary_counterexamples = Some(support::check_seam_references(&contract));
@@ -1057,6 +1081,38 @@ async fn spec_mounting_the_fixture_tree(world: &mut TinmanWorld, mode: String) {
     world.fixture_tree = Some(tree);
 }
 
+#[given(expr = "the backend is handed an environment defining {string} as {string}")]
+async fn the_backend_is_handed_an_environment(
+    world: &mut TinmanWorld,
+    name: String,
+    value: String,
+) {
+    world
+        .handed_env
+        .get_or_insert_with(std::collections::BTreeMap::new)
+        .insert(name, value);
+}
+
+#[then(expr = "the prepared process carries {string} as {string}")]
+async fn prepared_process_carries_as(world: &mut TinmanWorld, name: String, value: String) {
+    let prepared = world.prepared.as_ref().expect("a process was prepared");
+    let carried = prepared
+        .env
+        .iter()
+        .find(|(key, _)| key == &name)
+        .unwrap_or_else(|| {
+            let named: Vec<&str> = prepared.env.iter().map(|(key, _)| key.as_str()).collect();
+            panic!(
+                "the prepared process carries no environment pair for {name}; it carries {named:?}"
+            )
+        });
+    assert_eq!(
+        carried.1, value,
+        "the prepared process carries {name} as {:?} rather than {value:?}",
+        carried.1
+    );
+}
+
 #[when("the Bubblewrap backend prepares the process")]
 async fn bwrap_prepares_process(world: &mut TinmanWorld) {
     // A scenario naming a specification is asserting on what the sandbox grants
@@ -1066,12 +1122,15 @@ async fn bwrap_prepares_process(world: &mut TinmanWorld) {
         Some(command) => command.clone(),
         None => reporting_process(world.granted_env.as_deref().unwrap_or("PATH")),
     };
-    let spec = world
-        .spec
-        .clone()
-        .unwrap_or_else(SandboxSpec::default_for_record);
-    let backend = BubblewrapBackend::new();
-    let prepared = backend
+    // A scenario staging a parsed specification keeps it. One staging its plan
+    // section gets that section through the production parser, so the grants
+    // the plan names reach the backend rather than an empty default.
+    let spec = match world.spec.clone() {
+        Some(spec) => spec,
+        None if !world.plan_sources.is_empty() => sandbox_section(world),
+        None => SandboxSpec::default_for_record(),
+    };
+    let prepared = staged_backend(world)
         .prepare(&spec, &command)
         .expect("the Bubblewrap backend prepares the process");
     world.serialized = Some(to_json(&prepared));
@@ -1392,12 +1451,13 @@ async fn rendered_frame_contains(world: &mut TinmanWorld, text: String) {
 
 #[given(expr = "the operator's environment defines the secret {string} as {string}")]
 async fn env_defines_secret(world: &mut TinmanWorld, name: String, value: String) {
-    // Set the secret in the test process's own environment. Bubblewrap inherits
-    // this environment and must clear it, so a leak into the sandbox is a real
-    // leak of the operator's secret.
-    unsafe {
-        std::env::set_var(&name, &value);
-    }
+    // Hand the secret to the backend as the operator's environment. Bubblewrap
+    // is handed this environment and must clear it, so a leak into the sandbox
+    // is a real leak of the operator's secret.
+    world
+        .handed_env
+        .get_or_insert_with(std::collections::BTreeMap::new)
+        .insert(name.clone(), value.clone());
     world.secret_name = Some(name);
     world.secret_value = Some(value);
 }
@@ -1411,8 +1471,7 @@ async fn bwrap_prints_home_and_secret(world: &mut TinmanWorld, secret: String) {
         program: "/bin/sh".to_string(),
         args: vec!["-c".to_string(), script],
     };
-    let backend = BubblewrapBackend::new();
-    let prepared = backend
+    let prepared = staged_backend(world)
         .prepare(&SandboxSpec::default_for_record(), &command)
         .expect("the Bubblewrap backend prepares the process");
     world.prepared = Some(prepared);
@@ -3243,6 +3302,109 @@ async fn the_acronym_request_is_built(world: &mut TinmanWorld) {
     world.built_requests = vec![tinman::inference::acronym_request(&settings)];
 }
 
+#[given("a provider endpoint that records the body it receives")]
+async fn a_provider_endpoint_that_records_the_body(world: &mut TinmanWorld) {
+    // The local provider logs every body it receives, so recording is what it
+    // does rather than a mode it is put into. Only the endpoint moves here: the
+    // credential the preceding step configured is left standing, because this
+    // scenario asserts what reaches the provider under the operator's own
+    // configuration.
+    let provider =
+        support::LocalProvider::returning("Tinman Inspects Numerous Machine Agent Nodes");
+    world.env_vars.insert(
+        "TINMAN_BASE_URL".to_string(),
+        provider.base_url().to_string(),
+    );
+    world.provider = Some(provider);
+}
+
+#[when("the acronym request is sent to that endpoint")]
+async fn the_acronym_request_is_sent_to_that_endpoint(world: &mut TinmanWorld) {
+    let settings = resolved_settings(world);
+    // One settings value builds the request and drives the send, so the
+    // document the assertions read and the document the provider received come
+    // from one configuration. That identity is the join this scenario exists to
+    // make: any other pairing would compare two requests rather than two
+    // encodings of one.
+    world.built_requests = vec![tinman::inference::acronym_request(&settings)];
+    // The call returns once the provider has answered, so the recorded body is
+    // in hand the moment this step ends; nothing here waits on a clock.
+    let _ = tinman::inference::tagline_expansion(&settings);
+}
+
+/// The one body the provider recorded, parsed as the JSON document a provider
+/// receives. An expansion the generator accepts ends the ask loop on its first
+/// pass, so a second recorded body means the send was retried and the scenario
+/// is no longer reading the send it describes.
+fn recorded_body(world: &TinmanWorld) -> serde_json::Value {
+    let provider = world
+        .provider
+        .as_ref()
+        .expect("a recording provider endpoint was started");
+    let bodies = provider.received_bodies();
+    assert_eq!(
+        bodies.len(),
+        1,
+        "the provider recorded {} bodies rather than the one this scenario sends: {bodies:?}",
+        bodies.len()
+    );
+    serde_json::from_str(&bodies[0]).unwrap_or_else(|e| {
+        panic!(
+            "the body the provider received is not JSON: {e}; it reads:\n{}",
+            bodies[0]
+        )
+    })
+}
+
+/// The payload half of a built request's wire form, which is the half a
+/// provider receives. The endpoint and the credential are transport and sit
+/// beside it, per the provider contract.
+fn built_request_body(world: &TinmanWorld) -> serde_json::Value {
+    let built = world.built_requests.first().expect("a request was built");
+    let wire = to_json(built);
+    wire.get("body")
+        .unwrap_or_else(|| {
+            panic!("the built request's wire form carries no body field; it reads:\n{wire}")
+        })
+        .clone()
+}
+
+#[then("the recorded body names the model the built request names")]
+async fn the_recorded_body_names_the_model(world: &mut TinmanWorld) {
+    let recorded = recorded_body(world);
+    let built = world.built_requests.first().expect("a request was built");
+    assert_eq!(
+        recorded.get("model").and_then(|model| model.as_str()),
+        Some(built.model()),
+        "the sent body names a different model than the built request; it reads:\n{recorded}"
+    );
+}
+
+#[then("the recorded body carries the temperature the built request carries")]
+async fn the_recorded_body_carries_the_temperature(world: &mut TinmanWorld) {
+    let recorded = recorded_body(world);
+    let built = world.built_requests.first().expect("a request was built");
+    assert_eq!(
+        recorded
+            .get("temperature")
+            .and_then(|temperature| temperature.as_f64()),
+        Some(built.temperature()),
+        "the sent body carries a different temperature than the built request; it reads:\n{recorded}"
+    );
+}
+
+#[then("the recorded body carries the messages the built request carries")]
+async fn the_recorded_body_carries_the_messages(world: &mut TinmanWorld) {
+    let recorded = recorded_body(world);
+    let declared = built_request_body(world);
+    assert_eq!(
+        recorded.get("messages"),
+        declared.get("messages"),
+        "the sent body carries different messages than the built request declares; \
+         it reads:\n{recorded}"
+    );
+}
+
 #[when("the assistant request is built")]
 async fn the_assistant_request_is_built(world: &mut TinmanWorld) {
     let settings = resolved_settings(world);
@@ -3325,7 +3487,12 @@ async fn the_request_disables_reasoning(world: &mut TinmanWorld) {
     // request scantling governs, rather than off a field only this suite sees.
     for request in built_requests(world) {
         let wire = to_json(request);
-        let reasoning = wire.get("reasoning").unwrap_or_else(|| {
+        // The reasoning control is payload rather than transport, so it rides
+        // inside the body the provider receives, per the request scantling.
+        let body = wire
+            .get("body")
+            .unwrap_or_else(|| panic!("the request's wire form carries no body field:\n{wire:#}"));
+        let reasoning = body.get("reasoning").unwrap_or_else(|| {
             panic!("the request carries no reasoning control, so the provider reasons by default:\n{wire:#}")
         });
         assert_eq!(
@@ -3411,7 +3578,10 @@ fn request_contents(world: &TinmanWorld) -> String {
         .iter()
         .map(|request| {
             let wire = to_json(request);
-            wire["messages"]
+            // The messages are payload, so they ride inside the body the
+            // provider receives rather than beside it, per the request
+            // scantling.
+            wire["body"]["messages"]
                 .as_array()
                 .unwrap_or_else(|| panic!("the request carries no messages array:\n{wire:#}"))
                 .iter()
@@ -6790,6 +6960,15 @@ async fn a_plan_whose_run_step_carries_the_field(
     ));
 }
 
+#[given("a harness plan whose run step names the command 1.0 unquoted")]
+async fn a_plan_whose_run_step_names_an_unquoted_number(world: &mut TinmanWorld) {
+    // Written as the operator wrote it: YAML reads a bare 1.0 as a number, so
+    // the command the plan names never reaches the parser as the text it is.
+    world
+        .plan_sources
+        .push("flow:\n  - run:\n      command: 1.0\n".to_string());
+}
+
 #[given("a harness plan that defines no flow")]
 async fn a_plan_that_defines_no_flow(world: &mut TinmanWorld) {
     world
@@ -6867,6 +7046,17 @@ async fn parsing_reports_unknown_field(world: &mut TinmanWorld, field: String) {
     assert!(
         message.to_lowercase().contains("unknown field"),
         "the parse failure does not report {field:?} as an unknown field: {message}"
+    );
+}
+
+#[then("parsing fails and reports the value must be quoted to be read as text")]
+async fn parsing_reports_the_value_must_be_quoted(world: &mut TinmanWorld) {
+    let message = world.parse_error.as_deref().unwrap_or_else(|| {
+        panic!("the plan parsed rather than failing: the unquoted number was accepted as a command")
+    });
+    assert!(
+        message.to_lowercase().contains("quote"),
+        "the parse failure does not name quoting as the fix: {message}"
     );
 }
 
@@ -7050,11 +7240,12 @@ async fn a_sandbox_section_whose_path_lists(world: &mut TinmanWorld, entry: Stri
 
 #[given(expr = "the operator's environment defines {string} as {string}")]
 async fn the_operator_environment_defines(world: &mut TinmanWorld, name: String, value: String) {
-    // Set it in the test process's own environment, which Bubblewrap inherits
-    // and must clear unless the plan names it, so a leak is a real leak.
-    unsafe {
-        std::env::set_var(&name, &value);
-    }
+    // Hand it to the backend as the operator's environment, which Bubblewrap
+    // must clear unless the plan names it, so a leak is a real leak.
+    world
+        .handed_env
+        .get_or_insert_with(std::collections::BTreeMap::new)
+        .insert(name.clone(), value.clone());
     world.secret_name = Some(name);
     world.secret_value = Some(value);
 }
@@ -7088,6 +7279,20 @@ fn sandbox_section(world: &TinmanWorld) -> tinman::sandbox::SandboxSpec {
         .expect("a plan sandbox section was given");
     tinman::plan::parse_sandbox(source)
         .unwrap_or_else(|e| panic!("the sandbox section did not parse: {e}\n{source}"))
+}
+
+/// The backend the scenario staged: one handed the environment the scenario
+/// defined, or one reading the process table where the scenario handed none.
+///
+/// A scenario stages a host variable by handing the backend a table of its own.
+/// One process table serves every worker, so mutating it to stage a grant
+/// changes what every concurrent scenario reads, at whatever moment the
+/// scheduler interleaves them.
+fn staged_backend(world: &TinmanWorld) -> BubblewrapBackend {
+    match world.handed_env.as_ref() {
+        Some(env) => BubblewrapBackend::with_environment(env.clone()),
+        None => BubblewrapBackend::new(),
+    }
 }
 
 /// A process that reports what the sandbox granted it: the value of the named
@@ -10058,8 +10263,15 @@ async fn the_assistant_answers_the_docstring(
     use_provider(world, provider);
 }
 
-/// The title the setup form's own region carries, as the scenarios name it.
-const SETUP_FORM_TITLE: &str = "Set up inference";
+/// The title the setup form's own region carries, read from the asset the form
+/// draws it from. Held as a copy here, this was the same hand-copied constant
+/// the form itself carried: a title edited in the asset would strand the
+/// readiness wait below on text the screen no longer shows, and the scenario
+/// proving the catalogue is live would fail on the harness rather than on the
+/// product.
+fn setup_form_title() -> String {
+    setup_form_asset()[0].clone()
+}
 
 /// The key a scenario types into the credential field. It is a value no real
 /// provider issued, so a run that leaked it would be leaking nothing usable.
@@ -10124,8 +10336,9 @@ async fn no_region_titled_is_drawn(world: &mut TinmanWorld, title: String) {
 /// The text the setup form is showing, failing where no form was drawn.
 fn setup_form_text(world: &TinmanWorld) -> String {
     let (model, contents) = drawn_model(world);
-    let form = model.find_named(SETUP_FORM_TITLE).unwrap_or_else(|| {
-        panic!("the terminal object model reads no region titled {SETUP_FORM_TITLE:?}; screen:\n{contents}")
+    let title = setup_form_title();
+    let form = model.find_named(&title).unwrap_or_else(|| {
+        panic!("the terminal object model reads no region titled {title:?}; screen:\n{contents}")
     });
     let mut text = String::new();
     fn gather(region: &tinman::tom::Region, into: &mut String) {
@@ -10242,7 +10455,7 @@ async fn the_operator_has_opened_the_setup_form(world: &mut TinmanWorld) {
         .unwrap_or_else(|e| panic!("starting the setup form on a terminal failed: {e}"));
     // The form standing on the terminal is the signal it is ready for input, so
     // nothing is typed before the program can read it.
-    session.await_region(SETUP_FORM_TITLE, std::time::Duration::from_secs(10));
+    session.await_region(&setup_form_title(), std::time::Duration::from_secs(10));
     world.terminal_session = Some(session);
 }
 
@@ -11039,8 +11252,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all twenty-one name that version")]
-async fn all_twenty_one_name_that_version(world: &mut TinmanWorld) {
+#[then("all twenty-three name that version")]
+async fn all_twenty_three_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -11051,8 +11264,8 @@ async fn all_twenty_one_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        21,
-        "twenty-one schema URIs are published, found {}: {}",
+        23,
+        "twenty-three schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -11077,7 +11290,7 @@ async fn all_twenty_one_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the ten scantlings that declare no JSON Schema dialect")]
+#[given("the twelve scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -11103,16 +11316,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all ten proof contracts validate")]
-async fn all_ten_proof_contracts_validate(world: &mut TinmanWorld) {
+#[then("all twelve proof contracts validate")]
+async fn all_twelve_proof_contracts_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        10,
-        "ten scantlings declare no dialect, found {}: {}",
+        12,
+        "twelve scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

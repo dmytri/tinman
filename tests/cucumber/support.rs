@@ -83,11 +83,25 @@ pub struct ConstructionBoundary {
 /// shape. The contract carries its own search paths, so the set it guards grows
 /// by a line in the contract rather than by a checker somebody has to remember
 /// to extend.
+///
+/// A contract may name its sources either way, which is the split the
+/// proof-contract meta-schema's reference-boundary branch already carries:
+/// `searchPaths` guards a tree, and `module` guards one file. A contract may
+/// also require references as well as forbid them, because forbidding the
+/// encoder a module must not use says nothing about whether it uses the one it
+/// must, and a module that reaches for neither would satisfy a
+/// forbidden-only contract while encoding nothing at all.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeamReferenceContract {
+    #[serde(default)]
     pub search_paths: Vec<String>,
+    #[serde(default)]
+    pub module: Option<String>,
+    #[serde(default)]
     pub forbidden_references: Vec<String>,
+    #[serde(default)]
+    pub required_references: Vec<String>,
 }
 
 /// A deserialization strictness contract: the derive attribute every bound type
@@ -3891,12 +3905,27 @@ pub fn resolution_outcomes() -> Vec<String> {
 pub fn check_seam_references(contract_path: &str) -> Vec<String> {
     let contract: SeamReferenceContract = read_policy(contract_path);
     let mut bad = Vec::new();
-    if contract.search_paths.is_empty() {
+    let mut roots = contract.search_paths.clone();
+    roots.extend(contract.module.clone());
+    if roots.is_empty() {
         bad.push(format!(
-            "{contract_path} names no search path, so the scan asserted nothing"
+            "{contract_path} names neither a search path nor a module, so the scan asserted nothing"
         ));
     }
-    for path in &contract.search_paths {
+    // A contract may forbid references, require them, or do both, so neither
+    // list is required on its own. Naming neither is the case that reads as a
+    // clean bill while asserting nothing about the sources it opened.
+    if contract.forbidden_references.is_empty() && contract.required_references.is_empty() {
+        bad.push(format!(
+            "{contract_path} neither forbids nor requires a reference, so the scan asserted nothing"
+        ));
+    }
+    // Which required references were seen anywhere the contract scans. A
+    // required reference is satisfied by the set rather than by each source,
+    // because a contract guarding a tree requires the reference to be present
+    // in it, not repeated in every file of it.
+    let mut seen_required: Vec<&String> = Vec::new();
+    for path in &roots {
         let sources = if std::path::Path::new(path).is_dir() {
             let found = rust_sources_under(path);
             if found.is_empty() {
@@ -3928,7 +3957,19 @@ pub fn check_seam_references(contract_path: &str) -> Vec<String> {
                         ));
                     }
                 }
+                for reference in &contract.required_references {
+                    if carries_token(line, reference) && !seen_required.contains(&reference) {
+                        seen_required.push(reference);
+                    }
+                }
             }
+        }
+    }
+    for reference in &contract.required_references {
+        if !seen_required.contains(&reference) {
+            bad.push(format!(
+                "no source the contract scans references {reference}, which it requires"
+            ));
         }
     }
     bad
@@ -4646,7 +4687,7 @@ where
 const UNJOINED_ENUMERATIONS: [(&str, &str, &str); 8] = [
     (
         "scantlings/inference-request.schema.json",
-        "/properties/messages/items/properties/role",
+        "/properties/body/properties/messages/items/properties/role",
         "the wire message carries the role as a string, so no production enumeration carries the set",
     ),
     (

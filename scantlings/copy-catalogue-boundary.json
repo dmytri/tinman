@@ -1,0 +1,13 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/copy-catalogue-boundary.json",
+  "title": "Copy catalogue boundary",
+  "description": "Operator-facing copy is drawn from the asset catalogue. Every asset that carries copy an operator reads is referenced by the implementation, so the drawn text has one source and no second copy exists to drift from it. Discharged by the reference-boundary checker in verification support, which scans the implementation tree. Attested by the @contract scenario in features/interactive-help.feature.",
+  "searchPaths": [
+    "src"
+  ],
+  "requiredReferences": [
+    "assets/help/setup-form.txt",
+    "assets/help/assistant-prompt.txt"
+  ],
+  "rationale": "The setup form held its title, key hints and environment sentence as constants beside a panel that read the same kinds of copy from an asset. An asset was written to close that, and the scenario comparing the form against it passed while the form still drew from the constants, because those values had been copied out of the asset by hand: equal strings are not a reading. The honest test is to edit the asset and watch the screen follow, and it is unreachable here because the assets are compiled in, so no run can perform the edit. Requiring the reference is what remains checkable, and it is the half that actually regresses: a later change reintroducing a literal is silent, where a missing include is not."
+}

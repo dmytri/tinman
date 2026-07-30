@@ -26,7 +26,7 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all twenty-one name that version
+    Then all twenty-three name that version
 
   Rule: the project ships two artifacts from one tree, the crate and the npm package, and each carries its own version field. A bump applied to one is invisible to the other, and the schema-URI check above reads the crate manifest alone, so before the scenario below a forgotten npm manifest passed every gate and reached the registry naming a version that described different contents. The registry is where that would be discovered, which is after it is published and cannot be taken back.
 
@@ -105,9 +105,9 @@ Feature: methodology conformance
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the ten scantlings that declare no JSON Schema dialect
+    Given the twelve scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all ten proof contracts validate
+    Then all twelve proof contracts validate
     And the meta-schema forbids a property it does not name
 
   Rule: a scantling creates no work until something references it, so an unreferenced one is a contract nobody discharges while every attestation stays green. Four of the boundary contracts are reached through a path literal in a step definition rather than through a path named in a scenario, which is the sound route and the reason this join reads both. The floor guards the reader: a listing that finds no scantlings and a directory that holds none both report zero.

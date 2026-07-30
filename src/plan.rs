@@ -361,6 +361,25 @@ struct PlanForm {
     sources: Vec<Source>,
 }
 
+/// Restate a deserializer's type complaint as the operator's own mistake. A
+/// plan's values are text a program printed or an operator reads on a screen,
+/// so a bare 1.0 is a value YAML read as a number, and the fix is a pair of
+/// quotes. A complaint of any other shape passes through as written.
+///
+/// @planks("parsing fails and reports the value must be quoted to be read as text")
+fn name_the_quoting_fix(message: &str) -> String {
+    let Some((path, complaint)) = message.split_once("invalid type: ") else {
+        return message.to_string();
+    };
+    let Some((found, location)) = complaint.split_once(", expected a string") else {
+        return message.to_string();
+    };
+    let Some(value) = found.split('`').nth(1) else {
+        return message.to_string();
+    };
+    format!("{path}{value} must be quoted as \"{value}\" to be read as text{location}")
+}
+
 /// Parse a harness plan, normalizing every shorthand into the canonical plan.
 /// An omitted sandbox section is the secure default.
 ///
@@ -368,9 +387,11 @@ struct PlanForm {
 /// @planks("both plans are parsed")
 /// @planks("the harness plan at {string}")
 /// @planks("parsing fails and reports a missing flow")
+/// @planks("parsing fails and reports the value must be quoted to be read as text")
 /// @planks("a recorded plan is serialized and read back")
 pub fn parse(source: &str) -> Result<Plan, String> {
-    let form: PlanForm = serde_yaml::from_str(source).map_err(|e| e.to_string())?;
+    let form: PlanForm =
+        serde_yaml::from_str(source).map_err(|e| name_the_quoting_fix(&e.to_string()))?;
     let flow = if let Some(command) = form.tui {
         vec![FlowStep::Tui(TuiProcess {
             command,

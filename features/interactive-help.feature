@@ -457,7 +457,7 @@ Feature: interactive help
     When the verifier checks the assistant command boundary
     Then no counterexample is found
 
-  Rule: the assistant box reads its title and its key hints from assets/help/assistant-prompt.txt, and the setup form beside it held the same kinds of copy as constants in src/setup.rs. One screen carried two catalogues, and only one of them was a catalogue an operator or a translator could edit without touching the implementation. The form now reads assets/help/setup-form.txt for its title, its key hints, and the sentence naming the environment variable it reads.
+  Rule: the assistant box reads its title and its key hints from assets/help/assistant-prompt.txt, and the setup form beside it held the same kinds of copy as constants in src/setup.rs. One screen carries two catalogues, and only one of them is a catalogue an operator or a translator can edit without touching the implementation. assets/help/setup-form.txt was written to close that, and the scenario below then compared the form against the asset and passed while the form still drew from the constants, because those constant values had been copied out of the asset by hand. Equal strings are not a reading, and the scenario beneath this one is what tells the two apart.
 
   Rule: the label on the credential field is the one piece of that copy the asset does not carry, and the reason is arithmetic rather than oversight. Its value ends in a space the field's width calculation counts, so a line-oriented text asset would make a trailing space the difference between a correct form and a misaligned one, invisible in every editor that trims on save. A catalogue an operator can edit is what the move was for, and a value whose end they cannot see is not one.
 
@@ -466,3 +466,11 @@ Feature: interactive help
     Then the form title is the title the setup asset carries
     And the form names the keys that asset carries as the keys that save and leave
     And the form names the environment variable that asset carries
+
+  Rule: a catalogue an operator can edit is what the move to assets was for, and the scenario above cannot tell a form that reads its asset from a form that carries a copy of it. Both satisfy an assertion comparing the drawn line against the asset's line, because the two strings agree until one of them is edited. Editing the asset and finding the screen followed would tell them apart, and no run can do it: the assets are compiled into the binary, so the edit a test would make is one only a rebuild can apply. The reachable fact is the structural one underneath, that the implementation holds no second copy to drift from, and the contract below is what holds it.
+
+  @contract
+  Scenario: the operator-facing copy is drawn from the asset catalogue
+    Given the implementation sources
+    When the verifier checks the copy catalogue boundary
+    Then no counterexample is found

@@ -1,0 +1,21 @@
+id: process-wide-env-mutation
+language: rust
+severity: error
+message: Verification support mutates the process environment, which every concurrent worker shares.
+note: |
+  Concurrency is correctness-safe by construction only while workers touch disjoint
+  state. The environment is not disjoint: it is one table per process, so a scenario
+  setting a variable changes what every other scenario reads, at whatever moment the
+  scheduler happens to interleave them. The default tier runs at 64 workers and other
+  steps read HOME and PATH, so this is a live race rather than a latent one, and it
+  fails as an occasional unexplained red that reruns clean, which is the shape a team
+  learns to rerun rather than fix. Pass the value into the seam under test instead, or
+  give the child process its own environment when spawning it.
+files:
+  - tests/**
+rule:
+  any:
+    - pattern: std::env::set_var($$$)
+    - pattern: env::set_var($$$)
+    - pattern: std::env::remove_var($$$)
+    - pattern: env::remove_var($$$)

@@ -2,15 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.2.0/scantlings/inference-request.schema.json",
   "title": "Outbound inference request",
-  "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. Referenced by features/inference-provider.feature.",
+  "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. The endpoint and the credential are transport rather than payload, so they sit beside the body instead of inside it: an earlier revision listed them as body fields, and a second encoder that sent neither could diverge from this contract while the attestation stayed green. Referenced by features/inference-provider.feature.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "url",
     "authorization",
-    "model",
-    "messages",
-    "temperature"
+    "body"
   ],
   "properties": {
     "url": {
@@ -24,53 +22,65 @@
       "type": "string",
       "pattern": "^Bearer .+$"
     },
-    "model": {
-      "description": "The resolved model identifier the provider is asked to serve.",
-      "type": "string",
-      "minLength": 1
-    },
-    "temperature": {
-      "description": "The sampling temperature from the request's profile. The acronym profile optimizes for novelty and the assistant profile for correctness, so the value is per-profile rather than global.",
-      "type": "number",
-      "minimum": 0,
-      "maximum": 2
-    },
-    "messages": {
-      "description": "The chat messages, in order. At least one is always present.",
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "role",
-          "content"
-        ],
-        "properties": {
-          "role": {
-            "enum": [
-              "system",
-              "user",
-              "assistant"
-            ]
-          },
-          "content": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      }
-    },
-    "reasoning": {
-      "description": "The provider's reasoning control, omitted where a request does not set one. A reasoning model spends its budget on whatever it is asked, and the tagline asks for six words: measured against the configured provider, the request answered nothing inside forty seconds with reasoning left on and one to two seconds with it disabled. This is OpenRouter's parameter rather than a cross-vendor standard, which is the one place the vendor-neutral claim strains; an OpenAI-compatible endpoint that does not know it ignores it.",
+    "body": {
+      "description": "The JSON document sent as the request body, which is the whole of what the provider receives. Nothing outside this object reaches the payload.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "enabled"
+        "model",
+        "temperature",
+        "messages"
       ],
       "properties": {
-        "enabled": {
-          "type": "boolean"
+        "model": {
+          "description": "The resolved model identifier the provider is asked to serve.",
+          "type": "string",
+          "minLength": 1
+        },
+        "temperature": {
+          "description": "The sampling temperature from the request's profile. The acronym profile optimizes for novelty and the assistant profile for correctness, so the value is per-profile rather than global.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "messages": {
+          "description": "The chat messages, in order. At least one is always present.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "system",
+                  "user",
+                  "assistant"
+                ]
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "reasoning": {
+          "description": "The provider's reasoning control, omitted where a request does not set one. A reasoning model spends its budget on whatever it is asked, and the tagline asks for six words: measured against the configured provider, the request answered nothing inside forty seconds with reasoning left on and one to two seconds with it disabled. This is OpenRouter's parameter rather than a cross-vendor standard, which is the one place the vendor-neutral claim strains; an OpenAI-compatible endpoint that does not know it ignores it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
         }
       }
     }

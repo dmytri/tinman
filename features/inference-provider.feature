@@ -107,3 +107,21 @@ Feature: inference provider
     Given neither the environment nor a dotenv file sets "TINMAN_API_KEY"
     When an inference request is built
     Then the request carries no authorization header
+
+  Rule: the request Tinman builds and the request Tinman sends are encoded by two different pieces of code, each with its own escaping. The scantling attestation reads the first and the provider reads the second, so the contract is discharged against a document no provider ever receives, and either encoder can drift without reddening anything.
+
+  Scenario: the body sent to the provider carries the fields the built request declares
+    Given the environment sets "TINMAN_API_KEY" to "sk-or-v1-8f3c2a91"
+    And a provider endpoint that records the body it receives
+    When the acronym request is sent to that endpoint
+    Then the recorded body names the model the built request names
+    And the recorded body carries the temperature the built request carries
+    And the recorded body carries the messages the built request carries
+
+  Rule: the scenario above joins the two encodings at run time, and a join proves the pair agreed on the one document it saw. What kept them apart is structural: a second encoder existed at all, hand-rolling the escaping that a library already in the dependency graph performs, and the decoder reached for the YAML parser to read JSON. The contract below removes the room rather than watching it, because a hand-written escaper announces nothing when it grows back.
+
+  @contract
+  Scenario: the inference module encodes with the JSON library
+    Given the inference module source
+    When the verifier checks the inference encoding boundary
+    Then no counterexample is found

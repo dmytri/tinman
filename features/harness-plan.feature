@@ -29,6 +29,13 @@ Feature: harness plan
     When the verifier checks the plan deserialization strictness contract
     Then no counterexample is found
 
+  Rule: a plan's values are text a program printed or an operator expects to read on a screen, and screens carry version numbers, decimals and identifiers with leading zeros. YAML reads an unquoted 1.0 as a number, so a plan naming it as text fails to parse. Failing is right and the wording is not: the parser reports a type it expected, which describes the deserializer's disappointment rather than the operator's mistake, and the operator's mistake has a one-character fix.
+
+  Scenario: an unquoted number-like value is refused with the fix named
+    Given a harness plan whose run step names the command 1.0 unquoted
+    When the plan is parsed
+    Then parsing fails and reports the value must be quoted to be read as text
+
   Scenario: a plan with no flow is rejected
     Given a harness plan that defines no flow
     When the plan is parsed

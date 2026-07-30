@@ -192,11 +192,20 @@ extern "C" fn hand_the_terminal_back(_signal: i32) {
     std::process::exit(INTERRUPTED_STATUS);
 }
 
-/// The keys the box names while a call is pending. Escape abandons that call
-/// rather than leaving the session, so the hint names what the key does now.
+/// The title, the sending and leaving key hints, and the pending-call hint
+/// the box draws, read from `asset`'s first three lines. The compiled-in
+/// asset is the production default the box draws from; this seam also takes
+/// arbitrary asset text directly, so the copy it yields can be checked
+/// against an asset edit without redrawing a screen.
 ///
 /// @planks("the assistant prompt names {string} as the key that cancels")
-const PENDING_KEYS: &str = "esc to cancel";
+pub fn prompt_copy(asset: &str) -> (&str, &str, &str) {
+    let mut lines = asset.trim().lines();
+    let title = lines.next().unwrap_or_default();
+    let keys = lines.next().unwrap_or_default();
+    let pending_keys = lines.next().unwrap_or_default();
+    (title, keys, pending_keys)
+}
 
 /// How often the box is drawn again while a call is pending, which is how often
 /// the seconds it reports can advance.
@@ -285,9 +294,7 @@ fn call(settings: &Settings, history: Vec<Exchange>, question: &str) -> Pending 
 /// @planks("the operator interrupts the session")
 pub fn converse(settings: &Settings) -> std::io::Result<()> {
     use std::io::{Read, Write};
-    let mut prompt = PROMPT.trim().lines();
-    let title = prompt.next().unwrap_or_default();
-    let keys = prompt.next().unwrap_or_default();
+    let (title, keys, pending_keys) = prompt_copy(PROMPT);
     let columns = crossterm::terminal::size()?.0 as usize;
     let width = columns.min(MAX_COLUMNS);
     let coloured = std::env::var_os("NO_COLOR").is_none();
@@ -422,7 +429,7 @@ pub fn converse(settings: &Settings) -> std::io::Result<()> {
                     let waited = waiting_line(waiting.started.elapsed().as_secs());
                     draw(
                         &mut out,
-                        &box_lines(width, title, &waited, PENDING_KEYS, coloured),
+                        &box_lines(width, title, &waited, pending_keys, coloured),
                         false,
                         cursor_column(&question),
                     )?;

@@ -9,27 +9,32 @@
 use crate::inference::Settings;
 use std::io::{Read, Write};
 
-/// The title the form's box carries, which is the name a reader addresses the
-/// form by.
-///
-/// @planks("a region titled {string} is drawn")
-/// @planks("no region titled {string} is drawn")
-const TITLE: &str = "Set up inference";
-
-/// The keys the form names on its bottom border, read the way a pane's key
-/// hints are read.
-const HINT: &str = "enter to save, esc to leave";
+/// The setup asset, inlined at build time: its first line titles the form, its
+/// second names the keys that save and leave, and its third names the
+/// environment variable the form also reads the credential from. The compiled-
+/// in copy is the production default; `form_copy` reads any asset text the same
+/// way, so an edited asset is a live reading rather than a hand-kept copy.
+const FORM: &str = include_str!("../assets/help/setup-form.txt");
 
 /// The label naming the field the credential is typed into. The colon before
 /// the field is what says the underscores after it are an input rather than a
-/// rule.
+/// rule. Its value ends in a space the field's width calculation counts, so it
+/// stays a constant rather than a line of the asset, where a trailing space is
+/// invisible in every editor that trims on save.
 const LABEL: &str = "key: ";
 
-/// The other way a credential reaches Tinman, named on the form so an operator
-/// who would rather configure it than type it knows what to set.
+/// Read `asset` as the form's own copy: the title on its first line, the key
+/// hints on its second, and the environment sentence on its third, the order
+/// assets/help/setup-form.txt carries them in.
 ///
-/// @planks("the form names {string} as an environment variable it reads")
-const ENVIRONMENT: &str = "TINMAN_API_KEY in the environment or a .env file is read too";
+/// @planks("the form title is the title the setup asset carries")
+pub fn form_copy(asset: &str) -> (String, String, String) {
+    let mut lines = asset.trim().lines();
+    let title = lines.next().unwrap_or_default().to_string();
+    let hint = lines.next().unwrap_or_default().to_string();
+    let environment = lines.next().unwrap_or_default().to_string();
+    (title, hint, environment)
+}
 
 /// The cell the credential field is drawn with. The field shows its own width
 /// and never the key, so the characters on the screen carry no secret.
@@ -130,21 +135,22 @@ fn save(key: &str) {
 /// @planks("the form names {string} as an environment variable it reads")
 /// @planks("the credential field is hidden")
 fn form_lines(width: usize, settings: &Settings) -> Vec<String> {
+    let (title, hint, environment) = form_copy(FORM);
     let inner = width - 2;
     let mut lines = Vec::new();
-    let rule = HORIZONTAL.repeat(inner - TITLE.chars().count());
-    lines.push(format!("{TOP_LEFT}{TITLE}{rule}{TOP_RIGHT}"));
+    let rule = HORIZONTAL.repeat(inner - title.chars().count());
+    lines.push(format!("{TOP_LEFT}{title}{rule}{TOP_RIGHT}"));
     for body in [
         format!("endpoint  {}", settings.base_url),
         format!("model     {}", settings.model),
-        ENVIRONMENT.to_string(),
+        environment,
     ] {
         let shown: String = body.chars().take(inner).collect();
         let padding = " ".repeat(inner - shown.chars().count());
         lines.push(format!("{VERTICAL}{shown}{padding}{VERTICAL}"));
     }
-    let rule = HORIZONTAL.repeat(inner - HINT.chars().count());
-    lines.push(format!("{BOTTOM_LEFT}{HINT}{rule}{BOTTOM_RIGHT}"));
+    let rule = HORIZONTAL.repeat(inner - hint.chars().count());
+    lines.push(format!("{BOTTOM_LEFT}{hint}{rule}{BOTTOM_RIGHT}"));
     let field = MASK.repeat(width - LABEL.chars().count());
     lines.push(format!("{LABEL}{HIDDEN}{field}{PLAIN}"));
     lines
