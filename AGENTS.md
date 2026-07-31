@@ -92,16 +92,21 @@ These move together or not at all:
 - `version` in `Cargo.toml`
 - `version` in `npm/package.json`
 - every published schema `$id` URI, across `scantlings/` and `assets/examples/`, which `every published schema URI names the packaged version` joins to the packaged version and counts
+- the git tag `vX.Y.Z`, pushed, because every one of those URIs resolves through it
 
 Two facts about the checks around this coupling, both paid for on 2026-07-29.
 
-`every published schema URI names the packaged version` compares the URIs against `Cargo.toml`, so it catches a forgotten URI and never a changed contract under an unchanged version. A schema whose content moves while the version stands leaves every URI still naming `@vX.Y.Z`, and the check stays green while that pinned URI serves something the repository no longer contains. The tree is in that state now: `sandbox-spec.schema.json` lost a required field with `Cargo.toml` still reading 0.2.0. The URI is pinned to a tag rather than to a branch, so publishing the next version is what resolves it, and a consumer reading the pinned URI meanwhile gets the older contract.
+`every published schema URI names the packaged version` compares the URIs against `Cargo.toml`, so it catches a forgotten URI and never a changed contract under an unchanged version. A schema whose content moves while the version stands leaves every URI still naming `@vX.Y.Z`, and the check stays green while that pinned URI serves something the repository no longer contains. The tree was in that state through the 0.2.0 cycle: `sandbox-spec.schema.json` lost a required field while `Cargo.toml` still read 0.2.0. The URI is pinned to a tag rather than to a branch, so publishing the next version is what resolves it, and a consumer reading the pinned URI meanwhile gets the older contract. Read that as the standing shape of the gap rather than as a description of the tree now, which moves every release.
 
 `both packaged manifests name one version` joins the two manifest versions and reddens when they diverge. Before it nothing joined them at all, so a bump applied to one could reach a registry naming a version that described different contents.
 
 ## Outbound
 
-Tinman ships two targets, and they release independently. `RIGGING.md` carries the exact `ship` and `verify` commands for each under `## Outbound`.
+Tinman ships three outbound targets. `RIGGING.md` carries the exact `ship` and `verify` commands for each under `## Outbound`, in the order they run.
+
+**The git tag ships first, and it is a real target rather than bookkeeping.** Every published schema `$id` is `cdn.jsdelivr.net/gh/dmytri/tinman@vX.Y.Z/...`, and jsdelivr resolves that through the tag. An untagged release therefore publishes a full set of URIs that answer 404, and nothing in the tree can tell: the schema-URI conformance scenario reads the repository and finds every URI naming the packaged version, exactly as it should, while every one of them is dead on the network. Measured on 2026-07-31: `@v0.1.2` returned 200, `@v0.2.0` returned 404, `@v0.3.0` returned 200. The 0.2.0 URIs were dead from the day they shipped until 0.3.0 replaced them, so the pinned-URI compatibility story below had never actually worked. The tag's `verify` line fetches a schema over the network for exactly this reason, because it is the only one of the three that a repository-side check cannot stand in for.
+
+The two registry targets release independently of each other.
 
 **crates.io** ships the source crate. `cargo publish` from the repository root is the whole runbook.
 
@@ -115,7 +120,19 @@ Two versions have to move together: `version` in `Cargo.toml` and `version` in `
 
 Each line also names the version it expects rather than accepting whichever one answers. The crates.io line reads that version from `Cargo.toml`, so it reddens when the registry is behind the repository.
 
-This is not hypothetical. The previous line was `cargo search tinman`, which exits 0 whatever version comes back. The 0.2.0 release reached npm on 2026-07-28 and never reached crates.io, where 0.1.2 still stands, and `cargo search` reported success for a day across that gap. The replacement caught it on its first run.
+This is not hypothetical. The previous line was `cargo search tinman`, which exits 0 whatever version comes back. The 0.2.0 release reached npm on 2026-07-28 and never reached crates.io, which stayed at 0.1.2 for the rest of that cycle, and `cargo search` reported success for a day across the gap. The replacement caught it on its first run. Both registries served 0.3.0 on 2026-07-31.
+
+### What the 0.3.0 release found in these lines
+
+The 0.3.0 release was the first to run this rigging end to end, and running it is what found the faults. Three of the four had been sitting in values that looked correct and had never been executed. A `ship` line nobody has run is a claim, and the release is where the claim is tested.
+
+**A directory argument needs a path, not a bare name.** The npm ship line read `npm publish npm --access public`, and npm resolved the bare `npm` as a package name from the registry rather than as the local directory. It answered `403 Forbidden - PUT https://registry.npmjs.org/npm`. The line now reads `npm publish ./npm`. Both forms are visible in a dry run, which is the cheap way to tell them apart: the bare form reports `+ npm@12.0.2` with 1942 files, and the path form reports `+ @dk/tinman@0.3.0` with 4. The 0.2.0 package was published by hand from outside the repository, so this line had never run.
+
+**The npm verify line takes `--prefer-online`.** Without it, `npm install @dk/tinman@latest` failed six times over two minutes with `ETARGET` while `npm view` reported `0.3.0` and `dist-tags.latest` agreed. That is a stale local packument rather than registry propagation, and it makes the line report a good artifact as bad. That failure is the mirror of the `cargo search` one above: one passed everything and one failed everything, and neither answered the question asked.
+
+**A ship or verify line prints its own status.** A release run piped a publish into `tail -12` and read `exit=0` from a publish that had just 403'd, because a pipeline reports the status of its last command. Every line under `## Outbound` now ends by printing its own exit status before propagating it, the way the sweep commands under `## Run data` already do. The printed line survives the pipe even where `$?` does not, so a role that pipes the output still sees the failure.
+
+The general rule under all four: a value in `RIGGING.md` that has never been executed is not yet a value. Prove a changed ship or verify line by running what can be run without publishing, and name in the report what could not be.
 
 ## Settled decisions
 

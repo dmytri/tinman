@@ -69,9 +69,12 @@
 - dependency: clap_complete
 
 ## Outbound
+- outbound: git tag
+- ship: `set -o pipefail; v=$(rg -m1 '^version = ' Cargo.toml | cut -d'"' -f2); git tag "v$v" && git push origin "v$v"; r=$?; printf 'ship git tag v%s exit=%s\n' "$v" "$r"; exit $r`
+- verify: `set -o pipefail; v=$(rg -m1 '^version = ' Cargo.toml | cut -d'"' -f2); curl -sSf -o /dev/null "https://cdn.jsdelivr.net/gh/dmytri/tinman@v$v/scantlings/tom.schema.json"; r=$?; printf 'verify git tag v%s exit=%s\n' "$v" "$r"; exit $r`
 - outbound: crates.io
-- ship: `cargo publish`
-- verify: `d=$(mktemp -d); cargo install tinman --version "$(rg -m1 '^version = ' Cargo.toml | cut -d'"' -f2)" --root "$d" --locked && "$d/bin/tinman" --version`
+- ship: `set -o pipefail; cargo publish; r=$?; printf 'ship crates.io exit=%s\n' "$r"; exit $r`
+- verify: `set -o pipefail; d=$(mktemp -d); v=$(rg -m1 '^version = ' Cargo.toml | cut -d'"' -f2); cargo install tinman --version "$v" --root "$d" --locked && "$d/bin/tinman" --version; r=$?; printf 'verify crates.io exit=%s\n' "$r"; exit $r`
 - outbound: npm
-- ship: `cargo build --release && install -D target/release/tinman npm/bin/tinman && cp README.md LICENSE npm/ && npm publish npm --access public`
-- verify: `d=$(mktemp -d); npm install --prefix "$d" @dk/tinman@latest && "$d/node_modules/.bin/tinman" --version`
+- ship: `set -o pipefail; cargo build --release && install -D target/release/tinman npm/bin/tinman && cp README.md LICENSE npm/ && npm publish ./npm --access public; r=$?; printf 'ship npm exit=%s\n' "$r"; exit $r`
+- verify: `set -o pipefail; d=$(mktemp -d); npm install --prefix "$d" --prefer-online @dk/tinman@latest && "$d/node_modules/.bin/tinman" --version; r=$?; printf 'verify npm exit=%s\n' "$r"; exit $r`
