@@ -76,10 +76,10 @@ struct TinmanWorld {
     // which one it is
     outbound_targets: Option<Vec<support::OutboundTarget>>,
     outbound_lines: Option<Vec<(String, String, Option<String>)>>,
-    // the types verification support declares, and the ones a double's name
-    // marks that carry no justification
-    support_types: Option<Vec<support::DeclaredType>>,
-    unmarked_doubles: Option<Vec<String>>,
+    // the exceptional-double marks verification support carries, and the subset
+    // whose text names no condition the agreement permits
+    double_marks: Option<Vec<support::ExceptionalDoubleMark>>,
+    unjustified_marks: Option<Vec<String>>,
     // the construction-boundary contract the verifier last checked, so a floor
     // asserting how the checker counts reads the same contract the check did
     boundary_contract: Option<String>,
@@ -100,6 +100,10 @@ struct TinmanWorld {
     stale_planks: Option<Vec<String>>,
     unbound_patterns: Option<Vec<String>>,
     metacharacter_names: Option<Vec<String>>,
+    // the scenario references the shipped Markdown documents cite, and the ones
+    // naming no scenario the specs carry
+    shipped_citations: Option<Vec<support::Citation>>,
+    unresolved_citations: Option<Vec<String>>,
     // the provisional planks the implementation carries, and the spent ones,
     // naming a scenario Captain has already disposed of
     provisional_planks: Option<support::ProvisionalInventory>,
@@ -10959,56 +10963,51 @@ async fn the_outbound_targets_read_are_not_empty(world: &mut TinmanWorld) {
 // methodology conformance: the doubles verification support declares
 // ---------------------------------------------------------------------------
 
-#[given("the types declared in the verification support sources")]
-async fn the_types_declared_in_verification_support(world: &mut TinmanWorld) {
-    world.support_types = Some(support::verification_support_types());
+#[given("the exceptional-double marks in the verification support sources")]
+async fn the_exceptional_double_marks_in_verification_support(world: &mut TinmanWorld) {
+    world.double_marks = Some(support::exceptional_double_marks());
 }
 
-#[when("each type whose name marks it a double is matched against the marks the sources carry")]
-async fn each_double_named_type_is_matched_against_the_marks(world: &mut TinmanWorld) {
-    let types = world
-        .support_types
+#[when("each mark is read for the condition it names")]
+async fn each_mark_is_read_for_the_condition_it_names(world: &mut TinmanWorld) {
+    let marks = world
+        .double_marks
         .as_ref()
-        .expect("the verification support types were read");
-    world.unmarked_doubles = Some(
-        types
+        .expect("the exceptional-double marks were read");
+    world.unjustified_marks = Some(
+        marks
             .iter()
-            .filter(|declared| support::names_a_double(&declared.name) && !declared.marked)
-            .map(|declared| {
-                format!(
-                    "{}:{} {} is named a double and carries no mark",
-                    declared.file, declared.line, declared.name
-                )
-            })
+            .filter(|mark| mark.condition.is_none())
+            .map(|mark| format!("{}:{} {}", mark.file, mark.line, mark.text))
             .collect(),
     );
 }
 
-#[then("every type named as a double carries an exceptional-double mark")]
-async fn every_double_carries_an_exceptional_double_mark(world: &mut TinmanWorld) {
-    let unmarked = world
-        .unmarked_doubles
+#[then("every mark names one of the three conditions the Verification agreement permits")]
+async fn every_mark_names_a_permitted_condition(world: &mut TinmanWorld) {
+    let unjustified = world
+        .unjustified_marks
         .as_ref()
-        .expect("the double-named types were matched against the marks");
+        .expect("each mark was read for the condition it names");
     assert!(
-        unmarked.is_empty(),
-        "{} type(s) named as a double carry no @exceptional-double mark naming the condition \
-         that allows them:\n{}",
-        unmarked.len(),
-        unmarked.join("\n")
+        unjustified.is_empty(),
+        "{} exceptional-double mark(s) name no one condition the Verification agreement permits, \
+         so each stands as a gesture rather than a justification:\n{}",
+        unjustified.len(),
+        unjustified.join("\n")
     );
 }
 
-#[then("the types read are not empty")]
-async fn the_support_types_read_are_not_empty(world: &mut TinmanWorld) {
-    let types = world
-        .support_types
+#[then("the marks read are not empty")]
+async fn the_double_marks_read_are_not_empty(world: &mut TinmanWorld) {
+    let marks = world
+        .double_marks
         .as_ref()
-        .expect("the verification support types were read");
+        .expect("the exceptional-double marks were read");
     assert!(
-        !types.is_empty(),
-        "the verification support sources declare no type at all, so the census read nothing \
-         and this scenario would assert nothing"
+        !marks.is_empty(),
+        "the verification support sources carry no exceptional-double mark at all, so the \
+         assertion above read an empty selection and inspected nothing"
     );
 }
 
@@ -11057,6 +11056,45 @@ async fn every_group_reported_is_one_the_allowance_names(world: &mut TinmanWorld
         "{} duplicate group(s) the scanner reports are not named in {path}:\n{}",
         unnamed.len(),
         unnamed.join("\n")
+    );
+}
+
+#[then("every group the allowance names is one it reports")]
+async fn every_allowed_group_is_one_the_scanner_reports(world: &mut TinmanWorld) {
+    let report = world
+        .duplication
+        .as_ref()
+        .expect("the duplication scanner ran");
+    let allowed = world
+        .duplication_allowance
+        .as_ref()
+        .expect("the duplication allowance was read");
+    let path = world
+        .duplication_allowance_path
+        .as_deref()
+        .expect("the duplication allowance was named");
+    // The reverse direction of the same fingerprint join. An entry the scanner no
+    // longer reports excused duplication that is gone, and it stays in the file
+    // granting cover to whatever later matches its fingerprint.
+    let unreported: Vec<&String> = allowed
+        .iter()
+        .filter(|fingerprint| {
+            !report
+                .groups
+                .iter()
+                .any(|group| &group.fingerprint == *fingerprint)
+        })
+        .collect();
+    assert!(
+        unreported.is_empty(),
+        "{} allowance entr(ies) in {path} name a group the scanner no longer reports, so each \
+         excuses duplication that is gone:\n{}",
+        unreported.len(),
+        unreported
+            .iter()
+            .map(|fingerprint| fingerprint.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -11298,6 +11336,65 @@ async fn no_scenario_name_carries_a_metacharacter(world: &mut TinmanWorld) {
         "{} scenario name(s) carry a regex metacharacter, which the focused command would pass unescaped:\n{}",
         carrying.len(),
         carrying.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the scenarios the shipped prose cites
+// ---------------------------------------------------------------------------
+
+#[given("the scenario references cited in the shipped Markdown documents")]
+async fn the_scenario_references_the_shipped_documents_cite(world: &mut TinmanWorld) {
+    world.shipped_citations = Some(support::cited_scenario_references());
+}
+
+#[when("each is matched against the scenarios the specs declare")]
+async fn each_citation_is_matched_against_the_specs(world: &mut TinmanWorld) {
+    let citations = world
+        .shipped_citations
+        .as_ref()
+        .expect("the citations were read");
+    let carried: std::collections::HashSet<String> = support::spec_scenarios()
+        .iter()
+        .map(support::SpecScenario::reference)
+        .collect();
+    world.unresolved_citations = Some(
+        citations
+            .iter()
+            .filter(|citation| !carried.contains(&citation.reference))
+            .map(|citation| {
+                format!(
+                    "{}:{} cites {}",
+                    citation.document, citation.line, citation.reference
+                )
+            })
+            .collect(),
+    );
+}
+
+#[then("every citation names a scenario the specs carry")]
+async fn every_citation_names_a_scenario_the_specs_carry(world: &mut TinmanWorld) {
+    let unresolved = world
+        .unresolved_citations
+        .as_ref()
+        .expect("each citation was matched");
+    assert!(
+        unresolved.is_empty(),
+        "{} citation(s) name a scenario the specs do not carry:\n{}",
+        unresolved.len(),
+        unresolved.join("\n")
+    );
+}
+
+#[then("the citations read are not empty")]
+async fn the_citations_read_are_not_empty(world: &mut TinmanWorld) {
+    let citations = world
+        .shipped_citations
+        .as_ref()
+        .expect("the citations were read");
+    assert!(
+        !citations.is_empty(),
+        "the shipped Markdown documents cite no scenario, so the join asserted nothing"
     );
 }
 

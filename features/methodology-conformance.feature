@@ -14,16 +14,22 @@ Feature: methodology conformance
     Then no rule in the set reports a match
     And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation and killed-measured-child rules
 
-  Rule: a double was matched by the text of its declaration, which is not the same as its name. A struct merely holding a field of a double's type reddened, and the mark that justifies a real double could not be read at all, because an attribute sits between the doc comment and the item and a rule sees a comment's shape rather than its content. Both distinctions need a reader, so this check left the rule set for a step definition beside the plank joins. It leaves with the weakness stated rather than the count: a double named outside the pattern is invisible to any name-keyed check, and closing that needs a checker reading what a type does rather than what it is called.
+  Rule: a double was matched by the text of its declaration, which is not the same as its name. A struct merely holding a field of a double's type reddened, and the mark that justifies a real double could not be read at all, because an attribute sits between the doc comment and the item and a rule sees a comment's shape rather than its content. Both distinctions need a reader, so this check left the rule set for a step definition beside the plank joins.
+
+  Rule: finding the doubles is not mechanizable here, and two attempts to pretend otherwise are why this says so. A name-keyed filter matched none of the forty-eight types this tree declares, because these doubles are named for what they stand in for rather than for being stand-ins. A shape-keyed filter fares no better: the standing example is a real HTTP server on a real port, which production reaches exactly as it reaches a provider, so it satisfies no production trait and shares no structural property with the thing it replaces. A double at a network boundary looks like ordinary code, which is the point of it.
+
+  Rule: so the enumeration stays a human judgment made at harbour, and what a run checks is the half a run can decide. A mark either names one of the three conditions the Verification agreement permits or it does not, and that is readable. This catches the failure that actually happens, which is a double marked with a gesture rather than a justification, and the mark surviving long after the condition that earned it. What it does not catch is an unmarked double, and no check here will: an empty filter passing every assertion downstream of it is how the previous two versions of this scenario stayed green while inspecting nothing.
 
   @conformance
-  Scenario: every test double in verification support carries its justification
-    Given the types declared in the verification support sources
-    When each type whose name marks it a double is matched against the marks the sources carry
-    Then every type named as a double carries an exceptional-double mark
-    And the types read are not empty
+  Scenario: every exceptional-double mark names a condition the agreement permits
+    Given the exceptional-double marks in the verification support sources
+    When each mark is read for the condition it names
+    Then every mark names one of the three conditions the Verification agreement permits
+    And the marks read are not empty
 
-  Rule: the scanner reports ten exact groups and eight are coincidence, so a gate demanding none is unsatisfiable. A threshold is worse than useless here: at the setting that drops the noise it also drops the status_line pair, the duplication that motivated adopting a scanner at all. No number separates copied logic from the shape small functions share, because that shape is what small functions have in common. So the gate reads zero outside a named allowance, and each allowance carries the reason it is one.
+  Rule: the scanner reports groups that are coincidence rather than copied logic, so a gate demanding none is unsatisfiable. A threshold does not separate them either: at the setting that drops the noise it also dropped the one pair that motivated adopting a scanner at all, because the shape small functions share is what makes them small rather than what makes them copied. So the gate reads zero outside a named allowance, and each entry carries the reason it is one.
+
+  Rule: the join runs both ways, and the second direction is the one that rots. Reading only that every reported group is allowed lets an entry outlive the duplication it excused: the code changes, the scanner stops reporting it, and a permission nobody needs sits in the file granting cover to whatever later matches its fingerprint. Nothing announces that, because the gate it weakens stays green throughout. An allowance is a claim about the tree as much as a permission, so it is checked as one.
 
   Rule: the scanner reads functions and not items. It is structurally blind to the three duplicated constants beside the status_line pair: its own unit census names closures, methods, functions and trait impl blocks, and two byte-identical files holding only constant declarations analyse as zero units. This gate therefore covers half the duplication in the tree, and the half it misses is named here rather than left to whoever trusts the green.
 
@@ -32,7 +38,19 @@ Feature: methodology conformance
     Given the implementation sources and the allowance in "scantlings/duplication-allowance.json"
     When the duplication scanner reads the sources
     Then every group it reports is one the allowance names
+    And every group the allowance names is one it reports
     And the groups read are not empty
+
+  Rule: the durable prose cites scenarios, which is the right thing to cite, and nothing checks that the citations resolve. A scenario title is a durable artifact where a function name is disposable, so pointing at one points at the contract rather than at the machinery beneath it. But a title moves when a check's premise changes, and the sentence citing it then describes a scenario the tree does not carry, silently, because prose has no reader. This file was refitted three times in one day for that class of drift.
+
+  Rule: so a citation takes a form a reader can find. A bare title in backticks is indistinguishable from any other backticked string, and a checker guessing which is which repeats the fault it was written to close: a filter that cannot identify its own subject either matches nothing or matches the wrong thing. The reference form the watchbill already uses names the file and the title together, so a citation announces itself and resolves exactly, and a document is free to keep quoting a title in prose beside it for a human to read.
+
+  @conformance
+  Scenario: every scenario a shipped document cites is one the specs carry
+    Given the scenario references cited in the shipped Markdown documents
+    When each is matched against the scenarios the specs declare
+    Then every citation names a scenario the specs carry
+    And the citations read are not empty
 
   Rule: nothing reads the outbound section. Every other rigging value that matters carries a check: the tiers have the budget scenario, the plank commands have their join, the scantlings have their reachability. The one section only a release executes had none, and three of its four values were wrong through two releases, one of them shipping schema URIs that answered 404 from the day they were published. A release is too rare to be the thing that finds a broken release command.
 

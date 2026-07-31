@@ -5,44 +5,74 @@
   "allowedGroups": [
     {
       "fingerprint": "15454e94f5e4376a",
-      "members": ["Request::address", "Request::model", "Proposal::command", "ResolvedBackend::backend"],
+      "members": [
+        "Request::address",
+        "Request::model",
+        "Proposal::command",
+        "ResolvedBackend::backend"
+      ],
       "reason": "Single-expression accessors returning a field of four unrelated types. Sharing no logic, they share only the shape every accessor has."
     },
     {
       "fingerprint": "d0f576cb647a2aff",
-      "members": ["Request::authorization", "Proposal::answer", "ResolvedBackend::name", "Locator::scope"],
+      "members": [
+        "Request::authorization",
+        "Proposal::answer",
+        "ResolvedBackend::name",
+        "Locator::scope"
+      ],
       "reason": "The same accessor shape on four unrelated types."
     },
     {
       "fingerprint": "ba56c1b7313a65b5",
-      "members": ["assistant_request", "assistant_completion", "ask"],
+      "members": [
+        "assistant_request",
+        "assistant_completion",
+        "ask"
+      ],
       "reason": "Single-expression delegations, each forwarding to a different seam with different arguments."
     },
     {
       "fingerprint": "c1d5572d653c8e7e",
-      "members": ["ScreenSize::total_lines", "ScreenSize::screen_lines", "ScreenSize::columns"],
+      "members": [
+        "ScreenSize::total_lines",
+        "ScreenSize::screen_lines",
+        "ScreenSize::columns"
+      ],
       "reason": "Three accessors a trait requires separately. Collapsing them would mean not implementing the trait."
     },
     {
       "fingerprint": "155a7c22dff1e395",
-      "members": ["execute", "execute_over_tree"],
+      "members": [
+        "execute",
+        "execute_over_tree"
+      ],
       "reason": "Two entry points over different inputs, alike in shape and not in what they walk."
     },
     {
       "fingerprint": "8ea192ed2fb7b1b2",
-      "members": ["VirtualScreen::cell", "VirtualScreen::reverse"],
+      "members": [
+        "VirtualScreen::cell",
+        "VirtualScreen::reverse"
+      ],
       "reason": "Two grid reads returning different attributes of a cell. The indexing arithmetic is the grid's, not copied logic."
     },
     {
       "fingerprint": "b92a56a1873f0fad",
-      "members": ["MountMode::as_name", "Binding::as_str"],
+      "members": [
+        "MountMode::as_name",
+        "Binding::as_str"
+      ],
       "reason": "Exhaustive match arms mapping two unrelated enums to their own strings. The strings differ; only the match shape agrees."
     },
     {
       "fingerprint": "bb61490898a21805",
-      "members": ["is_available", "capture_interactive"],
+      "members": [
+        "is_available",
+        "capture_interactive"
+      ],
       "reason": "Single-expression delegations into unrelated subsystems, one inference and one PTY."
     }
   ],
-  "rationale": "The scanner reported ten exact groups and eight are coincidence, so a gate asserting zero groups is unsatisfiable and a tuned threshold is worse: at the setting that drops the noise it also drops the status_line pair, which is the duplication that motivated adopting a scanner at all. No number separates copied logic from the shape small functions share, because the shape is what small functions have in common. Naming each allowance instead makes every exemption a decision somebody wrote down and leaves the gate at zero outside them. Two groups are deliberately absent from this list because they are real: screen_text with settled_text, and the status_line pair carried by both driver.rs and flow.rs."
+  "rationale": "A gate asserting no duplicate group at all is unsatisfiable, because the scanner reports coincidence alongside copied logic. A tuned threshold is worse: at the setting that dropped the noise when this was measured on 2026-07-31, it also dropped the one pair that had motivated adopting a scanner. No number separates copied logic from the shape small functions share, because that shape is what makes them small rather than what makes them copied. Naming each allowance instead makes every exemption a decision somebody wrote down, and leaves the gate at zero outside them. The genuine duplication this file was written beside was collapsed rather than allowed, which is why no entry here excuses one: an entry that ever does is a decision to argue in review, not a threshold to nudge. The attesting scenario reads this list in both directions, so an entry outliving the duplication it excused reddens rather than sitting on, granting cover to whatever later matches its fingerprint."
 }

@@ -3899,85 +3899,107 @@ fn deserializable_items(source: &str) -> Vec<DeserializableItem> {
     found
 }
 
-/// The verification support sources, the scope the double census reads.
+/// The verification support sources, the scope the mark census reads.
 const VERIFICATION_SUPPORT_SOURCES: [&str; 2] = ["tests/cucumber.rs", "tests/cucumber/support.rs"];
 
-/// One type a source declares: where it is declared, its name, and whether the
-/// documentation attached to it carries an `@exceptional-double` mark.
+/// The ordinals by which the Verification agreement's three permitted conditions
+/// are named. The agreement enumerates them, so the ordinal is the handle a mark
+/// has for saying which one applies.
+const PERMITTED_CONDITIONS: [&str; 3] = ["first", "second", "third"];
+
+/// One `@exceptional-double` mark a verification support source carries: where it
+/// sits, the text it carries, and the condition that text names.
 #[derive(Debug, Clone)]
-pub struct DeclaredType {
+pub struct ExceptionalDoubleMark {
     pub file: String,
     pub line: usize,
-    pub name: String,
-    pub marked: bool,
+    pub text: String,
+    pub condition: Option<String>,
 }
 
-/// Every struct and enum the verification support sources declare, each with the
-/// mark its own documentation carries.
+/// Every `@exceptional-double` mark the verification support sources carry.
 ///
-/// Attributes are stepped over rather than read as the end of the documentation,
-/// because an attribute sits between a doc comment and the item it describes and
-/// a `#[derive(Debug)]` there would otherwise hide the mark entirely. Any other
-/// content ends the comment, so a mark justifying one type never carries to the
-/// next.
-pub fn verification_support_types() -> Vec<DeclaredType> {
-    let mut declared = Vec::new();
+/// A mark opens its own documentation line, so prose that mentions the tag inside
+/// a sentence is writing about marks rather than being one. The mark then runs to
+/// the end of its documentation block, because the condition it names lives in the
+/// justification below the tag rather than on the tag line alone.
+pub fn exceptional_double_marks() -> Vec<ExceptionalDoubleMark> {
+    let mut marks = Vec::new();
     for file in VERIFICATION_SUPPORT_SOURCES {
         let source = std::fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("the verification support at {file} is unreadable: {e}"));
-        let mut documentation = String::new();
-        let mut open = 0usize;
+        let mut open: Option<(usize, String)> = None;
         for (index, raw) in source.lines().enumerate() {
             let line = raw.trim();
-            if open > 0 {
-                open += line.matches('[').count();
-                open = open.saturating_sub(line.matches(']').count());
-                continue;
+            let documentation = line.strip_prefix("///").map(str::trim);
+            match (documentation, open.as_mut()) {
+                (Some(content), Some((_, text))) => {
+                    text.push(' ');
+                    text.push_str(content);
+                }
+                (Some(content), None) if content.starts_with("@exceptional-double") => {
+                    open = Some((index + 1, content.to_string()));
+                }
+                (Some(_), None) => {}
+                (None, _) => {
+                    if let Some((line_number, text)) = open.take() {
+                        marks.push(ExceptionalDoubleMark {
+                            file: file.to_string(),
+                            line: line_number,
+                            condition: condition_named(&text),
+                            text,
+                        });
+                    }
+                }
             }
-            if line.starts_with("#[") {
-                open = line
-                    .matches('[')
-                    .count()
-                    .saturating_sub(line.matches(']').count());
-                continue;
-            }
-            if line.starts_with("///") {
-                documentation.push_str(line);
-                documentation.push('\n');
-                continue;
-            }
-            if let Some((name, _)) = declared_type(line) {
-                declared.push(DeclaredType {
-                    file: file.to_string(),
-                    line: index + 1,
-                    name,
-                    marked: documentation.contains("@exceptional-double"),
-                });
-            }
-            documentation.clear();
+        }
+        if let Some((line_number, text)) = open.take() {
+            marks.push(ExceptionalDoubleMark {
+                file: file.to_string(),
+                line: line_number,
+                condition: condition_named(&text),
+                text,
+            });
         }
     }
-    declared
+    marks
 }
 
-/// Whether a type's own name marks it a test double.
+/// The permitted condition a mark's own text names, where it names exactly one.
 ///
-/// The census keys on the name rather than on the text of the declaration, so a
-/// type merely holding a field of a double's type is no double itself. A marker
-/// counts only where the name continues with a new word, so an ordinary type
-/// whose name opens with those letters is left alone.
-///
-/// A double named outside this set is invisible to any name-keyed check. Closing
-/// that needs a checker reading what a type does rather than what it is called.
-pub fn names_a_double(name: &str) -> bool {
-    ["Mock", "Fake", "Stub", "Dummy", "Spy"]
-        .iter()
-        .any(|marker| match name.strip_prefix(marker) {
-            None => false,
-            Some(rest) => {
-                rest.is_empty() || rest.starts_with(|c: char| c.is_uppercase() || c == '_')
-            }
+/// The reader takes an ordinal qualifying the word `condition`, which is the form
+/// the agreement's own enumeration gives a mark to point with, allowing a word
+/// such as `named` between the two. A mark naming no condition is a gesture rather
+/// than a justification; a mark naming two says which applies no more clearly than
+/// a mark naming none, so both read as unnamed.
+fn condition_named(text: &str) -> Option<String> {
+    let words: Vec<String> = text
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
         })
+        .collect();
+    let mut found: Vec<&str> = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        if word != "condition" && word != "conditions" {
+            continue;
+        }
+        let opens = index.saturating_sub(2);
+        for candidate in &words[opens..index] {
+            if let Some(ordinal) = PERMITTED_CONDITIONS
+                .iter()
+                .find(|permitted| *permitted == candidate)
+                && !found.contains(ordinal)
+            {
+                found.push(ordinal);
+            }
+        }
+    }
+    match found.as_slice() {
+        [only] => Some((*only).to_string()),
+        _ => None,
+    }
 }
 
 /// The two declaration forms the strictness requirement reads differently.
@@ -4555,6 +4577,112 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
             ambient_tags.extend(strip_tag_marks(&rule.tags));
             for scenario in &rule.scenarios {
                 collect(scenario, &ambient, &ambient_tags);
+            }
+        }
+    }
+    found
+}
+
+/// One scenario reference a shipped document cites: the document carrying it,
+/// the line it sits on, and the `<spec>.feature:<Scenario Name>` reference
+/// itself.
+#[derive(Debug, Clone)]
+pub struct Citation {
+    pub document: String,
+    pub line: usize,
+    pub reference: String,
+}
+
+/// The paths the packaged manifest excludes from the crate, each a repository
+/// path prefix.
+fn packaged_exclusions(manifest_path: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(manifest_path)
+        .unwrap_or_else(|e| panic!("manifest {manifest_path} unreadable: {e}"));
+    let mut in_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("exclude")
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+        {
+            return value
+                .trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|entry| entry.trim().trim_matches('"').to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// The Markdown documents the package ships.
+///
+/// The crate packages the tracked files its manifest does not exclude, so that
+/// is what is read here rather than a list kept by hand: a document added to
+/// the tree is surveyed the moment it is tracked, and one the manifest excludes
+/// is never opened. Tracked is the load-bearing half. An untracked Markdown
+/// file reaches no consumer, and reading one would survey the wake, such as the
+/// README the npm ship command copies into `npm/`, whose citations are a second
+/// copy of the README's own.
+pub fn shipped_markdown_documents() -> Vec<String> {
+    let listing = std::process::Command::new("git")
+        .args(["ls-files"])
+        .output()
+        .expect("git ls-files ran");
+    assert!(
+        listing.status.success(),
+        "git ls-files failed: {}",
+        String::from_utf8_lossy(&listing.stderr)
+    );
+    let excluded = packaged_exclusions("Cargo.toml");
+    let mut found: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+        .lines()
+        .map(str::to_string)
+        .filter(|path| path.ends_with(".md"))
+        .filter(|path| {
+            !excluded
+                .iter()
+                .any(|entry| path == entry || path.starts_with(&format!("{entry}/")))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// Every scenario reference the shipped Markdown documents cite.
+///
+/// A citation is a backticked token carrying `.feature:`, the reference form
+/// the watchbill already uses. Keying on that form is what lets a citation
+/// announce itself: a bare backticked title cannot be told from any other
+/// backticked string, and a survey that guesses reads a command line as a
+/// scenario title. A backticked feature path carrying no title is a durable
+/// pointer to the file rather than a citation of a scenario, so it names no
+/// scenario for this join to resolve and is not read as one.
+pub fn cited_scenario_references() -> Vec<Citation> {
+    let mut found = Vec::new();
+    for document in shipped_markdown_documents() {
+        let text = std::fs::read_to_string(&document)
+            .unwrap_or_else(|e| panic!("shipped document {document} unreadable: {e}"));
+        for (offset, line) in text.lines().enumerate() {
+            for (index, span) in line.split('`').enumerate() {
+                // An odd index sits between a pair of backticks; an even one is
+                // the prose around them.
+                if index % 2 == 1 && span.contains(".feature:") {
+                    found.push(Citation {
+                        document: document.clone(),
+                        line: offset + 1,
+                        reference: span.to_string(),
+                    });
+                }
             }
         }
     }
