@@ -1,0 +1,37 @@
+id: unshared-corpus-read
+language: rust
+severity: error
+message: Verification support reads a durable corpus directory per scenario rather than once per run.
+note: |
+  Verification agreement, Reuse: provision ambient state once and share it. State that no
+  scenario asserts is setup cost, so build it once per run behind a lock or marker file.
+  The specs, the scantlings, the implementation sources and the shipped example plans are
+  ambient state by that test: no scenario asserts that a directory can be listed, and every
+  scenario reading one re-reads and re-parses the whole tree to reach the one fact it came
+  for. The cost is paid by every scenario in the tier, so it is paid on every inner-loop
+  run, which is where verification latency becomes iteration latency.
+
+  Read each corpus once behind a shared initializer such as LazyLock and let every step read
+  the parsed result. Sharing stays safe because these corpora are read-only: nothing mutates
+  them, so no scenario can observe another's use of them. The rule goes green on the shared
+  form, which was proven at adoption against a probe carrying both shapes.
+
+  A read of a directory the run itself created, such as a namespaced temporary tree, is not
+  matched: it is the scenario's own state rather than ambient state, and provisioning it is
+  sometimes the behaviour under assertion. The corpus roots are named as literals because a
+  read reaching one is what makes the cost ambient, and a path built at run time is the
+  scenario's own by construction.
+files:
+  - tests/**
+rule:
+  all:
+    - pattern: std::fs::read_dir($PATH)
+    - has:
+        kind: string_literal
+        regex: '^"(features|scantlings|src|assets)'
+        stopBy: end
+    - not:
+        inside:
+          kind: call_expression
+          regex: '^(std::sync::)?(LazyLock|OnceLock)::new'
+          stopBy: end

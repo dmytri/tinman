@@ -1,7 +1,7 @@
 {
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/duplication-allowance.json",
   "title": "Duplication allowance",
-  "description": "The duplicate groups the scanner reports that are structural coincidence rather than copied logic. Every entry names why. A group the scanner reports and this file does not name is a finding, so the gate is zero outside this list rather than a tuned threshold. Discharged by the duplication checker in verification support, which joins the scanner's report against these entries. Attested by the @conformance scenario in features/methodology-conformance.feature.",
+  "description": "The duplicates that are structural coincidence rather than copied logic, in two lists because two censuses read the sources. Every entry names why. Anything a census reports that this file does not name is a finding, so the gate is zero outside these lists rather than a tuned threshold. allowedGroups answers the duplication scanner, which reads functions. allowedConstants answers the constant census, which exists because the scanner carries no unit kind for a constant and so cannot see one at any threshold. Both are discharged by verification support joining a census against its list, and both are attested by @conformance scenarios in features/methodology-conformance.feature.",
   "allowedGroups": [
     {
       "fingerprint": "15454e94f5e4376a",
@@ -74,5 +74,6 @@
       "reason": "Single-expression delegations into unrelated subsystems, one inference and one PTY."
     }
   ],
+  "allowedConstants": [],
   "rationale": "A gate asserting no duplicate group at all is unsatisfiable, because the scanner reports coincidence alongside copied logic. A tuned threshold is worse: at the setting that dropped the noise when this was measured on 2026-07-31, it also dropped the one pair that had motivated adopting a scanner. No number separates copied logic from the shape small functions share, because that shape is what makes them small rather than what makes them copied. Naming each allowance instead makes every exemption a decision somebody wrote down, and leaves the gate at zero outside them. The genuine duplication this file was written beside was collapsed rather than allowed, which is why no entry here excuses one: an entry that ever does is a decision to argue in review, not a threshold to nudge. The attesting scenario reads this list in both directions, so an entry outliving the duplication it excused reddens rather than sitting on, granting cover to whatever later matches its fingerprint."
 }

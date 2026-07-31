@@ -12,7 +12,7 @@ Feature: methodology conformance
     Given the implementation sources and the verification support sources
     When the verification-conformance rule set is run
     Then no rule in the set reports a match
-    And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation and killed-measured-child rules
+    And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation, killed-measured-child and unshared-corpus-read rules
 
   Rule: a double was matched by the text of its declaration, which is not the same as its name. A struct merely holding a field of a double's type reddened, and the mark that justifies a real double could not be read at all, because an attribute sits between the doc comment and the item and a rule sees a comment's shape rather than its content. Both distinctions need a reader, so this check left the rule set for a step definition beside the plank joins.
 
@@ -40,6 +40,38 @@ Feature: methodology conformance
     Then every group it reports is one the allowance names
     And every group the allowance names is one it reports
     And the groups read are not empty
+
+  Rule: the duplication scanner reads functions and not items, so a duplicated constant is invisible to it. Its unit census names closures, methods, functions and trait impl blocks and carries no unit kind for a constant at all, which means no threshold and no flag reaches one. The blindness was proven structural rather than a threshold effect on 2026-07-31 by a two-file probe: two byte-identical sources holding only constant declarations analyse as zero code units, so lowering the node and line minimums to 1 changes nothing. A green from the scanner therefore covers duplicated functions only, and a second census is what covers the rest.
+
+  Rule: a duplicated constant is worth its own census because the constants that get copied are the ones that encode a decision. A deadline, a key sequence or a limit repeated in two files is two places to change and one place to forget, and the copy stays green while it drifts, because nothing joins the two declarations. Both allowances are read in both directions for the same reason the function one is: an entry outliving the duplication it excused would otherwise sit on, granting cover to whatever later matches it.
+
+  @conformance
+  Scenario: every duplicated constant the census reports is named as coincidence
+    Given the implementation sources and the allowance in "scantlings/duplication-allowance.json"
+    When the constant census reads the sources
+    Then every duplicated constant it reports is one the allowance names
+    And every duplicated constant the allowance names is one it reports
+    And the constants read are not empty
+
+  Rule: a wait on a spawned child that carries no deadline hangs the whole suite rather than failing one scenario, and it fails in the worst shape a run has: no output, no red and no weather line, because the sweep never finishes. The tier budget check cannot catch it either, since that check reads a record a hung sweep never wrote. The remedy is already in the verification support sources, which carry a helper that polls a predicate toward a deadline and reports whether the process exited in time.
+
+  Rule: this is a reader's check rather than a rule entry, and it was tried as a rule entry first on 2026-07-31. A syntax query sees the shape of a call and not the type of its receiver, so the reader on this project's own terminal session is indistinguishable from a wait on a child process: both are a method call on a plain binding. The rule reddened four correct readers alongside the real faults, and narrowing it to the unambiguous wait forms would have missed the fault that motivated it. Where a check cannot identify its own subject it either matches nothing or matches the wrong thing, so the subject is given a findable form here instead: the census reads the process construction sites and asks what bounds each wait that follows.
+
+  @conformance
+  Scenario: every wait on a spawned child is bounded by a deadline
+    Given the process waits in the verification support sources
+    When each wait is read for the deadline that bounds it
+    Then every wait on a spawned child reaches a deadline
+    And the waits read are not empty
+
+  Rule: escalation is owed when a termination deadline passes, and it is owed only then. Signalling a process that has already gone produces a diagnostic from the system's own kill, and that diagnostic reaches the runner's error stream because the shell running the signal inherits it. A sweep has printed about 34 such lines, which is harmless to results and is exactly the noise a real diagnostic hides behind. A stream carrying routine noise is one nobody reads.
+
+  @conformance
+  Scenario: tearing down a session whose process has exited leaves no failed signal
+    Given a driver session whose process has already exited
+    When verification support tears the session down
+    Then the teardown reports the process had already gone
+    And no diagnostic from the system's kill reaches the runner's error stream
 
   Rule: the durable prose cites scenarios, which is the right thing to cite, and nothing checks that the citations resolve. A scenario title is a durable artifact where a function name is disposable, so pointing at one points at the contract rather than at the machinery beneath it. But a title moves when a check's premise changes, and the sentence citing it then describes a scenario the tree does not carry, silently, because prose has no reader. This file was refitted three times in one day for that class of drift.
 

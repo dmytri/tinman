@@ -12,8 +12,40 @@
       "enum": ["empty"]
     },
     "network": {
-      "description": "Whether the sandboxed process may reach the network.",
-      "enum": ["allow", "deny"]
+      "description": "How the sandboxed process reaches the network. deny gives it no route at all, allow gives it the host's, and proxy gives it one route through a proxy Tinman runs, so every exchange is observable and the credential stays outside the sandbox.",
+      "enum": ["allow", "deny", "proxy"]
+    },
+    "egress": {
+      "description": "How egress is treated. Read only where network is proxy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "har": {
+          "description": "The HTTP Archive file the exchange is recorded to when recording, and served from when replaying.",
+          "type": "string"
+        },
+        "fault": {
+          "description": "A fault injected into every exchange, so a condition the real provider will not produce on demand can be tested.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "description": "An HTTP status served instead of the upstream response.",
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "latency": {
+              "description": "A delay applied before the response is served, as a duration such as 2s.",
+              "type": "string"
+            },
+            "offline": {
+              "description": "Whether the connection is refused outright.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
     },
     "path": {
       "description": "Controlled PATH entries visible inside the sandbox.",

@@ -68,6 +68,8 @@
 - dependency: tui-markdown, default-features = false
 - dependency: clap_mangen
 - dependency: clap_complete
+- dependency: hudsucker
+- dependency: har
 
 ## Outbound
 - outbound: git tag
