@@ -6,7 +6,6 @@
 use crate::backend::resolve;
 use crate::pty::{InteractiveCapture, capture_interactive};
 use crate::sandbox::{CommandSpec, SandboxSpec};
-use crate::screen::VirtualScreen;
 use crate::tom::{Locator, Model, Region, Resolution, build};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -632,20 +631,6 @@ fn sandbox(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     reply(id, json!({"ok": true, "backend": SANDBOX_BACKEND}))
 }
 
-/// The text of the screen's bottom row, the way a full-screen program reports
-/// its own state. A completed key send always redraws this row by absolute
-/// position, so it is the row an activation reads back to tell whether the
-/// program answered, whatever else on screen a scroll may have shifted.
-///
-/// @planks("the failure reports the selection did not reach the {string} named {string}")
-fn status_line(screen: &VirtualScreen) -> String {
-    screen
-        .rows()
-        .last()
-        .map(|row| row.concat().trim_end().to_string())
-        .unwrap_or_default()
-}
-
 /// Activate the region playing `role` and named `name`: resolve the locator
 /// against the current screen, a locator matching nothing or several regions
 /// failing with what it looked for, then move the selection onto the one
@@ -690,12 +675,12 @@ fn activate(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
             json!({"ok": false, "failure": format!("{count} matches for the {role} named {name:?}")}),
         ),
         Resolution::One(region) => {
-            let before = status_line(&session.capture.screen());
+            let before = session.capture.screen().bottom_line();
             session.capture.press_key(SELECT_KEY);
             session.capture.press_key("Enter");
             let deadline = Instant::now() + RESPONSE_DEADLINE;
             loop {
-                if status_line(&session.capture.screen()) != before {
+                if session.capture.screen().bottom_line() != before {
                     let mut activated = region;
                     activated.selected = true;
                     session.selected = Some(activated);
@@ -748,13 +733,13 @@ fn press(id: Value, params: &Value, sessions: &mut Sessions) -> Value {
     let Some(session) = addressed(params, sessions) else {
         return no_session(id);
     };
-    let before = status_line(&session.capture.screen());
+    let before = session.capture.screen().bottom_line();
     session.capture.press_key(key);
     if key != "Enter" {
         session.capture.press_key("Enter");
     }
     let deadline = Instant::now() + RESPONSE_DEADLINE;
-    while status_line(&session.capture.screen()) == before && Instant::now() < deadline {
+    while session.capture.screen().bottom_line() == before && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
     reply(id, json!({"ok": true}))

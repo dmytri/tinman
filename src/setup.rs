@@ -11,9 +11,9 @@ use std::io::{Read, Write};
 
 /// The setup asset, inlined at build time: its first line titles the form, its
 /// second names the keys that save and leave, and its third names the
-/// environment variable the form also reads the credential from. The compiled-
-/// in copy is the production default; `form_copy` reads any asset text the same
-/// way, so an edited asset is a live reading rather than a hand-kept copy.
+/// environment variable the form also reads the credential from. The form reads
+/// its copy from this asset each time it draws, so an edited asset is a live
+/// reading rather than a hand-kept copy.
 const FORM: &str = include_str!("../assets/help/setup-form.txt");
 
 /// The label naming the field the credential is typed into. The colon before
@@ -23,13 +23,13 @@ const FORM: &str = include_str!("../assets/help/setup-form.txt");
 /// invisible in every editor that trims on save.
 const LABEL: &str = "key: ";
 
-/// Read `asset` as the form's own copy: the title on its first line, the key
-/// hints on its second, and the environment sentence on its third, the order
-/// assets/help/setup-form.txt carries them in.
+/// The form's own copy, read from the setup asset: the title on its first line,
+/// the key hints on its second, and the environment sentence on its third, the
+/// order assets/help/setup-form.txt carries them in.
 ///
 /// @planks("the form title is the title the setup asset carries")
-pub fn form_copy(asset: &str) -> (String, String, String) {
-    let mut lines = asset.trim().lines();
+fn form_copy() -> (String, String, String) {
+    let mut lines = FORM.trim().lines();
     let title = lines.next().unwrap_or_default().to_string();
     let hint = lines.next().unwrap_or_default().to_string();
     let environment = lines.next().unwrap_or_default().to_string();
@@ -135,7 +135,7 @@ fn save(key: &str) {
 /// @planks("the form names {string} as an environment variable it reads")
 /// @planks("the credential field is hidden")
 fn form_lines(width: usize, settings: &Settings) -> Vec<String> {
-    let (title, hint, environment) = form_copy(FORM);
+    let (title, hint, environment) = form_copy();
     let inner = width - 2;
     let mut lines = Vec::new();
     let rule = HORIZONTAL.repeat(inner - title.chars().count());

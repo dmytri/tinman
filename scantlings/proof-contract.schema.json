@@ -378,6 +378,67 @@
           "minLength": 1
         }
       }
+    },
+    {
+      "title": "Duplication allowance contract",
+      "description": "Names the duplicate groups a scanner reports that are structural coincidence rather than copied logic, each with the reason it is allowed. A group the scanner reports and this contract does not name is a finding. A fingerprint is content-derived, so an allowed group whose code changes stops matching its entry and reddens, which is the safe direction to be wrong in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$id",
+        "title",
+        "description",
+        "allowedGroups"
+      ],
+      "properties": {
+        "$id": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowedGroups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fingerprint",
+              "members",
+              "reason"
+            ],
+            "properties": {
+              "fingerprint": {
+                "type": "string",
+                "minLength": 1
+              },
+              "members": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   ]
 }

@@ -449,4 +449,35 @@ impl VirtualScreen {
     pub fn rows(&self) -> &[Vec<String>] {
         &self.rows
     }
+
+    /// The text of the screen's bottom row, the way a full-screen program
+    /// reports its own state, so an activation reads that row to tell whether
+    /// the program answered the selection it sent. A completed key send always
+    /// redraws this row by absolute position, so it is the row read back
+    /// whatever else on screen a scroll may have shifted.
+    ///
+    /// @planks("the plan is replayed")
+    /// @planks("the failure reports the selection did not reach the {string} named {string}")
+    pub fn bottom_line(&self) -> String {
+        self.rows
+            .last()
+            .map(|row| row.concat().trim_end().to_string())
+            .unwrap_or_default()
+    }
+
+    /// The text of the lowest row the program left something on, read from the
+    /// bottom so a screen whose content sits above blank rows still yields it.
+    /// Recording this line as a plan's expectation proves the program ran while
+    /// the evidence is still in hand, rather than leaving that proof to whoever
+    /// replays the plan afterwards.
+    ///
+    /// @planks("the written plan carries an expectation on the text {string}")
+    pub fn lowest_nonblank_line(&self) -> String {
+        self.rows
+            .iter()
+            .rev()
+            .map(|row| row.concat().trim_end().to_string())
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+    }
 }

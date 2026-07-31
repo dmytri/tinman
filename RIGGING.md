@@ -27,7 +27,7 @@
 - plank-inventory: `ast-grep scan --inline-rules '{id: planks, language: rust, rule: {kind: line_comment, regex: "@planks"}}' --json=compact src`
 - typecheck: `cargo check --all-targets`
 - lint: `npx --no-install gplint "features/**" && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
-- conformance: `ast-grep scan`
+- conformance: `set -o pipefail; ast-grep scan; r=$?; printf 'conformance exit=%s\n' "$r"; exit $r`
 
 ## Perturbation
 - message: `PERTURBATION: consider current durable context; remove when fixed`
@@ -60,6 +60,7 @@
 - dependency: ureq
 - dependency: dotenvy
 - dependency: cargo-llvm-cov
+- dependency: cargo-dupes
 - dependency: ast-grep
 - dependency: gplint
 - dependency: mandoc

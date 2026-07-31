@@ -25,11 +25,14 @@ Feature: sandbox backend selection
     Then launching fails and reports Bubblewrap is unavailable
     And no unsandboxed process is started
 
+  Rule: the checker matched the type as the contract spells it, so a construction written with its full path slipped past while this scenario stayed green. A plant found it and no count could: src/backend.rs supplies a legitimate construction, so a not-empty floor reads satisfied whatever any other module does. The floor that catches it names the spelling rather than the tally, which is the shape a floor has to take whenever one permitted use keeps the count honest on its own.
+
   @contract
   Scenario: every launch path reaches its backend through resolution
     Given the implementation sources
     When the verifier checks the backend construction boundary
     Then no counterexample is found
+    And a construction written with a qualified path is counted the same as a bare one
 
   Rule: the condemnation this replaces could not route. Removing the unsandboxed variant, its resolution error and the unsafe parameter needs an edit to verification support, which is not a harbour write scope, so the removal work order sat in a tag that blocks the voyage and no role could discharge it. A scenario is the form that routes: it names the property the operator ruled, it reddens while the code contradicts it, and it goes green when the code is gone. An absence a tag asserts is an absence nobody runs.
 

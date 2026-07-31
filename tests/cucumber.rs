@@ -71,6 +71,24 @@ struct TinmanWorld {
     log_yaml: Option<String>,
     // methodology conformance
     conformance_scopes: Option<Vec<String>>,
+    // the outbound targets the rigging declares, and the ship and verify lines
+    // read off each, kept beside the target and the kind so a missing line names
+    // which one it is
+    outbound_targets: Option<Vec<support::OutboundTarget>>,
+    outbound_lines: Option<Vec<(String, String, Option<String>)>>,
+    // the types verification support declares, and the ones a double's name
+    // marks that carry no justification
+    support_types: Option<Vec<support::DeclaredType>>,
+    unmarked_doubles: Option<Vec<String>>,
+    // the construction-boundary contract the verifier last checked, so a floor
+    // asserting how the checker counts reads the same contract the check did
+    boundary_contract: Option<String>,
+    // what the duplication scanner reported over the implementation, and the
+    // group fingerprints the allowance names as coincidence, with the path it
+    // was read from so a failure names the file that would have to name them
+    duplication: Option<support::DuplicationReport>,
+    duplication_allowance: Option<Vec<String>>,
+    duplication_allowance_path: Option<String>,
     // the sandbox resources standing after the suite's own reclaim
     sandbox_inventory: Option<support::SandboxInventory>,
     conformance_matches: Option<Vec<support::ConformanceMatch>>,
@@ -954,16 +972,16 @@ async fn the_implementation_sources(_world: &mut TinmanWorld) {
 
 #[when("the verifier checks the backend construction boundary")]
 async fn verifier_checks_backend_construction_boundary(world: &mut TinmanWorld) {
-    world.boundary_counterexamples = Some(support::check_construction_boundary(
-        "scantlings/backend-construction-boundary.json",
-    ));
+    let contract = "scantlings/backend-construction-boundary.json";
+    world.boundary_counterexamples = Some(support::check_construction_boundary(contract));
+    world.boundary_contract = Some(contract.to_string());
 }
 
 #[when("the verifier checks the prepared-process construction boundary")]
 async fn verifier_checks_construction_boundary(world: &mut TinmanWorld) {
-    world.boundary_counterexamples = Some(support::check_construction_boundary(
-        "scantlings/prepared-process-construction-boundary.json",
-    ));
+    let contract = "scantlings/prepared-process-construction-boundary.json";
+    world.boundary_counterexamples = Some(support::check_construction_boundary(contract));
+    world.boundary_contract = Some(contract.to_string());
 }
 
 #[when("the verifier checks the diagnostic stream boundary")]
@@ -1003,6 +1021,35 @@ async fn verifier_checks_copy_catalogue_boundary(world: &mut TinmanWorld) {
 #[when(expr = "the verifier checks the seams named in {string}")]
 async fn verifier_checks_named_seams(world: &mut TinmanWorld, contract: String) {
     world.boundary_counterexamples = Some(support::check_seam_references(&contract));
+}
+
+#[then("a construction written with a qualified path is counted the same as a bare one")]
+async fn a_qualified_construction_counts_the_same(world: &mut TinmanWorld) {
+    let contract = world
+        .boundary_contract
+        .as_ref()
+        .expect("the boundary verifier named the contract it checked");
+    let bounded = support::bounded_construction_type(contract);
+    let bare = support::constructions_found_in(
+        contract,
+        &format!("fn probe() {{ let _ = {bounded} {{ field: 1 }}; }}\n"),
+    );
+    let qualified = support::constructions_found_in(
+        contract,
+        &format!("fn probe() {{ let _ = outer::inner::{bounded} {{ field: 1 }}; }}\n"),
+    );
+    // The bare count is the floor. A checker that had stopped seeing either
+    // spelling would count both at zero, and an equality alone would read that
+    // as the two being counted the same.
+    assert!(
+        bare > 0,
+        "the checker counts no bare construction of {bounded}, so it counts nothing at all"
+    );
+    assert_eq!(
+        qualified, bare,
+        "the checker counts {bare} bare construction(s) of {bounded} and {qualified} written \
+         with a qualified path, so a launch path spelling the type in full passes the boundary"
+    );
 }
 
 #[then("no counterexample is found")]
@@ -10795,7 +10842,7 @@ async fn no_rule_reports_a_match(world: &mut TinmanWorld) {
 }
 
 #[then(
-    "the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules"
+    "the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation and killed-measured-child rules"
 )]
 async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
     let carried = support::conformance_rule_ids();
@@ -10803,7 +10850,8 @@ async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
         "plank-form",
         "plank-presence",
         "perturbation-quiescence",
-        "forbidden-doubles",
+        "process-wide-env-mutation",
+        "killed-measured-child",
     ]
     .into_iter()
     .filter(|named| !carried.iter().any(|id| id == named))
@@ -10814,6 +10862,214 @@ async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
         missing.len(),
         missing.join(", "),
         carried.join(", ")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the release commands the rigging declares
+// ---------------------------------------------------------------------------
+
+#[given(expr = "the outbound targets in {string}")]
+async fn the_outbound_targets(world: &mut TinmanWorld, rigging: String) {
+    world.outbound_targets = Some(support::outbound_targets(&rigging));
+    world.rigging_path = Some(rigging);
+}
+
+#[when("each target's ship and verify lines are read")]
+async fn each_targets_ship_and_verify_lines_are_read(world: &mut TinmanWorld) {
+    let targets = world
+        .outbound_targets
+        .as_ref()
+        .expect("the outbound targets were read");
+    world.outbound_lines = Some(
+        targets
+            .iter()
+            .flat_map(|target| {
+                [
+                    (target.name.clone(), "ship".to_string(), target.ship.clone()),
+                    (
+                        target.name.clone(),
+                        "verify".to_string(),
+                        target.verify.clone(),
+                    ),
+                ]
+            })
+            .collect(),
+    );
+}
+
+#[then("every target carries both a ship line and a verify line")]
+async fn every_outbound_target_carries_both_lines(world: &mut TinmanWorld) {
+    let lines = world
+        .outbound_lines
+        .as_ref()
+        .expect("the ship and verify lines were read");
+    let missing: Vec<String> = lines
+        .iter()
+        .filter(|(_, _, line)| line.is_none())
+        .map(|(name, kind, _)| format!("the {name} target declares no {kind} line"))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{} outbound line(s) are missing, so a release runs a step nobody declared:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
+}
+
+#[then("every one of those lines reports its own exit status")]
+async fn every_outbound_line_reports_its_own_exit_status(world: &mut TinmanWorld) {
+    let lines = world
+        .outbound_lines
+        .as_ref()
+        .expect("the ship and verify lines were read");
+    let silent: Vec<String> = lines
+        .iter()
+        .filter_map(|(name, kind, line)| {
+            let command = line.as_deref()?;
+            (!support::reports_its_own_exit_status(command)).then(|| {
+                format!("the {name} target's {kind} line reports no status of its own: {command}")
+            })
+        })
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "{} outbound line(s) report no exit status, so a failed release reads as a clean \
+         one:\n{}",
+        silent.len(),
+        silent.join("\n")
+    );
+}
+
+#[then("the targets read are not empty")]
+async fn the_outbound_targets_read_are_not_empty(world: &mut TinmanWorld) {
+    let targets = world
+        .outbound_targets
+        .as_ref()
+        .expect("the outbound targets were read");
+    let rigging = world.rigging_path.as_ref().expect("the rigging was named");
+    assert!(
+        !targets.is_empty(),
+        "the rigging at {rigging} declares no outbound target, so this scenario would assert \
+         nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the doubles verification support declares
+// ---------------------------------------------------------------------------
+
+#[given("the types declared in the verification support sources")]
+async fn the_types_declared_in_verification_support(world: &mut TinmanWorld) {
+    world.support_types = Some(support::verification_support_types());
+}
+
+#[when("each type whose name marks it a double is matched against the marks the sources carry")]
+async fn each_double_named_type_is_matched_against_the_marks(world: &mut TinmanWorld) {
+    let types = world
+        .support_types
+        .as_ref()
+        .expect("the verification support types were read");
+    world.unmarked_doubles = Some(
+        types
+            .iter()
+            .filter(|declared| support::names_a_double(&declared.name) && !declared.marked)
+            .map(|declared| {
+                format!(
+                    "{}:{} {} is named a double and carries no mark",
+                    declared.file, declared.line, declared.name
+                )
+            })
+            .collect(),
+    );
+}
+
+#[then("every type named as a double carries an exceptional-double mark")]
+async fn every_double_carries_an_exceptional_double_mark(world: &mut TinmanWorld) {
+    let unmarked = world
+        .unmarked_doubles
+        .as_ref()
+        .expect("the double-named types were matched against the marks");
+    assert!(
+        unmarked.is_empty(),
+        "{} type(s) named as a double carry no @exceptional-double mark naming the condition \
+         that allows them:\n{}",
+        unmarked.len(),
+        unmarked.join("\n")
+    );
+}
+
+#[then("the types read are not empty")]
+async fn the_support_types_read_are_not_empty(world: &mut TinmanWorld) {
+    let types = world
+        .support_types
+        .as_ref()
+        .expect("the verification support types were read");
+    assert!(
+        !types.is_empty(),
+        "the verification support sources declare no type at all, so the census read nothing \
+         and this scenario would assert nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: duplication across the implementation
+// ---------------------------------------------------------------------------
+
+#[given(expr = "the implementation sources and the allowance in {string}")]
+async fn the_sources_and_the_duplication_allowance(world: &mut TinmanWorld, allowance: String) {
+    world.duplication_allowance = Some(support::duplication_allowance_fingerprints(&allowance));
+    world.duplication_allowance_path = Some(allowance);
+}
+
+#[when("the duplication scanner reads the sources")]
+async fn the_duplication_scanner_reads_the_sources(world: &mut TinmanWorld) {
+    // The implementation directory the rigging names, which is the scope its
+    // own conformance command hands the scanner.
+    world.duplication = Some(support::duplication_report("src"));
+}
+
+#[then("every group it reports is one the allowance names")]
+async fn every_group_reported_is_one_the_allowance_names(world: &mut TinmanWorld) {
+    let report = world
+        .duplication
+        .as_ref()
+        .expect("the duplication scanner ran");
+    let allowed = world
+        .duplication_allowance
+        .as_ref()
+        .expect("the duplication allowance was read");
+    let path = world
+        .duplication_allowance_path
+        .as_deref()
+        .expect("the duplication allowance was named");
+    // The fingerprint is the scanner's own identity for a group, so the join is
+    // over fingerprints; the members are carried into the message only, because
+    // a failure that names a hash alone says nothing about what is duplicated.
+    let unnamed: Vec<String> = report
+        .groups
+        .iter()
+        .filter(|group| !allowed.contains(&group.fingerprint))
+        .map(|group| format!("{}: {}", group.fingerprint, group.members.join(", ")))
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "{} duplicate group(s) the scanner reports are not named in {path}:\n{}",
+        unnamed.len(),
+        unnamed.join("\n")
+    );
+}
+
+#[then("the groups read are not empty")]
+async fn the_duplicate_groups_read_are_not_empty(world: &mut TinmanWorld) {
+    let report = world
+        .duplication
+        .as_ref()
+        .expect("the duplication scanner ran");
+    assert!(
+        !report.groups.is_empty(),
+        "the duplication scanner named no group at all, so the join read nothing and this \
+         scenario would assert nothing"
     );
 }
 
@@ -11252,8 +11508,8 @@ async fn the_published_schema_uris_are_read(world: &mut TinmanWorld) {
     world.published_uris = Some(support::published_schema_uris());
 }
 
-#[then("all twenty-three name that version")]
-async fn all_twenty_three_name_that_version(world: &mut TinmanWorld) {
+#[then("all twenty-four name that version")]
+async fn all_twenty_four_name_that_version(world: &mut TinmanWorld) {
     let version = world
         .package_version
         .as_ref()
@@ -11264,8 +11520,8 @@ async fn all_twenty_three_name_that_version(world: &mut TinmanWorld) {
         .expect("the published schema URIs were read");
     assert_eq!(
         uris.len(),
-        23,
-        "twenty-three schema URIs are published, found {}: {}",
+        24,
+        "twenty-four schema URIs are published, found {}: {}",
         uris.len(),
         uris.iter()
             .map(|(path, _)| path.as_str())
@@ -11290,7 +11546,7 @@ async fn all_twenty_three_name_that_version(world: &mut TinmanWorld) {
 // proof contracts: the shape of a scantling that declares no dialect
 // ---------------------------------------------------------------------------
 
-#[given("the twelve scantlings that declare no JSON Schema dialect")]
+#[given("the thirteen scantlings that declare no JSON Schema dialect")]
 async fn the_scantlings_declaring_no_dialect(world: &mut TinmanWorld) {
     world.proof_contracts = Some(support::nondialect_scantlings());
 }
@@ -11316,16 +11572,16 @@ async fn checked_against_the_meta_schema_in(world: &mut TinmanWorld, meta_schema
     world.meta_schema_path = Some(meta_schema);
 }
 
-#[then("all twelve proof contracts validate")]
-async fn all_twelve_proof_contracts_validate(world: &mut TinmanWorld) {
+#[then("all thirteen proof contracts validate")]
+async fn all_thirteen_proof_contracts_validate(world: &mut TinmanWorld) {
     let results = world
         .meta_schema_results
         .as_ref()
         .expect("each proof contract was checked");
     assert_eq!(
         results.len(),
-        12,
-        "twelve scantlings declare no dialect, found {}: {}",
+        13,
+        "thirteen scantlings declare no dialect, found {}: {}",
         results.len(),
         results
             .iter()

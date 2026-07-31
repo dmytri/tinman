@@ -12,7 +12,37 @@ Feature: methodology conformance
     Given the implementation sources and the verification support sources
     When the verification-conformance rule set is run
     Then no rule in the set reports a match
-    And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence and forbidden-doubles rules
+    And the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation and killed-measured-child rules
+
+  Rule: a double was matched by the text of its declaration, which is not the same as its name. A struct merely holding a field of a double's type reddened, and the mark that justifies a real double could not be read at all, because an attribute sits between the doc comment and the item and a rule sees a comment's shape rather than its content. Both distinctions need a reader, so this check left the rule set for a step definition beside the plank joins. It leaves with the weakness stated rather than the count: a double named outside the pattern is invisible to any name-keyed check, and closing that needs a checker reading what a type does rather than what it is called.
+
+  @conformance
+  Scenario: every test double in verification support carries its justification
+    Given the types declared in the verification support sources
+    When each type whose name marks it a double is matched against the marks the sources carry
+    Then every type named as a double carries an exceptional-double mark
+    And the types read are not empty
+
+  Rule: the scanner reports ten exact groups and eight are coincidence, so a gate demanding none is unsatisfiable. A threshold is worse than useless here: at the setting that drops the noise it also drops the status_line pair, the duplication that motivated adopting a scanner at all. No number separates copied logic from the shape small functions share, because that shape is what small functions have in common. So the gate reads zero outside a named allowance, and each allowance carries the reason it is one.
+
+  Rule: the scanner reads functions and not items. It is structurally blind to the three duplicated constants beside the status_line pair: its own unit census names closures, methods, functions and trait impl blocks, and two byte-identical files holding only constant declarations analyse as zero units. This gate therefore covers half the duplication in the tree, and the half it misses is named here rather than left to whoever trusts the green.
+
+  @conformance
+  Scenario: every duplicate group the scanner reports is named as coincidence
+    Given the implementation sources and the allowance in "scantlings/duplication-allowance.json"
+    When the duplication scanner reads the sources
+    Then every group it reports is one the allowance names
+    And the groups read are not empty
+
+  Rule: nothing reads the outbound section. Every other rigging value that matters carries a check: the tiers have the budget scenario, the plank commands have their join, the scantlings have their reachability. The one section only a release executes had none, and three of its four values were wrong through two releases, one of them shipping schema URIs that answered 404 from the day they were published. A release is too rare to be the thing that finds a broken release command.
+
+  @conformance
+  Scenario: every outbound target carries a ship and a verify that report their own status
+    Given the outbound targets in "RIGGING.md"
+    When each target's ship and verify lines are read
+    Then every target carries both a ship line and a verify line
+    And every one of those lines reports its own exit status
+    And the targets read are not empty
 
   Rule: a scantling and its published URI are read over the network by consumers who never run this suite, so both are checked here. A scantling that declares a dialect must satisfy it: a mistyped keyword yields a schema that validates everything and an attestation that asserts nothing. Each count is named so an empty read fails rather than passes; the proof contracts carry no dialect because they are discharged by their own checkers instead. The counts live in the scenario steps, where a run checks them; restating one here would only decay, since nothing about a sentence changes when a scantling is added.
 
@@ -26,7 +56,7 @@ Feature: methodology conformance
   Scenario: every published schema URI names the packaged version
     Given the package version in "Cargo.toml"
     When the schema URIs in the scantlings and the example plans are read
-    Then all twenty-three name that version
+    Then all twenty-four name that version
 
   Rule: the project ships two artifacts from one tree, the crate and the npm package, and each carries its own version field. A bump applied to one is invisible to the other, and the schema-URI check above reads the crate manifest alone, so before the scenario below a forgotten npm manifest passed every gate and reached the registry naming a version that described different contents. The registry is where that would be discovered, which is after it is published and cannot be taken back.
 
@@ -105,9 +135,9 @@ Feature: methodology conformance
 
   @conformance
   Scenario: every proof contract satisfies the proof-contract meta-schema
-    Given the twelve scantlings that declare no JSON Schema dialect
+    Given the thirteen scantlings that declare no JSON Schema dialect
     When each is checked against the meta-schema in "scantlings/proof-contract.schema.json"
-    Then all twelve proof contracts validate
+    Then all thirteen proof contracts validate
     And the meta-schema forbids a property it does not name
 
   Rule: a scantling creates no work until something references it, so an unreferenced one is a contract nobody discharges while every attestation stays green. Four of the boundary contracts are reached through a path literal in a step definition rather than through a path named in a scenario, which is the sound route and the reason this join reads both. The floor guards the reader: a listing that finds no scantlings and a directory that holds none both report zero.

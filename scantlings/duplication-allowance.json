@@ -1,0 +1,48 @@
+{
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/duplication-allowance.json",
+  "title": "Duplication allowance",
+  "description": "The duplicate groups the scanner reports that are structural coincidence rather than copied logic. Every entry names why. A group the scanner reports and this file does not name is a finding, so the gate is zero outside this list rather than a tuned threshold. Discharged by the duplication checker in verification support, which joins the scanner's report against these entries. Attested by the @conformance scenario in features/methodology-conformance.feature.",
+  "allowedGroups": [
+    {
+      "fingerprint": "15454e94f5e4376a",
+      "members": ["Request::address", "Request::model", "Proposal::command", "ResolvedBackend::backend"],
+      "reason": "Single-expression accessors returning a field of four unrelated types. Sharing no logic, they share only the shape every accessor has."
+    },
+    {
+      "fingerprint": "d0f576cb647a2aff",
+      "members": ["Request::authorization", "Proposal::answer", "ResolvedBackend::name", "Locator::scope"],
+      "reason": "The same accessor shape on four unrelated types."
+    },
+    {
+      "fingerprint": "ba56c1b7313a65b5",
+      "members": ["assistant_request", "assistant_completion", "ask"],
+      "reason": "Single-expression delegations, each forwarding to a different seam with different arguments."
+    },
+    {
+      "fingerprint": "c1d5572d653c8e7e",
+      "members": ["ScreenSize::total_lines", "ScreenSize::screen_lines", "ScreenSize::columns"],
+      "reason": "Three accessors a trait requires separately. Collapsing them would mean not implementing the trait."
+    },
+    {
+      "fingerprint": "155a7c22dff1e395",
+      "members": ["execute", "execute_over_tree"],
+      "reason": "Two entry points over different inputs, alike in shape and not in what they walk."
+    },
+    {
+      "fingerprint": "8ea192ed2fb7b1b2",
+      "members": ["VirtualScreen::cell", "VirtualScreen::reverse"],
+      "reason": "Two grid reads returning different attributes of a cell. The indexing arithmetic is the grid's, not copied logic."
+    },
+    {
+      "fingerprint": "b92a56a1873f0fad",
+      "members": ["MountMode::as_name", "Binding::as_str"],
+      "reason": "Exhaustive match arms mapping two unrelated enums to their own strings. The strings differ; only the match shape agrees."
+    },
+    {
+      "fingerprint": "bb61490898a21805",
+      "members": ["is_available", "capture_interactive"],
+      "reason": "Single-expression delegations into unrelated subsystems, one inference and one PTY."
+    }
+  ],
+  "rationale": "The scanner reported ten exact groups and eight are coincidence, so a gate asserting zero groups is unsatisfiable and a tuned threshold is worse: at the setting that drops the noise it also drops the status_line pair, which is the duplication that motivated adopting a scanner at all. No number separates copied logic from the shape small functions share, because the shape is what small functions have in common. Naming each allowance instead makes every exemption a decision somebody wrote down and leaves the gate at zero outside them. Two groups are deliberately absent from this list because they are real: screen_text with settled_text, and the status_line pair carried by both driver.rs and flow.rs."
+}

@@ -9,7 +9,6 @@ use crate::bwrap::SANDBOX_HOME;
 use crate::inspect;
 use crate::plan::{Action, Expectation, FlowStep, Plan, Source, TuiProcess};
 use crate::sandbox::{CommandSpec, SandboxSpec};
-use crate::screen::VirtualScreen;
 use std::path::Path;
 use std::time::Duration;
 
@@ -154,7 +153,7 @@ pub fn probe(command: &str, workspace: &Path, page_base_url: &str) -> Result<Pro
                 lines.push(line.clone());
                 lines.push(inspect::render(&launched.model));
                 let mut steps = Vec::new();
-                let settled = settled_text(&launched.screen);
+                let settled = launched.screen.lowest_nonblank_line();
                 if !settled.is_empty() {
                     steps.push(Action::Expect(Expectation {
                         text: settled,
@@ -415,19 +414,4 @@ fn value_for(name: &str) -> Option<String> {
         Some("file") => Some(FIXTURE_FILE.to_string()),
         _ => None,
     }
-}
-
-/// The text the program settled on: the lowest row it left something on. An
-/// expectation on that row proves the example ran while the evidence is still
-/// in hand, rather than leaving that proof to whoever replays the plan.
-///
-/// @planks("the written plan carries an expectation on the text {string}")
-fn settled_text(screen: &VirtualScreen) -> String {
-    screen
-        .rows()
-        .iter()
-        .rev()
-        .map(|row| row.concat().trim_end().to_string())
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
 }

@@ -192,15 +192,14 @@ extern "C" fn hand_the_terminal_back(_signal: i32) {
     std::process::exit(INTERRUPTED_STATUS);
 }
 
-/// The title, the sending and leaving key hints, and the pending-call hint
-/// the box draws, read from `asset`'s first three lines. The compiled-in
-/// asset is the production default the box draws from; this seam also takes
-/// arbitrary asset text directly, so the copy it yields can be checked
-/// against an asset edit without redrawing a screen.
+/// The title, the sending and leaving key hints, and the pending-call hint the
+/// box draws, read from the first three lines of the prompt asset. The box reads
+/// its copy from that asset each time it draws, so an edited asset is a live
+/// reading rather than a hand-kept copy.
 ///
 /// @planks("the assistant prompt names {string} as the key that cancels")
-pub fn prompt_copy(asset: &str) -> (&str, &str, &str) {
-    let mut lines = asset.trim().lines();
+fn prompt_copy() -> (&'static str, &'static str, &'static str) {
+    let mut lines = PROMPT.trim().lines();
     let title = lines.next().unwrap_or_default();
     let keys = lines.next().unwrap_or_default();
     let pending_keys = lines.next().unwrap_or_default();
@@ -294,7 +293,7 @@ fn call(settings: &Settings, history: Vec<Exchange>, question: &str) -> Pending 
 /// @planks("the operator interrupts the session")
 pub fn converse(settings: &Settings) -> std::io::Result<()> {
     use std::io::{Read, Write};
-    let (title, keys, pending_keys) = prompt_copy(PROMPT);
+    let (title, keys, pending_keys) = prompt_copy();
     let columns = crossterm::terminal::size()?.0 as usize;
     let width = columns.min(MAX_COLUMNS);
     let coloured = std::env::var_os("NO_COLOR").is_none();

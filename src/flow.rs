@@ -6,7 +6,6 @@ use crate::backend::resolve;
 use crate::plan::{Action, FlowStep, Locator, Plan};
 use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::CommandSpec;
-use crate::screen::VirtualScreen;
 use crate::tom::{Resolution, build};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -285,12 +284,12 @@ fn activate(session: &mut InteractiveCapture, locator: &Locator) -> Result<Locat
                 role: region.role().to_string(),
                 name: region.name.clone(),
             };
-            let before = status_line(&session.screen());
+            let before = session.screen().bottom_line();
             session.press_key(SELECT_KEY);
             session.press_key("Enter");
             let deadline = Instant::now() + RESPONSE_DEADLINE;
             loop {
-                if answered(&before, &status_line(&session.screen())) {
+                if answered(&before, &session.screen().bottom_line()) {
                     return Ok(bound);
                 }
                 if Instant::now() >= deadline {
@@ -317,19 +316,6 @@ fn activate(session: &mut InteractiveCapture, locator: &Locator) -> Result<Locat
 /// @planks("the plan is replayed")
 fn answered(before: &str, now: &str) -> bool {
     !now.is_empty() && !now.starts_with(before)
-}
-
-/// The text of the screen's bottom row, the way a full-screen program reports
-/// its own state, so an activation reads that row to tell whether the program
-/// answered the selection it sent.
-///
-/// @planks("the plan is replayed")
-fn status_line(screen: &VirtualScreen) -> String {
-    screen
-        .rows()
-        .last()
-        .map(|row| row.concat().trim_end().to_string())
-        .unwrap_or_default()
 }
 
 /// Wait for a driven program to draw the expected text, reading the live screen

@@ -246,7 +246,7 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
     }
 
     let mut steps = Vec::new();
-    let expectation_text = screen_text(&opening_view);
+    let expectation_text = opening_view.lowest_nonblank_line();
     if !expectation_text.is_empty() {
         steps.push(Action::Expect(Expectation {
             text: expectation_text,
@@ -384,23 +384,6 @@ fn opening_screen(capture: &mut InteractiveCapture) -> (Model, VirtualScreen) {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-}
-
-/// The text of the line the opening screen carried, trimmed, read from the
-/// bottom so a screen whose content sits above blank rows still yields it.
-/// Recording this line as the plan's first expectation proves the locator
-/// while the operator is still present, rather than leaving that proof to
-/// whoever replays the plan after they are gone.
-///
-/// @planks("the written plan carries an expectation on the text {string}")
-fn screen_text(screen: &VirtualScreen) -> String {
-    screen
-        .rows()
-        .iter()
-        .rev()
-        .map(|row| row.concat().trim_end().to_string())
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
 }
 
 /// The name the opening screen carried that the closing screen no longer

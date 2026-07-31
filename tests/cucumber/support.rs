@@ -1455,9 +1455,47 @@ impl DriverProcess {
     }
 }
 
+/// The budget a child gets to run its own exit path after being asked to stop.
+const TERMINATION_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Send `signal` to the process `pid` through the system's own `kill`, the route
+/// `interrupt` already takes, which needs no signalling dependency to reach.
+fn signal_process(pid: u32, signal: &str) {
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -{signal} {pid}"))
+        .status();
+}
+
+/// Wait up to `budget` for a process to exit, asking in short intervals because
+/// an exit is observable only by asking. Reports whether it exited in time.
+fn exited_within(budget: std::time::Duration, mut exited: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if exited() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 impl Drop for DriverProcess {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // Closing stdin is this protocol's own end of input, so the driver runs
+        // its exit path and an instrumented build flushes the coverage counters
+        // that say what it executed. A process stopped outright flushes nothing,
+        // and the seam then reads as unattributed rather than unreached. The
+        // unconditional stop stays as the fallback the deadline reaches.
+        self.stdin.take();
+        let exited = exited_within(TERMINATION_BUDGET, || {
+            matches!(self.child.try_wait(), Ok(Some(_)))
+        });
+        if !exited {
+            signal_process(self.child.id(), "KILL");
+        }
         let _ = self.child.wait();
     }
 }
@@ -2124,7 +2162,8 @@ fn shell_quote(word: &str) -> String {
 /// type at its prompt and end its input exactly as an operator does. Everything
 /// the program writes is drained on a reader thread into a shared buffer, so
 /// every wait here ends on observed output rather than on a clock. The child is
-/// killed on drop, so a scenario failing mid-session leaks no process.
+/// asked to stop on drop and waited on, so a scenario failing mid-session leaks
+/// no process and an instrumented build still flushes what it measured.
 pub struct TerminalSession {
     _master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -2712,7 +2751,18 @@ pub fn background_run(
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // Ask the program to stop and wait on its exit, so an instrumented build
+        // flushes what it measured rather than losing it to an outright stop.
+        // The unconditional stop is the fallback the deadline reaches.
+        if let Some(pid) = self.child.process_id() {
+            signal_process(pid, "TERM");
+            let exited = exited_within(TERMINATION_BUDGET, || {
+                matches!(self.child.try_wait(), Ok(Some(_)))
+            });
+            if !exited {
+                signal_process(pid, "KILL");
+            }
+        }
         let _ = self.child.wait();
         if let Some(drain) = self.reader.take() {
             let _ = drain.join();
@@ -3659,6 +3709,51 @@ pub fn check_boundary(policy_path: &str) -> Vec<String> {
     bad
 }
 
+/// The inline scan rule that finds a construction of `constructed_type`, in
+/// either spelling a construction may carry.
+///
+/// A bare name and a qualified path name the same type, so both are the same
+/// construction and the boundary binds them alike. Matching only the spelling
+/// the contract carries is what let a qualified construction past while the
+/// boundary scenario stayed green: the type's name sits in a different syntax
+/// node once a path precedes it, so the bare pattern never reaches it.
+fn construction_scan_rule(constructed_type: &str) -> String {
+    format!(
+        r#"{{id: construction, language: rust, rule: {{any: [{{pattern: "{constructed_type} {{ $$$FIELDS }}"}}, {{pattern: "$PATH::{constructed_type} {{ $$$FIELDS }}"}}]}}}}"#
+    )
+}
+
+/// The type a construction boundary contract bounds.
+pub fn bounded_construction_type(contract_path: &str) -> String {
+    let contract: ConstructionBoundary = read_policy(contract_path);
+    contract.constructed_type
+}
+
+/// How many constructions of the contract's bounded type the boundary checker's
+/// own scan finds in `source`.
+///
+/// The floor asserting a qualified construction counts needs an input the
+/// implementation cannot supply, because a qualified construction standing in
+/// the tree is exactly the state the boundary forbids. Running the checker's own
+/// rule over a source written for it makes the spelling observable without
+/// planting a violation in the implementation.
+pub fn constructions_found_in(contract_path: &str, source: &str) -> usize {
+    let contract: ConstructionBoundary = read_policy(contract_path);
+    let scratch = ScratchDir::new("construction-probe");
+    let probe = scratch.path().join("probe.rs");
+    std::fs::write(&probe, source).unwrap_or_else(|e| {
+        panic!(
+            "the probe source at {} is not written: {e}",
+            probe.display()
+        )
+    });
+    run_inline_scan(
+        &construction_scan_rule(&contract.constructed_type),
+        &scratch.path().display().to_string(),
+    )
+    .len()
+}
+
 /// Check every construction of the bounded type against the contract's
 /// permitted set. Returns counterexamples; an empty list means every
 /// construction of the type sits in a permitted module.
@@ -3670,10 +3765,7 @@ pub fn check_boundary(policy_path: &str) -> Vec<String> {
 /// construction, and a contract that found none is itself a counterexample.
 pub fn check_construction_boundary(contract_path: &str) -> Vec<String> {
     let contract: ConstructionBoundary = read_policy(contract_path);
-    let rule = format!(
-        r#"{{id: construction, language: rust, rule: {{pattern: "{} {{ $$$FIELDS }}"}}}}"#,
-        contract.constructed_type
-    );
+    let rule = construction_scan_rule(&contract.constructed_type);
     let mut bad = Vec::new();
     let mut found = 0usize;
     for scope in &contract.search_paths {
@@ -3805,6 +3897,87 @@ fn deserializable_items(source: &str) -> Vec<DeserializableItem> {
         attributes.clear();
     }
     found
+}
+
+/// The verification support sources, the scope the double census reads.
+const VERIFICATION_SUPPORT_SOURCES: [&str; 2] = ["tests/cucumber.rs", "tests/cucumber/support.rs"];
+
+/// One type a source declares: where it is declared, its name, and whether the
+/// documentation attached to it carries an `@exceptional-double` mark.
+#[derive(Debug, Clone)]
+pub struct DeclaredType {
+    pub file: String,
+    pub line: usize,
+    pub name: String,
+    pub marked: bool,
+}
+
+/// Every struct and enum the verification support sources declare, each with the
+/// mark its own documentation carries.
+///
+/// Attributes are stepped over rather than read as the end of the documentation,
+/// because an attribute sits between a doc comment and the item it describes and
+/// a `#[derive(Debug)]` there would otherwise hide the mark entirely. Any other
+/// content ends the comment, so a mark justifying one type never carries to the
+/// next.
+pub fn verification_support_types() -> Vec<DeclaredType> {
+    let mut declared = Vec::new();
+    for file in VERIFICATION_SUPPORT_SOURCES {
+        let source = std::fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("the verification support at {file} is unreadable: {e}"));
+        let mut documentation = String::new();
+        let mut open = 0usize;
+        for (index, raw) in source.lines().enumerate() {
+            let line = raw.trim();
+            if open > 0 {
+                open += line.matches('[').count();
+                open = open.saturating_sub(line.matches(']').count());
+                continue;
+            }
+            if line.starts_with("#[") {
+                open = line
+                    .matches('[')
+                    .count()
+                    .saturating_sub(line.matches(']').count());
+                continue;
+            }
+            if line.starts_with("///") {
+                documentation.push_str(line);
+                documentation.push('\n');
+                continue;
+            }
+            if let Some((name, _)) = declared_type(line) {
+                declared.push(DeclaredType {
+                    file: file.to_string(),
+                    line: index + 1,
+                    name,
+                    marked: documentation.contains("@exceptional-double"),
+                });
+            }
+            documentation.clear();
+        }
+    }
+    declared
+}
+
+/// Whether a type's own name marks it a test double.
+///
+/// The census keys on the name rather than on the text of the declaration, so a
+/// type merely holding a field of a double's type is no double itself. A marker
+/// counts only where the name continues with a new word, so an ordinary type
+/// whose name opens with those letters is left alone.
+///
+/// A double named outside this set is invisible to any name-keyed check. Closing
+/// that needs a checker reading what a type does rather than what it is called.
+pub fn names_a_double(name: &str) -> bool {
+    ["Mock", "Fake", "Stub", "Dummy", "Spy"]
+        .iter()
+        .any(|marker| match name.strip_prefix(marker) {
+            None => false,
+            Some(rest) => {
+                rest.is_empty() || rest.starts_with(|c: char| c.is_uppercase() || c == '_')
+            }
+        })
 }
 
 /// The two declaration forms the strictness requirement reads differently.
@@ -4401,6 +4574,155 @@ struct ScannerRule {
     id: String,
 }
 
+/// The machine-readable summary the duplication scanner emits.
+#[derive(Debug, Deserialize)]
+struct DuplicationSummary {
+    exact_duplicate_groups: usize,
+}
+
+/// What the duplication scanner reports over a source tree: the exact-duplicate
+/// groups it found, with the members of each as it named them.
+#[derive(Debug, Clone)]
+pub struct DuplicationReport {
+    pub groups: Vec<DuplicateGroup>,
+}
+
+/// One exact-duplicate group out of the scanner's listing: the fingerprint the
+/// scanner uses as the group's identity, and the units it named as members.
+#[derive(Debug, Clone)]
+pub struct DuplicateGroup {
+    pub fingerprint: String,
+    pub members: Vec<String>,
+}
+
+/// One group the duplication allowance names. Only the fingerprint is read: it
+/// is the scanner's own group identity and therefore the whole join. The reason
+/// and the member list the allowance carries are written for a human reading the
+/// file, and reading them here would assert nothing a run could fail on.
+#[derive(Debug, Deserialize)]
+struct AllowedDuplicateGroup {
+    fingerprint: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DuplicationAllowance {
+    #[serde(rename = "allowedGroups")]
+    allowed_groups: Vec<AllowedDuplicateGroup>,
+}
+
+/// The group fingerprints the duplication allowance at `path` names as
+/// coincidence rather than as copied logic.
+pub fn duplication_allowance_fingerprints(path: &str) -> Vec<String> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("the duplication allowance {path} is unreadable: {e}"));
+    let parsed: DuplicationAllowance = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("the duplication allowance {path} did not parse: {e}"));
+    parsed
+        .allowed_groups
+        .into_iter()
+        .map(|group| group.fingerprint)
+        .collect()
+}
+
+/// The exact-duplicate groups in the scanner's printed listing, read as the
+/// scanner writes them: a `Group N (fingerprint: H, K members):` heading, then
+/// one `- name (kind) at file:lines` line per member. The member name is taken
+/// up to the kind that follows it, which is how the scanner names the unit.
+fn parse_duplicate_groups(section: &str) -> Vec<DuplicateGroup> {
+    let mut groups: Vec<DuplicateGroup> = Vec::new();
+    for line in section.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Group ") {
+            let Some(marker) = trimmed.find("fingerprint: ") else {
+                continue;
+            };
+            let after = &trimmed[marker + "fingerprint: ".len()..];
+            let end = after.find([',', ')']).unwrap_or(after.len());
+            groups.push(DuplicateGroup {
+                fingerprint: after[..end].trim().to_string(),
+                members: Vec::new(),
+            });
+        } else if let Some(member) = trimmed.strip_prefix("- ")
+            && let Some(group) = groups.last_mut()
+        {
+            let name = member.split(" (").next().unwrap_or(member);
+            group.members.push(name.trim().to_string());
+        }
+    }
+    groups
+}
+
+/// Run the duplication scanner over `path` and read what it reports.
+///
+/// The count comes from the scanner's own JSON field rather than from its
+/// printed prose, so a wording change cannot quietly turn a red green. The
+/// printed report is read beside it only when a group was found, because the
+/// summary carries counts alone and a failing assertion needs the members. The
+/// scanner prints a closing line after its JSON, so the object is taken as the
+/// span between its outermost braces.
+pub fn duplication_report(path: &str) -> DuplicationReport {
+    let run = |arguments: &[&str]| -> String {
+        let output = std::process::Command::new("cargo")
+            .arg("dupes")
+            .args(arguments)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!("the duplication scanner over {path} could not be run: {e}")
+            });
+        String::from_utf8(output.stdout).expect("the duplication scanner emits UTF-8")
+    };
+    let summary = run(&["check", "--path", path, "--format", "json"]);
+    let (Some(start), Some(end)) = (summary.find('{'), summary.rfind('}')) else {
+        panic!("the duplication scanner over {path} emitted no summary object: {summary}");
+    };
+    let parsed: DuplicationSummary = serde_json::from_str(&summary[start..=end])
+        .unwrap_or_else(|e| panic!("the duplication summary over {path} is unreadable: {e}"));
+    // The scanner lists the members of each group only when a threshold it was
+    // given is exceeded, so the detail run carries the ceiling the rigging's own
+    // conformance command carries. A listing read off a passing run is empty,
+    // and a failing assertion would then name a count with no members.
+    let detail = if parsed.exact_duplicate_groups == 0 {
+        String::new()
+    } else {
+        exact_duplicate_section(&run(&["check", "--path", path, "--max-exact", "0"]))
+    };
+    let groups = parse_duplicate_groups(&detail);
+    // The scanner counts in its JSON and lists in its prose, and the join reads
+    // the prose. A parse that drifted from the listing's shape would yield fewer
+    // groups than the scanner found and every one of them allowed, which reads
+    // as a clean bill. Holding the two counts together makes that drift loud.
+    assert_eq!(
+        groups.len(),
+        parsed.exact_duplicate_groups,
+        "the duplication scanner over {path} counts {} exact duplicate group(s) but its listing \
+         parsed as {}, so the listing was not read as the scanner writes it:\n{detail}",
+        parsed.exact_duplicate_groups,
+        groups.len()
+    );
+    DuplicationReport { groups }
+}
+
+/// The exact-duplicate listing out of the duplication scanner's printed report:
+/// the section from its own heading to the next one, or to the end.
+fn exact_duplicate_section(report: &str) -> String {
+    let mut inside = false;
+    let mut section = Vec::new();
+    for line in report.lines() {
+        if line.trim() == "Exact Duplicates" {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if line.trim() == "Near Duplicates" {
+            break;
+        }
+        section.push(line);
+    }
+    section.join("\n").trim().to_string()
+}
+
 /// The rule ids the derived verification-conformance rule set carries, read from
 /// the rule directories `sgconfig.yml` names, exactly as the scanner reads them.
 pub fn conformance_rule_ids() -> Vec<String> {
@@ -4531,6 +4853,59 @@ pub fn weather_record_path(rigging: &str) -> String {
         .find(|(key, _)| key == "weather")
         .map(|(_, path)| path)
         .unwrap_or_else(|| panic!("the rigging at {rigging} names no weather record"))
+}
+
+/// One outbound target the rigging declares: the channel it names, and the ship
+/// and verify commands declared under it.
+#[derive(Debug, Clone)]
+pub struct OutboundTarget {
+    pub name: String,
+    pub ship: Option<String>,
+    pub verify: Option<String>,
+}
+
+/// Every outbound target the rigging declares, each joined to the ship and
+/// verify commands that follow it.
+///
+/// The section is a flat item list, so an `outbound` key opens a target and the
+/// `ship` and `verify` keys under it belong to that target until the next one
+/// opens. Reading it positionally is what lets a target declaring only one of
+/// the two be seen at all: a key-indexed read would find both keys present in
+/// the section and report nothing missing.
+pub fn outbound_targets(rigging: &str) -> Vec<OutboundTarget> {
+    let mut targets: Vec<OutboundTarget> = Vec::new();
+    for (key, value) in rigging_section(rigging, "Outbound") {
+        match key.as_str() {
+            "outbound" => targets.push(OutboundTarget {
+                name: value,
+                ship: None,
+                verify: None,
+            }),
+            "ship" => {
+                if let Some(target) = targets.last_mut() {
+                    target.ship = Some(value);
+                }
+            }
+            "verify" => {
+                if let Some(target) = targets.last_mut() {
+                    target.verify = Some(value);
+                }
+            }
+            _ => {}
+        }
+    }
+    targets
+}
+
+/// Whether an outbound command reports the exit status of the work it ran.
+///
+/// A release command runs its real work and then says how it went, so the three
+/// parts are read together: the status is captured off the work, printed where
+/// an operator reads it, and carried out as the command's own status. A command
+/// that only ends in the work's status reports nothing an operator watching a
+/// release can see, and one that only prints exits clean over a failure.
+pub fn reports_its_own_exit_status(command: &str) -> bool {
+    command.contains("=$?") && command.contains("exit=") && command.contains("exit $")
 }
 
 /// One tier sweep the weather record carries: the tier it swept and the wall
