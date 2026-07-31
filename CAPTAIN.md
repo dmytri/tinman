@@ -269,6 +269,14 @@ The ones still worth reading:
 
 Local guidance so this project sails as is now lives in `AGENTS.md` beside the `discover: none` note.
 
+## A third doctrine gap, found by Boatswain 2026-07-31
+
+**`AGENTS.md` is a harbour-only write scope and the practice has outgrown it.** The Write scopes Article gives Shipwright that file during harbour only, yet it rode this at-sea commit and the eight most recent commits touching it. The practice looks settled and the Article has not caught up.
+
+The reason it happens is structural rather than lax. `AGENTS.md` is where a settled decision goes so the next harbour stops re-deriving it, and decisions get settled at sea, during the voyage that discovers them. Sending each one to the next harbour means the record is always one harbour behind the reason for it, and a harbour re-derives what an at-sea decision already answered. That is the exact recurrence the file exists to prevent.
+
+Either the Article widens to let Shipwright write that file whenever Captain routes a settled decision to it, which is what happens now, or the doctrine needs a different home for a decision made at sea. Do not resolve it by having Captain write the file: routing through Shipwright is what caught three stale claims in it today, and every one was found because a second role read the tree instead of taking Captain's account.
+
 ## Two doctrine gaps worth raising upstream
 
 1. **A release version bump has no owner, and 2026-07-29 is the third time it has cost something.** The write-scope list gives Shipwright the manifest for dependency work only, and Shipwright is a harbour role while a release is mid-outbound. Crew is dispatched only for a failing target and a bump has none. Boatswain writes hygiene, not new content. So the one edit every release requires is the one edit no role owns, and Captain takes it under authority at sea each time, recorded as a departure. Captain bumped `Cargo.toml` to 0.1.2 that way; Boatswain named the same gap independently.
