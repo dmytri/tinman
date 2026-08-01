@@ -181,3 +181,41 @@ So the move is deferred because there is no stable destination, by the upstream 
 One precision the survey bought, because the obvious query gives the wrong answer. `serde_yaml` does carry an advisory, RUSTSEC-2018-0005, so a name-only advisory lookup reports a hit and reads as a live finding. Its affected range is `>=0.6.0-rc1, <0.8.4` and it was fixed in 0.8.4, so it cannot reach a 0.9 pin. Query the advisory databases by name and version together and let the answer decide; on 2026-07-30 the version-scoped query returned nothing.
 
 The environment reaches crates.io directly. A plain `curl` against the crates.io JSON API answered every query in this survey, and one against the OSV API answered the advisory queries. Any note claiming the registry is unreachable from this VM, and that `cargo search` is the only route, describes a past failure rather than a standing property. Prefer the JSON API for a version or a publication date, because `cargo search` reports neither and exits 0 whatever it finds.
+
+### Tinman keeps hudsucker for the proxy
+
+The operator ruled on 2026-08-01, after the field was re-surveyed against the live registry that day. The proxy seam stays on `hudsucker`.
+
+Three real candidates exist. Everything else the search surfaces is a client-side proxy connector, a DNS proxy, or unrelated, so a later survey that returns a longer list has widened the query rather than found new options.
+
+Cost was measured as a marginal figure rather than a standalone one, because a standalone package count answers a question nobody is asking. Each candidate was added to a throwaway crate already carrying Tinman's other fifteen dependencies, and the resolved package count read off that. Measured on 2026-08-01: no proxy crate at all resolves 311 packages, `rama` 363, `http-mitm-proxy` 368, and `hudsucker` 396. So `hudsucker` costs 85 packages where `rama` costs 52 and `http-mitm-proxy` costs 57.
+
+**The weight argument was heard and did not decide it.** The spread is 33 packages in about 400. Against that spread, `hudsucker` states this job as its purpose, where `rama` is a modular service framework in which man-in-the-middle proxying is one capability among many, so adopting `rama` means adopting a framework's opinions on everything else the seam does not need. Two further facts point the same way: `hudsucker` carries 212,852 downloads against `rama`'s 58,965 and `http-mitm-proxy`'s 32,749, and it holds the most recent publish of the three at 2026-07-15, where `http-mitm-proxy` last published 2026-01-24.
+
+One measurement is not comparable to the others, and it is recorded as such rather than repaired quietly. The `rama` figure of 363 was taken at default features, and whether its man-in-the-middle path needs further feature flags was not verified. That figure is therefore a floor rather than a like-for-like reading, and the real gap is likely narrower than 33. A later survey that repeats this comparison should resolve `rama` at the features the seam actually needs before treating the two numbers as comparable.
+
+**The revisit trigger is an event, not a date**, on the `serde_yaml` precedent above. Re-open this when `hudsucker` stops publishing, or when a purpose-built proxying crate appears whose marginal cost is materially lower at the features this seam actually needs. A harbour that re-opens it on the package count alone is repeating this decision.
+
+The specs stay crate-neutral, and deliberately so. Nothing in `features/proxied-egress.feature` names any crate, so a future swap rewrites a handler seam and touches no durable artifact. That is what keeps this a dependency decision rather than a specification one.
+
+### Three pinned versions are held, and approaching-latest is not a reason to move
+
+The operator ruled on 2026-08-01. The 2026-08-01 harbour reported three resolved versions sitting behind current stable, and all three are held: `clap` at 4.6.4 against 4.6.5, `clap_complete` at 4.6.7 against 4.6.8, and `jsonschema` at 0.48.5 against 0.49.2. Every other dependency stood at latest stable that day.
+
+No advisory reaches any of the three, no spec needs anything a newer version carries, and `jsonschema` is a dev-dependency rather than a shipped one.
+
+**The `locked` policy exists so that a version moves on a reason rather than on drift.** A version delta is not itself a reason. Read a report of one as an observation, never as a finding, because treating the delta as the trigger makes the policy mean its opposite: it would move every version the moment upstream published, which is the drift the pin was chosen to prevent.
+
+**The revisit trigger is an event, not a delta**, on the `serde_yaml` precedent above. Re-open a pin when an advisory lands that reaches the pinned version, or when a spec or a seam needs something a newer version carries. A harbour that reports these three again on the version delta alone is repeating this decision.
+
+One of the three is not like the other two, and a later harbour should not batch them. `clap` and `clap_complete` are patch moves within a stable major line. `jsonschema` from 0.48 to 0.49 is a minor bump on a 0.x line, where the semantic-versioning contract permits a breaking change, so it owes a real look when its trigger fires rather than a routine bump taken along with the others.
+
+### The default tier's budget stays at 120s, and a red is answered by the suite
+
+The operator ruled on 2026-08-01, on the harbour finding that the default tier was consuming most of its ceiling. Recorded sweeps ran 86576, 86754, 86728 and then 98098 ms, which is 82% of the budget and a rise of about 13%. The rise is explained rather than mysterious: a feature landed nine scenarios.
+
+**The ceiling does not move.** Raising a budget because a run approached it converts the ceiling into a comment, since a limit that yields whenever it binds has never limited anything. The value under `## Tiers` in `RIGGING.md` stays where it is.
+
+The lever, when the tier does redden `features/methodology-conformance.feature:the most recent sweep of each tier is within its declared budget`, is the suite rather than the number. Two moves are available in order. The first is measurement: this project cannot currently read a per-scenario duration, because cucumber-rs emits none, and closing that needs a custom cucumber-rs `Writer`, which is verification support and QM's to write. The second follows from the first, because fixture amortization is only worth spending on the scenarios the `Writer` names.
+
+**Read a budget red as the check working.** It is the signal that the suite has outgrown its ceiling and that the cost is now worth a voyage's attention, which is the whole reason the budget carries a number instead of a note.
