@@ -3,6 +3,7 @@
 //! that fails stops the flow and names itself.
 
 use crate::backend::resolve;
+use crate::driver::{EXPECT_DEADLINE, RESPONSE_DEADLINE, SELECT_KEY};
 use crate::plan::{Action, FlowStep, Locator, Plan};
 use crate::pty::{InteractiveCapture, capture_interactive_at};
 use crate::sandbox::CommandSpec;
@@ -204,17 +205,6 @@ fn run_flow(
         captures,
     })
 }
-
-/// How long a driven program is given to draw the text a step expects.
-const EXPECT_DEADLINE: Duration = Duration::from_secs(5);
-
-/// The key an activation sends to move the selection, a terminal having no
-/// pointer of its own to click a target with.
-const SELECT_KEY: &str = "\u{1b}[C";
-
-/// How long an activation waits for the driven program to answer, so the step
-/// resolves the moment the program redraws.
-const RESPONSE_DEADLINE: Duration = Duration::from_secs(2);
 
 /// How long a capture waits for the driven program to draw the items it
 /// collects, so a capture resolves the moment they appear.

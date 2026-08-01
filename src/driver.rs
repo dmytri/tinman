@@ -27,7 +27,7 @@ const CAPTURE_SCOPES: [&str; 2] = ["visible", "all"];
 
 /// How long a driven program is given to draw the text an expectation names, so
 /// an expectation resolves the moment the text appears.
-const EXPECT_DEADLINE: Duration = Duration::from_secs(5);
+pub(crate) const EXPECT_DEADLINE: Duration = Duration::from_secs(5);
 
 /// How long a wait gives the driven program to reach the state it names, so a
 /// barrier that never fires reports failure to arrive within a budget.
@@ -51,11 +51,11 @@ const SCROLL_KEY: &str = "\u{1b}[B";
 
 /// The key an activation sends to move the selection, a terminal having no
 /// pointer of its own to click a target with.
-const SELECT_KEY: &str = "\u{1b}[C";
+pub(crate) const SELECT_KEY: &str = "\u{1b}[C";
 
 /// How long an activation or a key press waits for the driven program to
 /// answer, so the call resolves the moment the program responds.
-const RESPONSE_DEADLINE: Duration = Duration::from_secs(2);
+pub(crate) const RESPONSE_DEADLINE: Duration = Duration::from_secs(2);
 
 /// The sandbox backend every session launches under.
 const SANDBOX_BACKEND: &str = "bubblewrap";

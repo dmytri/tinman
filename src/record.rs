@@ -3,6 +3,7 @@
 //! collects key presses and screen snapshots into a constrained interaction
 //! log.
 
+use crate::assistant::END_OF_INPUT;
 use crate::backend::resolve;
 use crate::inference::Settings;
 use crate::plan::{Action, Expectation, FlowStep, Plan, TuiProcess};
@@ -16,12 +17,6 @@ use std::time::{Duration, Instant};
 
 /// Where a recording's plan is written when the operator names no path.
 const DEFAULT_PLAN: &str = "tinman.yaml";
-
-/// The characters that end an operator's input. Ctrl-D reaches a raw terminal
-/// as the end-of-transmission character. A Ctrl-D the line discipline already
-/// handled, because it was typed before the recording made the terminal raw,
-/// reaches it as the disabled character the discipline substitutes for it.
-const END_OF_INPUT: [u8; 2] = [0x04, 0x00];
 
 /// How long the recorded program is given to draw its opening screen before
 /// that screen is taken as it stands, so a program that draws nothing is

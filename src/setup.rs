@@ -6,7 +6,11 @@
 //! credential masked, writing it where a secret belongs rather than beside the
 //! operator's work.
 
+use crate::assistant::{
+    BACKSPACE, BOTTOM_LEFT, BOTTOM_RIGHT, END_OF_INPUT, ESCAPE, MAX_COLUMNS, TOP_LEFT, TOP_RIGHT,
+};
 use crate::inference::Settings;
+use crate::tom::{HORIZONTAL, VERTICAL};
 use std::io::{Read, Write};
 
 /// The setup asset, inlined at build time: its first line titles the form, its
@@ -40,19 +44,6 @@ fn form_copy() -> (String, String, String) {
 /// and never the key, so the characters on the screen carry no secret.
 const MASK: &str = "_";
 
-/// The widest the form is drawn, however wide the terminal is: the measure the
-/// assistant's own box is capped at, so one screen keeps one measure.
-const MAX_COLUMNS: usize = 72;
-
-/// The characters the form's box is drawn with, the rounded corners the
-/// assistant's box carries.
-const TOP_LEFT: &str = "\u{256d}";
-const TOP_RIGHT: &str = "\u{256e}";
-const BOTTOM_LEFT: &str = "\u{2570}";
-const BOTTOM_RIGHT: &str = "\u{256f}";
-const HORIZONTAL: &str = "\u{2500}";
-const VERTICAL: &str = "\u{2502}";
-
 /// The escapes that draw the credential field concealed and put the terminal's
 /// own presentation back after it. Concealed is what a terminal calls a
 /// password field, so the field says what it is rather than looking ordinary.
@@ -60,18 +51,6 @@ const VERTICAL: &str = "\u{2502}";
 /// @planks("the credential field is hidden")
 const HIDDEN: &str = "\u{1b}[8m";
 const PLAIN: &str = "\u{1b}[0m";
-
-/// The bytes the terminal delivers when the operator ends the input. Ending the
-/// input before the program takes raw control leaves the line discipline's own
-/// end-of-file marker in the queue, which a raw read takes as the disabled
-/// character, so both stand for the same operator action.
-const END_OF_INPUT: [u8; 2] = [0x04, 0x00];
-
-/// The byte the escape key sends.
-const ESCAPE: u8 = 0x1b;
-
-/// The byte the backspace key puts in the terminal's input queue.
-const BACKSPACE: u8 = 0x7f;
 
 /// The file the saved credential is written to, under the configuration
 /// directory the operator's environment names. The project directory is the

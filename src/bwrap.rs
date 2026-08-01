@@ -3,6 +3,7 @@
 //! unavailable Bubblewrap is a hard failure, never a silent unsandboxed run.
 
 use crate::process::PreparedProcess;
+use crate::proxy::{Proxy, ProxyLink};
 use crate::sandbox::{CommandSpec, EnvOrigin, MountMode, Network, SandboxSpec};
 use crate::terminfo;
 use std::collections::BTreeMap;
@@ -39,16 +40,22 @@ struct Launch {
 }
 
 /// The Bubblewrap backend. It holds the name of the `bwrap` executable so the
-/// availability check can be exercised against a name that is off PATH, and the
+/// availability check can be exercised against a name that is off PATH, the
 /// environment a host grant reads, so the caller hands the seam a table rather
-/// than the seam reading the one table the whole process shares.
+/// than the seam reading the one table the whole process shares, and the link
+/// to the proxy a `proxy` launch routes egress through, for the same reason:
+/// the caller names which proxy, so a launch cannot inherit one another caller
+/// started.
 ///
 /// @planks("the Bubblewrap executable is absent")
 /// @planks("the Bubblewrap backend prepares the process")
+/// @planks("the target requests the allowed host directly by address")
+/// @planks("the target prints its whole environment and then calls the provider")
 #[derive(Debug, Clone)]
 pub struct BubblewrapBackend {
     pub(crate) executable: String,
     pub(crate) environment: BTreeMap<String, String>,
+    pub(crate) proxy: Option<ProxyLink>,
 }
 
 impl Default for BubblewrapBackend {
@@ -65,6 +72,7 @@ impl BubblewrapBackend {
         Self {
             executable: "bwrap".to_string(),
             environment: std::env::vars().collect(),
+            proxy: None,
         }
     }
 
@@ -75,6 +83,7 @@ impl BubblewrapBackend {
         Self {
             executable,
             environment: std::env::vars().collect(),
+            proxy: None,
         }
     }
 
@@ -86,7 +95,19 @@ impl BubblewrapBackend {
         Self {
             executable: "bwrap".to_string(),
             environment,
+            proxy: None,
         }
+    }
+
+    /// The same backend, routing a `proxy` launch's egress through `proxy`:
+    /// the launch bridges the port that proxy bound, and stages the credential
+    /// on that proxy for it to attach on the target's behalf.
+    ///
+    /// @planks("the target requests the allowed host directly by address")
+    /// @planks("the target prints its whole environment and then calls the provider")
+    pub fn routing_egress_through(mut self, proxy: &Proxy) -> BubblewrapBackend {
+        self.proxy = Some(proxy.link());
+        self
     }
 
     /// Generate the Bubblewrap argument vector that enforces isolation for the
@@ -119,6 +140,8 @@ impl BubblewrapBackend {
     /// @planks("the operator inspects a command that asks terminfo for the terminal width")
     /// @planks("the operator inspects {string}")
     /// @planks("the Bubblewrap backend prepares the process")
+    /// @planks("the target requests the allowed host directly by address")
+    /// @planks("the target prints its whole environment and then calls the provider")
     fn launch_with_home(
         &self,
         spec: &SandboxSpec,
@@ -128,14 +151,36 @@ impl BubblewrapBackend {
     ) -> Launch {
         let mut granted = Vec::new();
         let mut cleanup = Vec::new();
-        let mut args = vec![
-            "--unshare-all".to_string(),
-            "--clearenv".to_string(),
-            "--die-with-parent".to_string(),
-        ];
-        if spec.network == Network::Deny {
-            args.push("--unshare-net".to_string());
-        }
+        let mut args = if spec.network == Network::Proxy {
+            // A `proxy` launch runs behind pasta, which creates the network
+            // namespace and bridges only the proxy's own port into it before
+            // bwrap ever runs, so bwrap unshares every other namespace and
+            // keeps that one rather than replacing it with an unshared,
+            // unbridged namespace of its own. The proxied scenarios read the
+            // target's own answer through `curl -o /dev/null`, which needs a
+            // real device to write to.
+            vec![
+                "--unshare-user".to_string(),
+                "--unshare-ipc".to_string(),
+                "--unshare-pid".to_string(),
+                "--unshare-uts".to_string(),
+                "--unshare-cgroup-try".to_string(),
+                "--dev".to_string(),
+                "/dev".to_string(),
+                "--clearenv".to_string(),
+                "--die-with-parent".to_string(),
+            ]
+        } else {
+            let mut args = vec![
+                "--unshare-all".to_string(),
+                "--clearenv".to_string(),
+                "--die-with-parent".to_string(),
+            ];
+            if spec.network == Network::Deny {
+                args.push("--unshare-net".to_string());
+            }
+            args
+        };
         // A fresh procfs, isolated from the host, so the sandboxed program can
         // observe its own namespace. Under an unshared network namespace its
         // routing table is genuinely empty.
@@ -313,6 +358,8 @@ impl BubblewrapBackend {
     /// @planks("the operator inspects a command that writes {string} into its working directory and prints {string}")
     /// @planks("the operator records a command that writes {string} into its working directory and prints {string}")
     /// @planks("the operator runs that plan")
+    /// @planks("the target requests the allowed host directly by address")
+    /// @planks("the target prints its whole environment and then calls the provider")
     fn prepare_home(
         &self,
         spec: &SandboxSpec,
@@ -324,14 +371,55 @@ impl BubblewrapBackend {
             return Err("Bubblewrap is unavailable".to_string());
         }
         let launch = self.launch_with_home(spec, command, home, cwd);
+        let (program, args) = if spec.network == Network::Proxy {
+            let proxy = self.proxy.as_ref().ok_or_else(|| {
+                "no proxy is linked to a sandbox routing egress through one".to_string()
+            })?;
+            // The credential, if any, is staged on that proxy for it to attach
+            // to the exchange itself; it never becomes a sandbox argument, so
+            // the target's own environment never carries it.
+            proxy.hold_credential(self.environment.get("TINMAN_API_KEY").cloned());
+            (
+                PASTA_EXECUTABLE.to_string(),
+                pasta_args(&self.executable, proxy.address().port(), &launch.args),
+            )
+        } else {
+            (self.executable.clone(), launch.args)
+        };
         Ok(PreparedProcess {
-            program: self.executable.clone(),
-            args: launch.args,
+            program,
+            args,
             env: launch.env,
             cwd: None,
             cleanup: launch.cleanup,
         })
     }
+}
+
+/// The `pasta` executable name.
+const PASTA_EXECUTABLE: &str = "pasta";
+
+/// Wrap `bwrap_args` behind pasta, which creates the sandbox's network
+/// namespace and bridges exactly `proxy_port` from the host's loopback into
+/// it before bwrap runs, so nothing but that one port is reachable from
+/// inside: a direct dial to any other host port, allowed or not, has no
+/// route.
+///
+/// @planks("the target requests the allowed host directly by address")
+/// @planks("the target prints its whole environment and then calls the provider")
+fn pasta_args(bwrap_executable: &str, proxy_port: u16, bwrap_args: &[String]) -> Vec<String> {
+    let mut args = vec![
+        "-f".to_string(),
+        "-q".to_string(),
+        "-t".to_string(),
+        "none".to_string(),
+        "-T".to_string(),
+        proxy_port.to_string(),
+        "--".to_string(),
+        bwrap_executable.to_string(),
+    ];
+    args.extend(bwrap_args.iter().cloned());
+    args
 }
 
 /// A fresh, private directory seeded with `source`'s entries, so a copy mount

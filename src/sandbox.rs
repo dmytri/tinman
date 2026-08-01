@@ -6,12 +6,42 @@
 ///
 /// @planks("a sandbox specification that denies network access")
 /// @planks("the parsed sandbox specification denies network access")
+/// @planks("a sandbox specification setting network to {string}")
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
     Allow,
     #[default]
     Deny,
+    Proxy,
+}
+
+/// The egress policy read only where a sandbox specification's network is
+/// `proxy`: the HAR file the proxy records to or replays from, and the fault
+/// it injects into every exchange.
+///
+/// @planks("the proxy is recording to a HAR file")
+/// @planks("a HAR file carrying one recorded exchange")
+/// @planks("the same request is made")
+/// @planks("a request the recording does not carry is made")
+#[derive(Debug, Clone)]
+pub struct Egress {
+    pub har: Option<String>,
+    pub fault: Option<Fault>,
+}
+
+/// A fault the proxy injects into every exchange instead of reaching the
+/// upstream, so a condition the real provider will not produce on demand can
+/// be tested.
+///
+/// @planks("the proxy is injecting the status {int}")
+/// @planks("the proxy is injecting a latency of {int} seconds")
+/// @planks("the proxy is injecting the offline fault")
+#[derive(Debug, Clone)]
+pub struct Fault {
+    pub status: Option<u16>,
+    pub latency: Option<String>,
+    pub offline: bool,
 }
 
 /// The program a harness launches, with its arguments.

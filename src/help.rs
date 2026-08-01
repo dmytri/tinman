@@ -14,14 +14,17 @@ const HELP: &str = include_str!("../assets/help/tinman.txt");
 const UNAVAILABLE: &str = include_str!("../assets/help/inference-unavailable.txt");
 
 /// The escapes that draw a line in a colour other than the terminal's default
-/// foreground, and put the default foreground back at the end of it.
-const COLOUR: &str = "\u{1b}[36m";
-const DEFAULT_COLOUR: &str = "\u{1b}[39m";
+/// foreground, and put the default foreground back at the end of it. The
+/// assistant's own box reuses these, since a box drawn in one colour beside a
+/// line drawn in another would give one screen two conventions.
+pub(crate) const COLOUR: &str = "\u{1b}[36m";
+pub(crate) const DEFAULT_COLOUR: &str = "\u{1b}[39m";
 
 /// The marker a fenced block opens and closes with in the text the model
 /// returns. It is markdown notation rather than the expansion's wording, so it
-/// is left off the tagline and the words it delimited are kept.
-const FENCE: &str = "```";
+/// is left off the tagline and the words it delimited are kept. The assistant
+/// reuses this marker for the same reason: one model, one fence convention.
+pub(crate) const FENCE: &str = "```";
 
 /// The escape that moves the cursor down a row, scrolling at the foot of the
 /// screen as a line feed does. The help drawn ahead of the tagline moves the

@@ -7,7 +7,9 @@
 //! shell.
 
 use crate::cli::parse_command_line;
+use crate::help::{COLOUR, DEFAULT_COLOUR, FENCE};
 use crate::inference::{Exchange, Settings};
+use crate::tom::{HORIZONTAL, VERTICAL};
 use ratatui::backend::IntoCrossterm;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -102,13 +104,14 @@ pub fn model_reply_answering(answer: &str) -> String {
 const PROMPT: &str = include_str!("../assets/help/assistant-prompt.txt");
 
 /// The characters the box is drawn with, the same a pane Tinman reads in the
-/// programs it drives is drawn with. The corners are the rounded ones.
-const TOP_LEFT: &str = "\u{256d}";
-const TOP_RIGHT: &str = "\u{256e}";
-const BOTTOM_LEFT: &str = "\u{2570}";
-const BOTTOM_RIGHT: &str = "\u{256f}";
-const HORIZONTAL: &str = "\u{2500}";
-const VERTICAL: &str = "\u{2502}";
+/// programs it drives is drawn with. The corners are the rounded ones. The
+/// horizontal and vertical rules are the terminal object model's own, since a
+/// box drawn with a rule the model does not recognize would draw a border the
+/// model could not read back.
+pub(crate) const TOP_LEFT: &str = "\u{256d}";
+pub(crate) const TOP_RIGHT: &str = "\u{256e}";
+pub(crate) const BOTTOM_LEFT: &str = "\u{2570}";
+pub(crate) const BOTTOM_RIGHT: &str = "\u{256f}";
 
 /// The widest the box is drawn, and the measure the transcript is wrapped to,
 /// however wide the terminal is. One measure for the whole screen: a transcript
@@ -118,7 +121,7 @@ const VERTICAL: &str = "\u{2502}";
 /// @planks("the region titled {string} is at most {int} columns wide")
 /// @planks("no line of the answer is wider than {int} columns")
 /// @planks("the terminal object model of the screen conforms to the {string} schema in {string}")
-const MAX_COLUMNS: usize = 72;
+pub(crate) const MAX_COLUMNS: usize = 72;
 
 /// The escapes that put the terminal on the alternate screen and take it back
 /// off again, DEC private mode 1049. The session redraws itself constantly, so
@@ -126,11 +129,6 @@ const MAX_COLUMNS: usize = 72;
 /// the session leaves.
 const ALTERNATE_SCREEN: &str = "\u{1b}[?1049h";
 const MAIN_SCREEN: &str = "\u{1b}[?1049l";
-
-/// The escapes that draw the box in a colour other than the terminal's default
-/// foreground, and put the default foreground back at the end of each line.
-const COLOUR: &str = "\u{1b}[36m";
-const DEFAULT_COLOUR: &str = "\u{1b}[39m";
 
 /// The background the operator's own turn is drawn as a block of, running the
 /// full measure of the transcript, so the operator reads at a glance where their
@@ -143,22 +141,17 @@ const QUESTION_BACKGROUND: Color = Color::Blue;
 /// character instead of with colour.
 const QUESTION_MARKER: &str = "> ";
 
-/// The marker a fenced block opens and closes with in the markdown the model
-/// writes. The block it delimits is drawn as a block, so the marker itself is
-/// notation the operator reads past rather than content they came for.
-const FENCE: &str = "```";
-
 /// The bytes the terminal delivers when the operator ends the input. Ending the
 /// input before the program takes raw control leaves the line discipline's own
 /// end-of-file marker in the queue, which a raw read takes as the disabled
 /// character, so both stand for the same operator action.
-const END_OF_INPUT: [u8; 2] = [0x04, 0x00];
+pub(crate) const END_OF_INPUT: [u8; 2] = [0x04, 0x00];
 
 /// The byte the escape key sends.
-const ESCAPE: u8 = 0x1b;
+pub(crate) const ESCAPE: u8 = 0x1b;
 
 /// The byte the backspace key puts in the terminal's input queue.
-const BACKSPACE: u8 = 0x7f;
+pub(crate) const BACKSPACE: u8 = 0x7f;
 
 /// The signal an interrupt at the terminal delivers.
 const INTERRUPT: i32 = 2;

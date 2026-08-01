@@ -434,6 +434,37 @@
             }
           }
         },
+        "allowedConstants": {
+          "description": "The duplicated constants a constant census reports that are coincidence rather than copies, each with the reason it is one. Carries no minimum, because none excused is the healthy resting state and the census scenario's own floor guards the reader rather than this list. A constant is keyed by name and declaration together, so an entry names the constant rather than a content fingerprint.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "members",
+              "reason"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "members": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
         "rationale": {
           "type": "string",
           "minLength": 1

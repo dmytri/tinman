@@ -16,6 +16,7 @@ pub mod inference;
 pub mod inspect;
 pub mod plan;
 pub mod process;
+pub mod proxy;
 pub mod pty;
 pub mod record;
 pub mod sandbox;

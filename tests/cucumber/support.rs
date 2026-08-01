@@ -1460,11 +1460,31 @@ const TERMINATION_BUDGET: std::time::Duration = std::time::Duration::from_secs(5
 
 /// Send `signal` to the process `pid` through the system's own `kill`, the route
 /// `interrupt` already takes, which needs no signalling dependency to reach.
-fn signal_process(pid: u32, signal: &str) {
-    let _ = std::process::Command::new("sh")
+///
+/// Whatever the kill writes is captured and returned rather than inherited. The
+/// shell running the signal would otherwise write to the runner's own error
+/// stream, and a stream carrying routine noise is one nobody reads.
+fn signal_process(pid: u32, signal: &str) -> String {
+    match std::process::Command::new("sh")
         .arg("-c")
         .arg(format!("kill -{signal} {pid}"))
-        .status();
+        .output()
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stderr).into_owned(),
+        Err(e) => format!("the {signal} signal to {pid} could not be sent: {e}"),
+    }
+}
+
+/// What tearing a session down observed.
+#[derive(Debug, Clone)]
+pub struct TeardownReport {
+    /// Whether the process had already gone when teardown reached it. Escalation
+    /// is owed when a termination deadline passes, and only then: signalling a
+    /// process that has already gone produces a diagnostic and stops nothing.
+    pub already_gone: bool,
+    /// Whatever the system's own kill wrote while teardown signalled, captured
+    /// rather than inherited.
+    pub kill_diagnostics: String,
 }
 
 /// Wait up to `budget` for a process to exit, asking in short intervals because
@@ -1482,21 +1502,42 @@ fn exited_within(budget: std::time::Duration, mut exited: impl FnMut() -> bool) 
     }
 }
 
-impl Drop for DriverProcess {
-    fn drop(&mut self) {
-        // Closing stdin is this protocol's own end of input, so the driver runs
-        // its exit path and an instrumented build flushes the coverage counters
-        // that say what it executed. A process stopped outright flushes nothing,
-        // and the seam then reads as unattributed rather than unreached. The
-        // unconditional stop stays as the fallback the deadline reaches.
+impl DriverProcess {
+    /// Tear the session down and report what teardown observed.
+    ///
+    /// Closing stdin is this protocol's own end of input, so the driver runs its
+    /// exit path and an instrumented build flushes the coverage counters that
+    /// say what it executed. A process stopped outright flushes nothing, and the
+    /// seam then reads as unattributed rather than unreached. The unconditional
+    /// stop stays as the fallback the deadline reaches.
+    ///
+    /// A process that has already gone is reported rather than signalled.
+    pub fn tear_down(&mut self) -> TeardownReport {
         self.stdin.take();
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return TeardownReport {
+                already_gone: true,
+                kill_diagnostics: String::new(),
+            };
+        }
         let exited = exited_within(TERMINATION_BUDGET, || {
             matches!(self.child.try_wait(), Ok(Some(_)))
         });
+        let mut kill_diagnostics = String::new();
         if !exited {
-            signal_process(self.child.id(), "KILL");
+            kill_diagnostics = signal_process(self.child.id(), "KILL");
         }
         let _ = self.child.wait();
+        TeardownReport {
+            already_gone: false,
+            kill_diagnostics,
+        }
+    }
+}
+
+impl Drop for DriverProcess {
+    fn drop(&mut self) {
+        self.tear_down();
     }
 }
 
@@ -1639,20 +1680,109 @@ fn staging_dir_owner(name: &str) -> Option<u32> {
         .find_map(|part| part.parse::<u32>().ok())
 }
 
+// ---------------------------------------------------------------------------
+// shared corpora
+// ---------------------------------------------------------------------------
+//
+// The specs, the scantlings, the implementation sources and the shipped example
+// plans are ambient state: no scenario asserts that a directory can be listed,
+// and a scenario reading one re-reads and re-parses the whole tree to reach the
+// one fact it came for. That cost is paid by every scenario in the tier, so it
+// is paid on every inner-loop run. Each corpus is read once per run here and
+// every step reads the parsed result. Sharing stays safe because these corpora
+// are read-only: nothing mutates them, so no scenario can observe another's use
+// of them.
+
+/// The implementation sources, as `(path, text)` pairs ordered by path.
+static IMPLEMENTATION_SOURCES: std::sync::LazyLock<Vec<(String, String)>> =
+    std::sync::LazyLock::new(|| {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir("src").expect("the implementation directory is readable") {
+            let path = entry.expect("an implementation directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let display = path.display().to_string();
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("implementation source {display} unreadable: {e}"));
+            found.push((display, text));
+        }
+        found.sort();
+        found
+    });
+
+/// Every scantling in the scantlings directory, as `(path, document)` pairs
+/// ordered by path.
+static SCANTLING_DOCUMENTS: std::sync::LazyLock<Vec<(String, serde_json::Value)>> =
+    std::sync::LazyLock::new(|| {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable")
+        {
+            let path = entry.expect("a scantlings directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let display = path.display().to_string();
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
+            let document: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
+            found.push((display, document));
+        }
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        found
+    });
+
+/// Every spec path under the specs directory, ordered by path.
+static SPEC_PATHS: std::sync::LazyLock<Vec<std::path::PathBuf>> = std::sync::LazyLock::new(|| {
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir("features")
+        .expect("the specs directory is readable")
+        .map(|entry| entry.expect("a specs directory entry").path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("feature"))
+        .collect();
+    paths.sort();
+    paths
+});
+
+/// The shipped example plans, as `(path, text)` pairs ordered by path.
+static EXAMPLE_PLANS: std::sync::LazyLock<Vec<(String, String)>> = std::sync::LazyLock::new(|| {
+    let mut found = Vec::new();
+    for entry in
+        std::fs::read_dir("assets/examples").expect("the example plan directory is readable")
+    {
+        let path = entry.expect("an example plan directory entry").path();
+        let display = path.display().to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("example plan {display} unreadable: {e}"));
+        found.push((display, text));
+    }
+    found.sort();
+    found
+});
+
+/// The verification support sources, as `(path, text)` pairs ordered by path.
+/// These are read from named paths rather than from a listing, because the
+/// support tier is two files the runner itself names.
+static SUPPORT_SOURCES: std::sync::LazyLock<Vec<(String, String)>> =
+    std::sync::LazyLock::new(|| {
+        ["tests/cucumber.rs", "tests/cucumber/support.rs"]
+            .into_iter()
+            .map(|path| {
+                let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+                    panic!("verification support source {path} unreadable: {e}")
+                });
+                (path.to_string(), text)
+            })
+            .collect()
+    });
+
 /// The temporary-directory name prefixes the implementation creates, read from
 /// the implementation tree. Each creation site joins a `format!` literal onto
 /// the system temporary directory, so the prefix is that literal up to its first
 /// interpolation.
 pub fn implementation_temp_prefixes() -> Vec<String> {
     let mut found = std::collections::BTreeSet::new();
-    for entry in std::fs::read_dir("src").expect("the implementation directory is readable") {
-        let path = entry.expect("an implementation directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let display = path.display().to_string();
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("implementation source {display} unreadable: {e}"));
+    for (_, text) in IMPLEMENTATION_SOURCES.iter() {
         for (index, _) in text.match_indices("temp_dir()") {
             // The creation site is the join that follows, so the literal is read
             // from a bounded tail rather than from the rest of the file: a
@@ -2749,21 +2879,42 @@ pub fn background_run(
     Some((start, end - start + 1))
 }
 
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        // Ask the program to stop and wait on its exit, so an instrumented build
-        // flushes what it measured rather than losing it to an outright stop.
-        // The unconditional stop is the fallback the deadline reaches.
+impl TerminalSession {
+    /// Tear the session down and report what teardown observed.
+    ///
+    /// The program is asked to stop and its exit is waited on, so an instrumented
+    /// build flushes what it measured rather than losing it to an outright stop.
+    /// The unconditional stop is the fallback the deadline reaches.
+    ///
+    /// A process that has already gone is reported rather than signalled.
+    pub fn tear_down(&mut self) -> TeardownReport {
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return TeardownReport {
+                already_gone: true,
+                kill_diagnostics: String::new(),
+            };
+        }
+        let mut kill_diagnostics = String::new();
         if let Some(pid) = self.child.process_id() {
-            signal_process(pid, "TERM");
+            kill_diagnostics.push_str(&signal_process(pid, "TERM"));
             let exited = exited_within(TERMINATION_BUDGET, || {
                 matches!(self.child.try_wait(), Ok(Some(_)))
             });
             if !exited {
-                signal_process(pid, "KILL");
+                kill_diagnostics.push_str(&signal_process(pid, "KILL"));
             }
         }
         let _ = self.child.wait();
+        TeardownReport {
+            already_gone: false,
+            kill_diagnostics,
+        }
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        self.tear_down();
         if let Some(drain) = self.reader.take() {
             let _ = drain.join();
         }
@@ -3258,30 +3409,16 @@ pub fn run_conformance_scan(scope: &str) -> Vec<ConformanceMatch> {
 }
 
 /// Every scantling in the scantlings directory, as `(path, document)` pairs,
-/// ordered by path.
-fn scantling_documents() -> Vec<(String, serde_json::Value)> {
-    let mut found = Vec::new();
-    for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
-        let path = entry.expect("a scantlings directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let display = path.display().to_string();
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
-        let document: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
-        found.push((display, document));
-    }
-    found.sort_by(|a, b| a.0.cmp(&b.0));
-    found
+/// ordered by path, read once per run.
+fn scantling_documents() -> &'static [(String, serde_json::Value)] {
+    &SCANTLING_DOCUMENTS
 }
 
 /// Every scantling path under the scantlings directory, ordered by path.
 pub fn scantling_paths() -> Vec<String> {
     scantling_documents()
-        .into_iter()
-        .map(|(path, _)| path)
+        .iter()
+        .map(|(path, _)| path.clone())
         .collect()
 }
 
@@ -3292,22 +3429,14 @@ pub fn scantling_paths() -> Vec<String> {
 /// boundary contract reached through a path literal in a step definition is
 /// reached as soundly as one named in a scenario, so both surfaces are read.
 pub fn unreached_scantlings(paths: &[String]) -> Vec<String> {
-    let mut sources = Vec::new();
-    for entry in std::fs::read_dir("features").expect("the specs directory is readable") {
-        let path = entry.expect("a specs directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) == Some("feature") {
-            sources.push(path);
-        }
-    }
-    sources.push(std::path::PathBuf::from("tests/cucumber.rs"));
-    sources.push(std::path::PathBuf::from("tests/cucumber/support.rs"));
-    let texts: Vec<String> = sources
+    let mut texts: Vec<String> = SPEC_PATHS
         .iter()
         .map(|path| {
             std::fs::read_to_string(path)
                 .unwrap_or_else(|e| panic!("source {} unreadable: {e}", path.display()))
         })
         .collect();
+    texts.extend(SUPPORT_SOURCES.iter().map(|(_, text)| text.clone()));
     paths
         .iter()
         .filter(|scantling| !texts.iter().any(|text| text.contains(scantling.as_str())))
@@ -3321,8 +3450,9 @@ pub fn unreached_scantlings(paths: &[String]) -> Vec<String> {
 /// candidate for meta-schema validation.
 pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
     scantling_documents()
-        .into_iter()
+        .iter()
         .filter(|(_, document)| document.get("$schema").is_some())
+        .cloned()
         .collect()
 }
 
@@ -3332,8 +3462,9 @@ pub fn dialect_scantlings() -> Vec<(String, serde_json::Value)> {
 /// meta-schema rather than by a dialect it declares.
 pub fn nondialect_scantlings() -> Vec<(String, serde_json::Value)> {
     scantling_documents()
-        .into_iter()
+        .iter()
         .filter(|(_, document)| document.get("$schema").is_none())
+        .cloned()
         .collect()
 }
 
@@ -3543,34 +3674,19 @@ fn schema_counterexamples_for(
 /// fails there rather than being waved through here.
 pub fn published_schema_uris() -> Vec<(String, String)> {
     let mut found = Vec::new();
-    for entry in std::fs::read_dir("scantlings").expect("the scantlings directory is readable") {
-        let path = entry.expect("a scantlings directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let display = path.display().to_string();
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("scantling {display} unreadable: {e}"));
-        let document: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("scantling {display} did not parse: {e}"));
+    for (display, document) in SCANTLING_DOCUMENTS.iter() {
         let Some(id) = document.get("$id").and_then(|v| v.as_str()) else {
             continue;
         };
-        found.push((display, id.to_string()));
+        found.push((display.clone(), id.to_string()));
     }
-    for entry in
-        std::fs::read_dir("assets/examples").expect("the example plan directory is readable")
-    {
-        let path = entry.expect("an example plan directory entry").path();
-        let display = path.display().to_string();
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("example plan {display} unreadable: {e}"));
+    for (display, text) in EXAMPLE_PLANS.iter() {
         let uri = text
             .lines()
             .find_map(|line| line.split_once("$schema="))
             .map(|(_, uri)| uri.trim().to_string())
             .unwrap_or_else(|| panic!("example plan {display} names no $schema"));
-        found.push((display, uri));
+        found.push((display.clone(), uri));
     }
     found.sort();
     found
@@ -4522,15 +4638,15 @@ fn strip_tag_marks(tags: &[String]) -> Vec<String> {
 /// itself parses the specs with, so the set is the runner's own and not a
 /// second reading of the same files.
 pub fn spec_scenarios() -> Vec<SpecScenario> {
-    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir("features")
-        .expect("the specs directory is readable")
-        .map(|entry| entry.expect("a specs directory entry").path())
-        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("feature"))
-        .collect();
-    paths.sort();
+    SPEC_SCENARIOS.clone()
+}
 
+/// The parsed specs, read once per run. Parsing every spec is the cost this
+/// corpus carries, so the parsed scenarios are what is shared rather than the
+/// listing that reaches them.
+static SPEC_SCENARIOS: std::sync::LazyLock<Vec<SpecScenario>> = std::sync::LazyLock::new(|| {
     let mut found = Vec::new();
-    for path in paths {
+    for path in SPEC_PATHS.iter() {
         let display = path.display().to_string();
         // The runner's own parser expands a Scenario Outline into one scenario
         // per example row before matching any step, so a checker reading the
@@ -4539,7 +4655,7 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
         // nothing. Expanding here reads what the runner runs.
         use cucumber::feature::Ext as _;
         let feature =
-            cucumber::gherkin::Feature::parse_path(&path, cucumber::gherkin::GherkinEnv::default())
+            cucumber::gherkin::Feature::parse_path(path, cucumber::gherkin::GherkinEnv::default())
                 .unwrap_or_else(|e| panic!("spec {display} did not parse: {e}"))
                 .expand_examples()
                 .unwrap_or_else(|e| panic!("spec {display} did not expand its examples: {e:?}"));
@@ -4581,7 +4697,7 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
         }
     }
     found
-}
+});
 
 /// One scenario reference a shipped document cites: the document carrying it,
 /// the line it sits on, and the `<spec>.feature:<Scenario Name>` reference
@@ -4732,24 +4848,329 @@ struct AllowedDuplicateGroup {
     fingerprint: String,
 }
 
+/// One duplicated-constant group the allowance names. The declarations
+/// themselves are the group's identity here, because the constant census runs no
+/// scanner and so has no fingerprint of its own to join on. The members are read
+/// and the reason is not, for the same cause as above.
+#[derive(Debug, Deserialize)]
+struct AllowedDuplicateConstants {
+    members: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct DuplicationAllowance {
     #[serde(rename = "allowedGroups")]
     allowed_groups: Vec<AllowedDuplicateGroup>,
+    #[serde(rename = "allowedConstants", default)]
+    allowed_constants: Vec<AllowedDuplicateConstants>,
+}
+
+/// The duplication allowance at `path`, read once.
+fn duplication_allowance(path: &str) -> DuplicationAllowance {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("the duplication allowance {path} is unreadable: {e}"));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("the duplication allowance {path} did not parse: {e}"))
 }
 
 /// The group fingerprints the duplication allowance at `path` names as
 /// coincidence rather than as copied logic.
 pub fn duplication_allowance_fingerprints(path: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("the duplication allowance {path} is unreadable: {e}"));
-    let parsed: DuplicationAllowance = serde_json::from_str(&text)
-        .unwrap_or_else(|e| panic!("the duplication allowance {path} did not parse: {e}"));
-    parsed
+    duplication_allowance(path)
         .allowed_groups
         .into_iter()
         .map(|group| group.fingerprint)
         .collect()
+}
+
+/// The duplicated-constant groups the allowance at `path` names as coincidence,
+/// each as its sorted member list, which is the group's whole identity.
+pub fn duplication_allowance_constants(path: &str) -> Vec<Vec<String>> {
+    duplication_allowance(path)
+        .allowed_constants
+        .into_iter()
+        .map(|group| {
+            let mut members = group.members;
+            members.sort();
+            members
+        })
+        .collect()
+}
+
+/// The inline rule the constant census carries. A constant declares itself with
+/// or without a visibility, and the two are different nodes, so both forms are
+/// asked for.
+const CONSTANT_CENSUS_RULE: &str = r#"{id: constants, language: rust, rule: {any: [{pattern: "const $N: $T = $V;"}, {pattern: "pub const $N: $T = $V;"}]}}"#;
+
+/// One constant the census read: where it is declared, the name it carries, and
+/// the declaration it gives that name.
+#[derive(Debug, Clone)]
+pub struct CensusConstant {
+    pub file: String,
+    pub name: String,
+    /// The type and value the declaration gives, as the source writes them. Two
+    /// constants agreeing here declare the same thing under two names.
+    pub declaration: String,
+}
+
+impl CensusConstant {
+    /// The form a member is named by, in the allowance and in a failure alike.
+    pub fn member(&self) -> String {
+        format!("{}:{}", self.file, self.name)
+    }
+}
+
+/// One group the constant census reports: the constant two or more sources
+/// declare identically, and where each copy of it sits.
+#[derive(Debug, Clone)]
+pub struct DuplicateConstants {
+    /// The name and declaration the copies share, as the source writes them.
+    pub declaration: String,
+    pub members: Vec<String>,
+}
+
+/// Every constant the sources under `scope` declare, read with the same scanner
+/// the rigging's own derived commands hand their rules to.
+///
+/// The duplication scanner is structurally blind to a constant: its unit census
+/// names closures, methods, functions and trait impl blocks and carries no unit
+/// kind for a constant at all, so no threshold and no flag reaches one. This is
+/// the second census that covers the rest.
+pub fn constant_census(scope: &str) -> Vec<CensusConstant> {
+    let mut found = Vec::new();
+    for reported in run_inline_scan(CONSTANT_CENSUS_RULE, scope) {
+        let line = reported.range.start.line + 1;
+        let read = |key: &str| -> String {
+            reported
+                .meta_variables
+                .as_ref()
+                .and_then(|variables| variables.single.get(key))
+                .map(|variable| variable.text.clone())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}:{line} was reported as a constant declaring no {key}",
+                        reported.file
+                    )
+                })
+        };
+        found.push(CensusConstant {
+            file: reported.file.clone(),
+            name: read("N"),
+            declaration: format!("{} = {}", read("T"), read("V")),
+        });
+    }
+    found.sort_by_key(|constant| constant.member());
+    found.dedup_by(|a, b| a.member() == b.member() && a.declaration == b.declaration);
+    found
+}
+
+/// The constants the census reports as duplicated: every name two or more
+/// sources declare identically.
+///
+/// The join is the name together with the declaration, because that pair is what
+/// a copy is. A constant encoding a decision that was copied rather than shared
+/// is two places to change and one place to forget, and the copy stays green
+/// while it drifts because nothing joins the two declarations.
+///
+/// Joining on the declaration alone would report every constant that merely
+/// agrees in value with an unrelated one, such as six independently chosen
+/// deadlines that all happen to be two seconds. Those are not one decision
+/// written twice, so nothing will forget to change both, and excusing them would
+/// put permanent entries in the allowance for duplication that never existed. A
+/// census the project owns can tell them apart, where the third-party scanner
+/// beside it cannot and so must defer to a named allowance.
+pub fn duplicate_constants(constants: &[CensusConstant]) -> Vec<DuplicateConstants> {
+    let mut by_declaration: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for constant in constants {
+        by_declaration
+            .entry(format!("{} : {}", constant.name, constant.declaration))
+            .or_default()
+            .push(constant.member());
+    }
+    by_declaration
+        .into_iter()
+        .filter(|(_, members)| members.len() > 1)
+        .map(|(declaration, mut members)| {
+            members.sort();
+            DuplicateConstants {
+                declaration,
+                members,
+            }
+        })
+        .collect()
+}
+
+/// The inline rule the process-wait census carries for the sites that construct
+/// a child process.
+///
+/// A syntax query sees the shape of a call and not the type of its receiver, so
+/// a wait on a child process is indistinguishable by shape from a wait on
+/// anything else: both are a method call on a plain binding. The census is
+/// therefore anchored on the construction sites, and asks what bounds each wait
+/// on the binding a construction site produced.
+const PROCESS_SPAWN_RULE: &str = r#"{id: spawns, language: rust, rule: {any: [{pattern: "$X.spawn()"}, {pattern: "$X.spawn_command($C)"}]}}"#;
+
+/// The inline rule the process-wait census carries for the waits themselves.
+const PROCESS_WAIT_RULE: &str = r#"{id: waits, language: rust, rule: {any: [{pattern: "$X.wait()"}, {pattern: "$X.try_wait()"}]}}"#;
+
+/// The constructs that repeat a call, so a non-blocking ask becomes a wait.
+const REPEAT_FORMS: [&str; 3] = ["loop {", "while ", "exited_within("];
+
+/// The constructs that bound a wait by a deadline.
+const DEADLINE_FORMS: [&str; 3] = ["exited_within(", "Instant::now() +", "recv_timeout("];
+
+/// One wait on a spawned child the census read.
+#[derive(Debug, Clone)]
+pub struct ProcessWait {
+    pub file: String,
+    pub line: usize,
+    /// The call as the source makes it, on one line.
+    pub text: String,
+    /// The deadline the wait reaches, named as the source writes it. `None` when
+    /// nothing bounds the wait, which is the fault this census exists to find.
+    pub bound: Option<String>,
+}
+
+impl ProcessWait {
+    /// The form a wait is named by in a failure.
+    pub fn site(&self) -> String {
+        format!("{}:{}", self.file, self.line)
+    }
+}
+
+/// The text of one line of a verification support source, counted from one.
+fn support_source_line(file: &str, line: usize) -> String {
+    let (_, text) = SUPPORT_SOURCES
+        .iter()
+        .find(|(path, _)| path == file)
+        .unwrap_or_else(|| panic!("{file} is no verification support source"));
+    text.lines()
+        .nth(line - 1)
+        .unwrap_or_else(|| panic!("{file} carries no line {line}"))
+        .to_string()
+}
+
+/// The name a `let` binds on `line`, when it binds one.
+fn binding_name(line: &str) -> Option<String> {
+    let after = line.trim_start().strip_prefix("let ")?;
+    let after = after.strip_prefix("mut ").unwrap_or(after);
+    let name: String = after
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The text of the function enclosing `line` in a verification support source.
+///
+/// A wait is judged by what its own function establishes, so the reader takes
+/// the whole function rather than a window around the call.
+fn enclosing_function(file: &str, line: usize) -> String {
+    let (_, source) = SUPPORT_SOURCES
+        .iter()
+        .find(|(path, _)| path == file)
+        .unwrap_or_else(|| panic!("{file} is no verification support source"));
+    let lines: Vec<&str> = source.lines().collect();
+    let index = line - 1;
+    let start = (0..=index)
+        .rev()
+        .find(|candidate| {
+            let trimmed = lines[*candidate].trim_start();
+            trimmed.starts_with("fn ")
+                || trimmed.starts_with("pub fn ")
+                || trimmed.starts_with("async fn ")
+                || trimmed.starts_with("pub async fn ")
+        })
+        .unwrap_or_else(|| panic!("{file}:{line} sits in no function this census can read"));
+    let mut depth: usize = 0;
+    let mut opened = false;
+    let mut end = lines.len() - 1;
+    for (offset, text) in lines[start..].iter().enumerate() {
+        for character in text.chars() {
+            match character {
+                '{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if opened && depth == 0 {
+            end = start + offset;
+            break;
+        }
+    }
+    lines[start..=end].join("\n")
+}
+
+/// Every wait on a spawned child the verification support sources make, each
+/// with the deadline that bounds it.
+///
+/// A wait that carries no deadline hangs the whole suite rather than failing one
+/// scenario, and it fails in the worst shape a run has: no output, no red and no
+/// weather line, because the sweep never finishes.
+///
+/// A `try_wait` asks once and returns, so it can hang nothing on its own. It is
+/// a wait only where its function repeats it, and then the repeat is what a
+/// deadline must bound.
+pub fn process_wait_census() -> Vec<ProcessWait> {
+    let mut bindings: Vec<(String, String)> = Vec::new();
+    for reported in run_inline_scan(PROCESS_SPAWN_RULE, "tests") {
+        let line = reported.range.start.line + 1;
+        let text = support_source_line(&reported.file, line);
+        let binding = binding_name(&text).unwrap_or_else(|| {
+            panic!(
+                "{}:{line} spawns a child into no named binding: {text}",
+                reported.file
+            )
+        });
+        bindings.push((reported.file.clone(), binding));
+    }
+    bindings.sort();
+    bindings.dedup();
+
+    let mut found = Vec::new();
+    for reported in run_inline_scan(PROCESS_WAIT_RULE, "tests") {
+        let line = reported.range.start.line + 1;
+        let text = reported
+            .text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let Some((receiver, _)) = text.rsplit_once('.') else {
+            continue;
+        };
+        let receiver = receiver.trim();
+        // A wait counts only where its receiver is a binding a construction site
+        // in the same source spawned a child into, whether it is that binding or
+        // the field it was moved into.
+        let on_child = bindings.iter().any(|(file, name)| {
+            file == &reported.file && (receiver == name || receiver.ends_with(&format!(".{name}")))
+        });
+        if !on_child {
+            continue;
+        }
+        let function = enclosing_function(&reported.file, line);
+        let blocking = text.ends_with(".wait()");
+        let repeated = REPEAT_FORMS.iter().any(|form| function.contains(form));
+        if !blocking && !repeated {
+            continue;
+        }
+        let bound = DEADLINE_FORMS
+            .iter()
+            .find(|form| function.contains(**form))
+            .map(|form| form.to_string());
+        found.push(ProcessWait {
+            file: reported.file.clone(),
+            line,
+            text,
+            bound,
+        });
+    }
+    found.sort_by_key(|wait| wait.site());
+    found
 }
 
 /// The exact-duplicate groups in the scanner's printed listing, read as the
@@ -5106,7 +5527,7 @@ pub fn scantling_enumerations() -> Vec<ScantlingEnumeration> {
 
     let mut found = Vec::new();
     for (path, document) in scantling_documents() {
-        walk(&path, &document, "", &mut found);
+        walk(path, document, "", &mut found);
     }
     found.sort_by(|a, b| (&a.scantling, &a.pointer).cmp(&(&b.scantling, &b.pointer)));
     found
@@ -5315,4 +5736,350 @@ pub fn enumeration_pairs() -> Vec<EnumerationPair> {
         });
     }
     pairs
+}
+
+// ---------------------------------------------------------------------------
+// the recorded upstream the proxied-egress scenarios cross a proxy to reach
+// ---------------------------------------------------------------------------
+
+/// One request the upstream received, as it read it off the wire.
+#[derive(Debug, Clone)]
+pub struct ReceivedRequest {
+    pub method: String,
+    pub path: String,
+    /// The header lines the upstream read off the wire, so a scenario asserting
+    /// that a credential travelled reads what arrived rather than what the
+    /// client reports about itself.
+    pub headers: Vec<String>,
+}
+
+/// A real upstream answering on a real loopback port.
+///
+/// The scenarios assert both that an exchange reached the upstream and that one
+/// did not, so the upstream records what it received rather than the run
+/// inferring it from the client's side. A proxy that answered from a recording,
+/// injected a status or refused the connection leaves this log empty, and that
+/// emptiness is the assertion rather than an absence nobody checked.
+#[derive(Debug)]
+pub struct Upstream {
+    base_url: String,
+    /// The body the upstream currently answers with. It is shared with the
+    /// serving thread so a scenario can change the live answer, which is what
+    /// lets a replay scenario prove the recording was served rather than the
+    /// upstream's own current reply.
+    body: std::sync::Arc<std::sync::Mutex<String>>,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    received: std::sync::Arc<std::sync::Mutex<Vec<ReceivedRequest>>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Upstream {
+    /// Start an upstream answering every request with `body`, and wait until it
+    /// observably serves before reporting it ready.
+    pub fn answering(body: &str) -> Upstream {
+        use std::io::{BufRead, BufReader, Write};
+        use std::sync::atomic::Ordering;
+
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("the upstream binds a loopback port");
+        let addr = listener
+            .local_addr()
+            .expect("the upstream reports its address");
+        listener
+            .set_nonblocking(true)
+            .expect("the upstream listener is non-blocking");
+
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = std::sync::Arc::clone(&shutdown);
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let arrived = std::sync::Arc::clone(&received);
+        let answer = std::sync::Arc::new(std::sync::Mutex::new(body.to_string()));
+        let served = std::sync::Arc::clone(&answer);
+
+        let handle = std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("the accepted connection is blocking");
+                        let mut reader =
+                            BufReader::new(stream.try_clone().expect("the connection is cloned"));
+                        let mut request_line = String::new();
+                        if reader.read_line(&mut request_line).unwrap_or(0) == 0 {
+                            continue;
+                        }
+                        // The readiness probe and a real request both arrive as a
+                        // request line, so the line is what names the exchange.
+                        let mut parts = request_line.split_whitespace();
+                        let method = parts.next().unwrap_or_default().to_string();
+                        let path = parts.next().unwrap_or_default().to_string();
+                        let mut headers = Vec::new();
+                        loop {
+                            let mut line = String::new();
+                            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                                break;
+                            }
+                            if line == "\r\n" || line == "\n" {
+                                break;
+                            }
+                            headers.push(line.trim_end().to_string());
+                        }
+                        arrived
+                            .lock()
+                            .expect("the upstream request log is readable")
+                            .push(ReceivedRequest {
+                                method,
+                                path,
+                                headers,
+                            });
+                        let current = served
+                            .lock()
+                            .expect("the upstream answer is readable")
+                            .clone();
+                        let mut stream = stream;
+                        let _ = stream.write_all(http_response(200, "OK", &current).as_bytes());
+                        let _ = stream.flush();
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let upstream = Upstream {
+            base_url: format!("http://{addr}"),
+            body: answer,
+            shutdown,
+            received,
+            handle: Some(handle),
+        };
+        upstream.await_ready();
+        // The readiness probe is an exchange the upstream recorded, and no
+        // scenario asked for it, so the log starts where the scenario does.
+        upstream.forget_received();
+        upstream
+    }
+
+    /// Poll the upstream until it observably answers, bounded by a deadline, so
+    /// a scenario never races the listener into being ready.
+    fn await_ready(&self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if std::net::TcpStream::connect_timeout(
+                &self
+                    .base_url
+                    .trim_start_matches("http://")
+                    .parse()
+                    .expect("the upstream address parses"),
+                std::time::Duration::from_millis(200),
+            )
+            .is_ok()
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the upstream at {} did not answer within 5s",
+                self.base_url
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Where the upstream answers.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// The body the upstream answers every request with at this moment.
+    pub fn body(&self) -> String {
+        self.body
+            .lock()
+            .expect("the upstream answer is readable")
+            .clone()
+    }
+
+    /// Change the body the upstream answers with from here on, so a scenario
+    /// can tell a recorded reply apart from the upstream's current one.
+    pub fn answer_with(&self, body: &str) {
+        *self.body.lock().expect("the upstream answer is writable") = body.to_string();
+    }
+
+    /// Every request the upstream received.
+    pub fn received(&self) -> Vec<ReceivedRequest> {
+        self.received
+            .lock()
+            .expect("the upstream request log is readable")
+            .clone()
+    }
+
+    /// Discard the requests recorded so far, so a scenario whose setup had to
+    /// reach the upstream for real asserts over the action alone.
+    pub fn forget_received(&self) {
+        self.received
+            .lock()
+            .expect("the upstream request log is readable")
+            .clear();
+    }
+
+    /// Stop the upstream and wait for its thread to leave, so a scenario running
+    /// "with the upstream stopped" has an upstream that observably went.
+    pub fn stop(&mut self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for Upstream {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// What a request through the proxy answered.
+#[derive(Debug, Clone)]
+pub struct ProxiedResponse {
+    pub status: u16,
+    pub body: String,
+    /// How long the exchange took, so a scenario asserting an injected delay
+    /// measures the response rather than trusting the configuration.
+    pub elapsed: std::time::Duration,
+}
+
+/// Make `url` through the HTTP proxy listening at `proxy`, as a client
+/// configured to use a proxy does: the request line carries the absolute URI and
+/// the connection is opened to the proxy rather than to the host.
+///
+/// A refused connection and a proxy error are answers a scenario asserts on, so
+/// both are returned rather than panicked.
+pub fn request_through_proxy(proxy: &str, url: &str) -> Result<ProxiedResponse, String> {
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    let started = std::time::Instant::now();
+    let address: std::net::SocketAddr = proxy
+        .trim_start_matches("http://")
+        .parse()
+        .map_err(|e| format!("the proxy address {proxy} does not parse: {e}"))?;
+    let host = url.trim_start_matches("http://");
+    let host = host.split('/').next().unwrap_or(host);
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(10))
+            .map_err(|e| format!("the connection to the proxy at {proxy} failed: {e}"))?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .map_err(|e| format!("the read budget could not be set: {e}"))?;
+    write!(
+        stream,
+        "GET {url} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    )
+    .map_err(|e| format!("the request to the proxy failed: {e}"))?;
+    stream
+        .flush()
+        .map_err(|e| format!("the request to the proxy was not flushed: {e}"))?;
+
+    let mut reader = BufReader::new(stream);
+    let mut status_line = String::new();
+    reader
+        .read_line(&mut status_line)
+        .map_err(|e| format!("the proxy sent no status line: {e}"))?;
+    if status_line.is_empty() {
+        return Err("the proxy closed the connection without answering".to_string());
+    }
+    let status: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .ok_or_else(|| format!("the proxy answered an unreadable status line: {status_line}"))?;
+    let mut length = 0usize;
+    loop {
+        let mut line = String::new();
+        if reader
+            .read_line(&mut line)
+            .map_err(|e| format!("the proxy sent an unreadable header: {e}"))?
+            == 0
+        {
+            break;
+        }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            length = value.trim().parse().unwrap_or(0);
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+    }
+    let mut body = String::new();
+    if length > 0 {
+        let mut buffer = vec![0u8; length];
+        reader
+            .read_exact(&mut buffer)
+            .map_err(|e| format!("the proxy sent a short body: {e}"))?;
+        body = String::from_utf8_lossy(&buffer).into_owned();
+    } else {
+        let _ = reader.read_to_string(&mut body);
+    }
+    Ok(ProxiedResponse {
+        status,
+        body,
+        elapsed: started.elapsed(),
+    })
+}
+
+/// One exchange a HAR recording carries, as a scenario reads it.
+#[derive(Debug, Clone)]
+pub struct HarEntry {
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+}
+
+/// The entries a HAR recording carries, read where HAR puts them: `log.entries`,
+/// each carrying the request it recorded and the response that answered it.
+///
+/// A recording that does not parse is a failure rather than an empty reading: a
+/// scenario asserting one entry would otherwise pass an unwritten file off as a
+/// recording that carries nothing.
+pub fn har_entries(path: &str) -> Vec<HarEntry> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("the HAR recording {path} is unreadable: {e}"));
+    let document: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("the HAR recording {path} did not parse: {e}"));
+    let entries = document
+        .get("log")
+        .and_then(|log| log.get("entries"))
+        .and_then(|entries| entries.as_array())
+        .unwrap_or_else(|| panic!("the HAR recording {path} carries no log.entries array"));
+    entries
+        .iter()
+        .map(|entry| {
+            let request = entry
+                .get("request")
+                .unwrap_or_else(|| panic!("a HAR entry in {path} carries no request"));
+            let response = entry
+                .get("response")
+                .unwrap_or_else(|| panic!("a HAR entry in {path} carries no response"));
+            HarEntry {
+                method: request
+                    .get("method")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_else(|| panic!("a HAR request in {path} records no method"))
+                    .to_string(),
+                url: request
+                    .get("url")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_else(|| panic!("a HAR request in {path} records no url"))
+                    .to_string(),
+                status: response
+                    .get("status")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_else(|| panic!("a HAR response in {path} records no status"))
+                    as u16,
+            }
+        })
+        .collect()
 }

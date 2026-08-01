@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 const TOP_LEFT: [&str; 2] = ["\u{250c}", "\u{256d}"];
 const TOP_RIGHT: [&str; 2] = ["\u{2510}", "\u{256e}"];
 const BOTTOM_LEFT: [&str; 2] = ["\u{2514}", "\u{2570}"];
-const HORIZONTAL: &str = "\u{2500}";
-const VERTICAL: &str = "\u{2502}";
+pub(crate) const HORIZONTAL: &str = "\u{2500}";
+pub(crate) const VERTICAL: &str = "\u{2502}";
 
 /// A Ratatui-shaped rectangle in screen cells.
 ///

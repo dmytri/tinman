@@ -31,7 +31,7 @@ Feature: methodology conformance
 
   Rule: the join runs both ways, and the second direction is the one that rots. Reading only that every reported group is allowed lets an entry outlive the duplication it excused: the code changes, the scanner stops reporting it, and a permission nobody needs sits in the file granting cover to whatever later matches its fingerprint. Nothing announces that, because the gate it weakens stays green throughout. An allowance is a claim about the tree as much as a permission, so it is checked as one.
 
-  Rule: the scanner reads functions and not items. It is structurally blind to the three duplicated constants beside the status_line pair: its own unit census names closures, methods, functions and trait impl blocks, and two byte-identical files holding only constant declarations analyse as zero units. This gate therefore covers half the duplication in the tree, and the half it misses is named here rather than left to whoever trusts the green.
+  Rule: the scanner reads functions and not items, so this gate covers duplicated functions only. What it cannot see is covered by a second census rather than counted here, at features/methodology-conformance.feature:every duplicated constant the census reports is named as coincidence. A count in this prose would decay every time the tree gained or lost a copy, and would decay silently, because nothing about a sentence changes when its number stops being true.
 
   @conformance
   Scenario: every duplicate group the scanner reports is named as coincidence
@@ -44,6 +44,8 @@ Feature: methodology conformance
   Rule: the duplication scanner reads functions and not items, so a duplicated constant is invisible to it. Its unit census names closures, methods, functions and trait impl blocks and carries no unit kind for a constant at all, which means no threshold and no flag reaches one. The blindness was proven structural rather than a threshold effect on 2026-07-31 by a two-file probe: two byte-identical sources holding only constant declarations analyse as zero code units, so lowering the node and line minimums to 1 changes nothing. A green from the scanner therefore covers duplicated functions only, and a second census is what covers the rest.
 
   Rule: a duplicated constant is worth its own census because the constants that get copied are the ones that encode a decision. A deadline, a key sequence or a limit repeated in two files is two places to change and one place to forget, and the copy stays green while it drifts, because nothing joins the two declarations. Both allowances are read in both directions for the same reason the function one is: an entry outliving the duplication it excused would otherwise sit on, granting cover to whatever later matches it.
+
+  Rule: a constant is keyed by its name and its declaration together, and keying on the declaration alone was tried first. That key reads two constants agreeing in value as one duplicate, so unrelated deadlines that happen to sit at the same two seconds arrive as copies, and each would need a permanent allowance entry excusing duplication that never existed. A copy is one name declared twice. Two independent decisions that coincide are not a copy, and a census that cannot tell them apart fills its own allowance with noise until nobody reads it.
 
   @conformance
   Scenario: every duplicated constant the census reports is named as coincidence
@@ -149,6 +151,19 @@ Feature: methodology conformance
     Given the scenarios in the specs
     When each scenario name is read as the focused command would pass it
     Then no scenario name carries a regex metacharacter
+
+  Rule: a background declared before any rule is feature-scoped and reaches every scenario, including scenarios inside later rule blocks. A background declared below a rule belongs to that rule, so the next rule ends its scope and every scenario after it runs with its given state unprovisioned. Those scenarios still run and still report, which is what makes it expensive: they fail on a precondition nobody removed on purpose, or they pass while asserting against state the background was supposed to have built.
+
+  Rule: so the position that is safe is the earliest one, and it is safe permanently rather than until the next edit. A background sitting below the rules works only while no rule follows it, which makes a correct file one edit away from a broken one, and the edit that breaks it is the ordinary act of adding durable context. Placing the background above every rule removes the failure mode instead of avoiding it.
+
+  Rule: this check exists because the prose form of it failed three times, and the first version of the check was itself wrong. The trap reddened seven scenarios once, was written up as a note, and recurred twice inside one session on 2026-07-31, the second time minutes after that note was rewritten to forbid it more forcefully. The check first written to close it asserted that no rule may follow a background at all, which is not true of this runner and reddened six correct scenarios across two features. The rule that is true is narrower and is the one stated here.
+
+  @conformance
+  Scenario: every background is declared before any rule
+    Given the feature files in the specs
+    When each feature carrying a background is read for a rule declared above it
+    Then every background is declared before any rule
+    And the features read are not empty
 
   Rule: a tier budget is a ceiling rather than advice, so it needs a check that reads it. The sweep commands already append their wall clock to the weather record, so no new instrumentation is owed. The check reads the most recent sweep of each tier rather than every entry retained, because the record is append-only and unbounded: one historical outlier would redden the check permanently while saying nothing about what the suite costs now, and the only remedy left would be deleting run data to clear a red. Yesterday's weather is the next run's starting prior, so the last observation is the one a ceiling judges. The floor guards the producer rather than the run history: a budget declared for a tier whose sweep command records nothing could never be exceeded, and a check that reads an empty record would report a clean bill for a suite it never measured. Verifying the producer structurally keeps a fresh clone honest, where no sweep has run yet and there is nothing to compare.
 

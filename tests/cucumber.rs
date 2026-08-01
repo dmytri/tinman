@@ -89,6 +89,26 @@ struct TinmanWorld {
     duplication: Option<support::DuplicationReport>,
     duplication_allowance: Option<Vec<String>>,
     duplication_allowance_path: Option<String>,
+    // what the constant census read over the implementation, the groups it
+    // reports as duplicated, and the groups the allowance names as coincidence
+    constants_read: Option<Vec<support::CensusConstant>>,
+    duplicate_constants: Option<Vec<support::DuplicateConstants>>,
+    constant_allowance: Option<Vec<Vec<String>>>,
+    // the waits on a spawned child the verification support sources make, each
+    // with the deadline that bounds it
+    process_waits: Option<Vec<support::ProcessWait>>,
+    // what tearing a driver session down observed
+    teardown: Option<support::TeardownReport>,
+    // the proxied-egress scenarios: the real upstream, the proxy under test, the
+    // scratch directory the HAR sits in, and what a request through the proxy
+    // answered, whether it answered or failed
+    upstream: Option<support::Upstream>,
+    proxy: Option<tinman::proxy::Proxy>,
+    har_dir: Option<support::ScratchDir>,
+    har_path: Option<String>,
+    rule_placements: Option<Vec<RulePlacement>>,
+    proxied: Option<support::ProxiedResponse>,
+    proxy_error: Option<String>,
     // the sandbox resources standing after the suite's own reclaim
     sandbox_inventory: Option<support::SandboxInventory>,
     conformance_matches: Option<Vec<support::ConformanceMatch>>,
@@ -7340,9 +7360,17 @@ fn sandbox_section(world: &TinmanWorld) -> tinman::sandbox::SandboxSpec {
 /// changes what every concurrent scenario reads, at whatever moment the
 /// scheduler interleaves them.
 fn staged_backend(world: &TinmanWorld) -> BubblewrapBackend {
-    match world.handed_env.as_ref() {
+    let backend = match world.handed_env.as_ref() {
         Some(env) => BubblewrapBackend::with_environment(env.clone()),
         None => BubblewrapBackend::new(),
+    };
+    // A scenario that started its own proxy hands the backend that proxy, so a
+    // launch is linked to the one its own scenario started. Without the link the
+    // association can only be re-derived from ambient state, which is what let
+    // two concurrent scenarios bridge each other's ports.
+    match world.proxy.as_ref() {
+        Some(proxy) => backend.routing_egress_through(proxy),
+        None => backend,
     }
 }
 
@@ -10846,7 +10874,7 @@ async fn no_rule_reports_a_match(world: &mut TinmanWorld) {
 }
 
 #[then(
-    "the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation and killed-measured-child rules"
+    "the rule set carries at least the plank-form, plank-presence, perturbation-quiescence, process-wide-env-mutation, killed-measured-child and unshared-corpus-read rules"
 )]
 async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
     let carried = support::conformance_rule_ids();
@@ -10856,6 +10884,7 @@ async fn the_rule_set_carries_the_named_rules(_world: &mut TinmanWorld) {
         "perturbation-quiescence",
         "process-wide-env-mutation",
         "killed-measured-child",
+        "unshared-corpus-read",
     ]
     .into_iter()
     .filter(|named| !carried.iter().any(|id| id == named))
@@ -11017,7 +11046,11 @@ async fn the_double_marks_read_are_not_empty(world: &mut TinmanWorld) {
 
 #[given(expr = "the implementation sources and the allowance in {string}")]
 async fn the_sources_and_the_duplication_allowance(world: &mut TinmanWorld, allowance: String) {
+    // One allowance file answers both censuses, so both of its lists are read
+    // here: the scanner reads functions and the census reads constants, and each
+    // scenario joins the list its own census answers.
     world.duplication_allowance = Some(support::duplication_allowance_fingerprints(&allowance));
+    world.constant_allowance = Some(support::duplication_allowance_constants(&allowance));
     world.duplication_allowance_path = Some(allowance);
 }
 
@@ -11108,6 +11141,196 @@ async fn the_duplicate_groups_read_are_not_empty(world: &mut TinmanWorld) {
         !report.groups.is_empty(),
         "the duplication scanner named no group at all, so the join read nothing and this \
          scenario would assert nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: duplicated constants across the implementation
+// ---------------------------------------------------------------------------
+
+#[when("the constant census reads the sources")]
+async fn the_constant_census_reads_the_sources(world: &mut TinmanWorld) {
+    // The implementation directory the rigging names, which is the scope the
+    // duplication scanner beside this census is handed.
+    let constants = support::constant_census("src");
+    world.duplicate_constants = Some(support::duplicate_constants(&constants));
+    world.constants_read = Some(constants);
+}
+
+#[then("every duplicated constant it reports is one the allowance names")]
+async fn every_duplicate_constant_is_one_the_allowance_names(world: &mut TinmanWorld) {
+    let reported = world
+        .duplicate_constants
+        .as_ref()
+        .expect("the constant census ran");
+    let allowed = world
+        .constant_allowance
+        .as_ref()
+        .expect("the constant allowance was read");
+    let path = world
+        .duplication_allowance_path
+        .as_deref()
+        .expect("the duplication allowance was named");
+    // The census runs no scanner, so it has no fingerprint of its own: the
+    // members are the group's identity, and they are carried into the message
+    // because a failure naming a declaration alone says nothing about where the
+    // copies are.
+    let unnamed: Vec<String> = reported
+        .iter()
+        .filter(|group| !allowed.contains(&group.members))
+        .map(|group| format!("{}: {}", group.declaration, group.members.join(", ")))
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "{} duplicated constant group(s) the census reports are not named in {path}:\n{}",
+        unnamed.len(),
+        unnamed.join("\n")
+    );
+}
+
+#[then("every duplicated constant the allowance names is one it reports")]
+async fn every_allowed_constant_is_one_the_census_reports(world: &mut TinmanWorld) {
+    let reported = world
+        .duplicate_constants
+        .as_ref()
+        .expect("the constant census ran");
+    let allowed = world
+        .constant_allowance
+        .as_ref()
+        .expect("the constant allowance was read");
+    let path = world
+        .duplication_allowance_path
+        .as_deref()
+        .expect("the duplication allowance was named");
+    // The reverse direction of the same join. An entry the census no longer
+    // reports excused duplication that is gone, and it stays in the file granting
+    // cover to whatever later matches it.
+    let unreported: Vec<String> = allowed
+        .iter()
+        .filter(|members| !reported.iter().any(|group| &group.members == *members))
+        .map(|members| members.join(", "))
+        .collect();
+    assert!(
+        unreported.is_empty(),
+        "{} allowance entr(ies) in {path} name duplicated constants the census no longer \
+         reports, so each excuses duplication that is gone:\n{}",
+        unreported.len(),
+        unreported.join("\n")
+    );
+}
+
+#[then("the constants read are not empty")]
+async fn the_constants_read_are_not_empty(world: &mut TinmanWorld) {
+    let constants = world
+        .constants_read
+        .as_ref()
+        .expect("the constant census ran");
+    // The floor guards the reader rather than the count. An empty duplicated set
+    // is the healthy resting state here, so the assertion is that the census read
+    // the sources at all: a census that found no constant whatsoever and one that
+    // found no duplicate among them would otherwise report the same clean bill.
+    assert!(
+        !constants.is_empty(),
+        "the constant census read no constant at all, so the joins above read nothing and this \
+         scenario would assert nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: waits on a spawned child
+// ---------------------------------------------------------------------------
+
+#[given("the process waits in the verification support sources")]
+async fn the_process_waits_in_the_support_sources(world: &mut TinmanWorld) {
+    world.process_waits = Some(support::process_wait_census());
+}
+
+#[when("each wait is read for the deadline that bounds it")]
+async fn each_wait_is_read_for_its_deadline(world: &mut TinmanWorld) {
+    // The census names the deadline as it reads each wait, so the reading is
+    // already in hand. Asserting it was taken keeps this step from passing over a
+    // census that never ran.
+    world
+        .process_waits
+        .as_ref()
+        .expect("the process-wait census ran");
+}
+
+#[then("every wait on a spawned child reaches a deadline")]
+async fn every_wait_reaches_a_deadline(world: &mut TinmanWorld) {
+    let waits = world
+        .process_waits
+        .as_ref()
+        .expect("the process-wait census ran");
+    let unbounded: Vec<String> = waits
+        .iter()
+        .filter(|wait| wait.bound.is_none())
+        .map(|wait| format!("{}: {}", wait.site(), wait.text))
+        .collect();
+    assert!(
+        unbounded.is_empty(),
+        "{} wait(s) on a spawned child reach no deadline, so each hangs the whole sweep rather \
+         than failing one scenario:\n{}",
+        unbounded.len(),
+        unbounded.join("\n")
+    );
+}
+
+#[then("the waits read are not empty")]
+async fn the_waits_read_are_not_empty(world: &mut TinmanWorld) {
+    let waits = world
+        .process_waits
+        .as_ref()
+        .expect("the process-wait census ran");
+    assert!(
+        !waits.is_empty(),
+        "the census read no wait on a spawned child at all, so the assertion above inspected \
+         nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: tearing down a session whose process has gone
+// ---------------------------------------------------------------------------
+
+#[given("a driver session whose process has already exited")]
+async fn a_driver_session_whose_process_has_exited(world: &mut TinmanWorld) {
+    let mut session = support::DriverProcess::start();
+    // Closing stdin is this protocol's own end of input, so the driver runs its
+    // own exit path. Waiting on that exit is what makes the process observably
+    // gone before teardown reaches it, rather than merely likely to be.
+    session.close_stdin();
+    session.wait_for_exit();
+    world.driver = Some(session);
+}
+
+#[when("verification support tears the session down")]
+async fn verification_support_tears_the_session_down(world: &mut TinmanWorld) {
+    let session = world.driver.as_mut().expect("the driver session started");
+    world.teardown = Some(session.tear_down());
+}
+
+#[then("the teardown reports the process had already gone")]
+async fn the_teardown_reports_the_process_had_gone(world: &mut TinmanWorld) {
+    let report = world.teardown.as_ref().expect("the session was torn down");
+    assert!(
+        report.already_gone,
+        "teardown reached a process that had already exited and did not report it as gone, so it \
+         would signal one that cannot be stopped"
+    );
+}
+
+#[then("no diagnostic from the system's kill reaches the runner's error stream")]
+async fn no_kill_diagnostic_reaches_the_error_stream(world: &mut TinmanWorld) {
+    let report = world.teardown.as_ref().expect("the session was torn down");
+    // Teardown captures whatever the kill writes rather than letting it inherit
+    // the runner's error stream, so what it captured is what would have reached
+    // that stream. Escalation is owed when a termination deadline passes, and
+    // only then, so a teardown reaching a gone process signals nothing at all.
+    assert!(
+        report.kill_diagnostics.is_empty(),
+        "teardown signalled a process that had already gone, and the system's kill answered:\n{}",
+        report.kill_diagnostics
     );
 }
 
@@ -12391,4 +12614,666 @@ async fn main() {
         .fail_on_skipped()
         .run_and_exit("features")
         .await;
+}
+
+// ---------------------------------------------------------------------------
+// proxied egress
+// ---------------------------------------------------------------------------
+
+/// The body the upstream answers every request with, so a scenario asserting
+/// that the upstream's own answer was served has something to name.
+const UPSTREAM_BODY: &str = r#"{"answer":"from the upstream"}"#;
+
+/// The body the upstream is switched to after a recording is made, so a replay
+/// that reached the network would answer with this rather than the recording.
+const UPSTREAM_CURRENT_BODY: &str = r#"{"answer":"from the upstream, changed"}"#;
+
+/// The path the recorded exchange is made against.
+const RECORDED_PATH: &str = "/exchange";
+
+/// The URL a request through the proxy names, in the absolute form a client
+/// configured to use a proxy sends.
+fn upstream_url(world: &TinmanWorld, path: &str) -> String {
+    let upstream = world.upstream.as_ref().expect("the upstream started");
+    format!("{}{path}", upstream.base_url())
+}
+
+/// Start the proxy under the given egress policy and hold it on the world.
+fn start_proxy(world: &mut TinmanWorld, egress: tinman::sandbox::Egress) {
+    let proxy = tinman::proxy::Proxy::start(&egress).expect("the proxy starts");
+    world.proxy = Some(proxy);
+}
+
+/// The HAR path this scenario records to and replays from, created under a
+/// scratch directory whose teardown is registered with it.
+fn har_path(world: &mut TinmanWorld) -> String {
+    if let Some(path) = world.har_path.as_ref() {
+        return path.clone();
+    }
+    let dir = support::ScratchDir::new("har");
+    let path = dir.path().join("egress.har").display().to_string();
+    world.har_dir = Some(dir);
+    world.har_path = Some(path.clone());
+    path
+}
+
+/// Make one request through the proxy and record what it answered.
+fn cross_the_proxy(world: &mut TinmanWorld, path: &str) {
+    let url = upstream_url(world, path);
+    let address = world
+        .proxy
+        .as_ref()
+        .expect("the proxy started")
+        .address()
+        .to_string();
+    match support::request_through_proxy(&address, &url) {
+        Ok(response) => world.proxied = Some(response),
+        Err(e) => world.proxy_error = Some(e),
+    }
+}
+
+#[given("a recorded upstream that answers on a real port")]
+async fn a_recorded_upstream(world: &mut TinmanWorld) {
+    world.upstream = Some(support::Upstream::answering(UPSTREAM_BODY));
+}
+
+#[given("the proxy is recording to a HAR file")]
+async fn the_proxy_is_recording_to_a_har_file(world: &mut TinmanWorld) {
+    // The HAR does not exist yet, which is what puts the proxy in recording
+    // rather than replaying: the recording is the file's presence.
+    let har = har_path(world);
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: Some(har),
+            fault: None,
+        },
+    );
+}
+
+#[when("a request crosses the proxy and is answered")]
+async fn a_request_crosses_the_proxy_and_is_answered(world: &mut TinmanWorld) {
+    cross_the_proxy(world, RECORDED_PATH);
+    let response = world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the proxy answered: {:?}", world.proxy_error));
+    assert_eq!(
+        response.status, 200,
+        "the exchange was not answered: {response:?}"
+    );
+}
+
+#[then("the HAR file carries one entry for that request")]
+async fn the_har_carries_one_entry(world: &mut TinmanWorld) {
+    let entries = support::har_entries(&har_path(world));
+    assert_eq!(
+        entries.len(),
+        1,
+        "the HAR carries {} entr(ies) rather than the one exchange that crossed the proxy",
+        entries.len()
+    );
+}
+
+#[then("the entry records the request method, the request URL and the response status")]
+async fn the_entry_records_method_url_and_status(world: &mut TinmanWorld) {
+    let url = upstream_url(world, RECORDED_PATH);
+    let entries = support::har_entries(&har_path(world));
+    let entry = entries.first().expect("the HAR carries the entry");
+    assert_eq!(entry.method, "GET", "the entry records the wrong method");
+    assert_eq!(entry.url, url, "the entry records the wrong URL");
+    assert_eq!(entry.status, 200, "the entry records the wrong status");
+}
+
+#[given("a HAR file carrying one recorded exchange")]
+async fn a_har_carrying_one_recorded_exchange(world: &mut TinmanWorld) {
+    let har = har_path(world);
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: Some(har.clone()),
+            fault: None,
+        },
+    );
+    cross_the_proxy(world, RECORDED_PATH);
+    world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the exchange was recorded: {:?}", world.proxy_error));
+    // The recording is closed before it is replayed from, so the replay reads a
+    // complete file rather than one still being written.
+    world.proxy.take().expect("the proxy started").stop();
+    let entries = support::har_entries(&har);
+    assert_eq!(
+        entries.len(),
+        1,
+        "the recording carries {} entr(ies) rather than one",
+        entries.len()
+    );
+    // Producing the recording meant one real exchange with the upstream, which
+    // is this step's own setup and not the request the scenario goes on to
+    // assert about. The log starts where the action does, the same way it does
+    // after the readiness probe.
+    world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .forget_received();
+    world.proxied = None;
+    world.proxy_error = None;
+}
+
+#[given("the upstream now answers that same request with a different body")]
+async fn the_upstream_now_answers_with_a_different_body(world: &mut TinmanWorld) {
+    // The upstream stays up and serving. Changing what it would answer is what
+    // makes the replay assertion falsifiable: a proxy that forwarded instead of
+    // replaying now returns a body the recording does not carry, and the
+    // scenario can tell the two apart.
+    world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .answer_with(UPSTREAM_CURRENT_BODY);
+}
+
+#[when("the same request is made")]
+async fn the_same_request_is_made(world: &mut TinmanWorld) {
+    let har = har_path(world);
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: Some(har),
+            fault: None,
+        },
+    );
+    cross_the_proxy(world, RECORDED_PATH);
+}
+
+#[when("a request the recording does not carry is made")]
+async fn a_request_the_recording_does_not_carry(world: &mut TinmanWorld) {
+    let har = har_path(world);
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: Some(har),
+            fault: None,
+        },
+    );
+    cross_the_proxy(world, "/unrecorded");
+}
+
+#[then("the recorded body is served rather than the upstream's current one")]
+async fn the_recorded_body_is_served(world: &mut TinmanWorld) {
+    let current = world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .body();
+    let response = world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the replay answered: {:?}", world.proxy_error));
+    assert_eq!(response.status, 200, "the replay served the wrong status");
+    assert_eq!(
+        response.body.trim(),
+        UPSTREAM_BODY,
+        "the replay served a body the recording does not carry"
+    );
+    assert_ne!(
+        response.body.trim(),
+        current.trim(),
+        "the replay served the upstream's current body rather than the recorded one"
+    );
+}
+
+#[then("the request fails naming the entry it did not match")]
+async fn the_request_fails_naming_the_entry(world: &mut TinmanWorld) {
+    // A miss is a failure the client can see, whether the proxy refuses the
+    // exchange outright or answers with an error naming it. Either way the
+    // request it could not match is what the failure has to name, so a reader of
+    // the failure knows which entry to record.
+    let named = match (world.proxied.as_ref(), world.proxy_error.as_ref()) {
+        (Some(response), _) => {
+            assert!(
+                response.status >= 400,
+                "the unmatched request was answered with {} rather than failing",
+                response.status
+            );
+            response.body.clone()
+        }
+        (None, Some(error)) => error.clone(),
+        (None, None) => panic!("the unmatched request neither answered nor failed"),
+    };
+    assert!(
+        named.contains("/unrecorded"),
+        "the failure does not name the entry it did not match: {named}"
+    );
+}
+
+#[given(expr = "the proxy is injecting the status {int}")]
+async fn the_proxy_is_injecting_the_status(world: &mut TinmanWorld, status: u16) {
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: None,
+            fault: Some(tinman::sandbox::Fault {
+                status: Some(status),
+                latency: None,
+                offline: false,
+            }),
+        },
+    );
+}
+
+#[given(expr = "the proxy is injecting a latency of {int} seconds")]
+async fn the_proxy_is_injecting_a_latency(world: &mut TinmanWorld, seconds: u64) {
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: None,
+            fault: Some(tinman::sandbox::Fault {
+                status: None,
+                latency: Some(format!("{seconds}s")),
+                offline: false,
+            }),
+        },
+    );
+}
+
+#[given("the proxy is injecting the offline fault")]
+async fn the_proxy_is_injecting_the_offline_fault(world: &mut TinmanWorld) {
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: None,
+            fault: Some(tinman::sandbox::Fault {
+                status: None,
+                latency: None,
+                offline: true,
+            }),
+        },
+    );
+}
+
+#[when("a request crosses the proxy")]
+async fn a_request_crosses_the_proxy(world: &mut TinmanWorld) {
+    cross_the_proxy(world, RECORDED_PATH);
+}
+
+#[then(expr = "the response carries the status {int}")]
+async fn the_response_carries_the_status(world: &mut TinmanWorld, status: u16) {
+    let response = world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the proxy answered: {:?}", world.proxy_error));
+    assert_eq!(
+        response.status, status,
+        "the proxy served {} rather than the injected status",
+        response.status
+    );
+}
+
+#[then("the upstream received no request")]
+async fn the_upstream_received_no_request(world: &mut TinmanWorld) {
+    let received = world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .received();
+    assert!(
+        received.is_empty(),
+        "the upstream received {} request(s) although the fault was to be served instead: \
+         {received:?}",
+        received.len()
+    );
+}
+
+#[then(expr = "the response arrives no sooner than {int} seconds after the request")]
+async fn the_response_arrives_no_sooner_than(world: &mut TinmanWorld, seconds: u64) {
+    let response = world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the proxy answered: {:?}", world.proxy_error));
+    let configured = std::time::Duration::from_secs(seconds);
+    assert!(
+        response.elapsed >= configured,
+        "the response arrived after {:?}, sooner than the injected latency of {configured:?}",
+        response.elapsed
+    );
+}
+
+#[then("the response carries the upstream's own body")]
+async fn the_response_carries_the_upstreams_body(world: &mut TinmanWorld) {
+    let expected = world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .body()
+        .to_string();
+    let response = world
+        .proxied
+        .as_ref()
+        .unwrap_or_else(|| panic!("the proxy answered: {:?}", world.proxy_error));
+    assert_eq!(
+        response.body.trim(),
+        expected,
+        "the delayed response did not carry the upstream's own body"
+    );
+}
+
+#[then("the connection is refused")]
+async fn the_connection_is_refused(world: &mut TinmanWorld) {
+    let error = world.proxy_error.as_ref().unwrap_or_else(|| {
+        panic!(
+            "the proxy answered rather than refusing the connection: {:?}",
+            world.proxied
+        )
+    });
+    assert!(
+        error.contains("refused") || error.contains("closed"),
+        "the connection failed for a reason other than refusal: {error}"
+    );
+}
+
+#[given(expr = "a sandbox specification setting network to {string}")]
+async fn spec_setting_network_to(world: &mut TinmanWorld, network: String) {
+    let mut spec = SandboxSpec::default_for_record();
+    spec.network = match network.as_str() {
+        "allow" => Network::Allow,
+        "deny" => Network::Deny,
+        "proxy" => Network::Proxy,
+        other => panic!("no sandbox network policy is named {other}"),
+    };
+    world.spec = Some(spec);
+}
+
+#[when("the specification is validated")]
+async fn the_specification_is_validated(world: &mut TinmanWorld) {
+    let spec = world.spec.as_ref().expect("a sandbox specification");
+    world.serialized = Some(to_json(spec));
+}
+
+#[then(expr = "the specification conforms to the {string} schema in {string}")]
+async fn the_specification_conforms_to_schema(
+    world: &mut TinmanWorld,
+    _schema_id: String,
+    path: String,
+) {
+    let instance = world
+        .serialized
+        .as_ref()
+        .expect("the specification was serialized");
+    let bad = support::schema_counterexamples(&path, instance);
+    assert!(bad.is_empty(), "schema violations: {bad:?}");
+}
+
+// ---------------------------------------------------------------------------
+// rule placement conformance
+// ---------------------------------------------------------------------------
+
+/// A feature file read for where its `Rule:` lines sit relative to its
+/// `Background:`.
+#[derive(Debug)]
+struct RulePlacement {
+    path: String,
+    /// The line numbers of every `Rule:` declared above the `Background:`. A
+    /// rule opens a block, so a background below one belongs to that rule
+    /// rather than to the feature, and any later rule then takes the scenarios
+    /// under it out of that background's scope.
+    rules_above_background: Vec<usize>,
+}
+
+/// Read every feature file under the specs directory for a rule declared after
+/// its background. The read is line-based on the Gherkin keywords, which is
+/// what the parser itself keys on, so the check sees the file the way the
+/// runner does.
+fn rule_placements() -> Vec<RulePlacement> {
+    let specs = std::path::Path::new("features");
+    let mut placements = Vec::new();
+    let entries = std::fs::read_dir(specs).expect("the specs directory is readable");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("feature") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("the feature file is readable");
+        let mut background: Option<usize> = None;
+        let mut rules_seen = Vec::new();
+        let mut rules_above_background = Vec::new();
+        for (index, line) in source.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("Rule:") {
+                rules_seen.push(index + 1);
+                continue;
+            }
+            if background.is_none() && trimmed.starts_with("Background:") {
+                background = Some(index + 1);
+                rules_above_background = rules_seen.clone();
+            }
+        }
+        if background.is_some() {
+            placements.push(RulePlacement {
+                path: path.display().to_string(),
+                rules_above_background,
+            });
+        }
+    }
+    placements
+}
+
+#[given("the feature files in the specs")]
+async fn the_feature_files_in_the_specs(world: &mut TinmanWorld) {
+    world.rule_placements = Some(rule_placements());
+}
+
+#[when("each feature carrying a background is read for a rule declared above it")]
+async fn each_feature_read_for_a_rule_above_its_background(world: &mut TinmanWorld) {
+    // The read happened when the features were gathered; this step names the
+    // action the scenario describes so the assertion below reads what it says.
+    world
+        .rule_placements
+        .as_ref()
+        .expect("the feature files were read");
+}
+
+#[then("every background is declared before any rule")]
+async fn every_background_is_declared_before_any_rule(world: &mut TinmanWorld) {
+    let placements = world
+        .rule_placements
+        .as_ref()
+        .expect("the feature files were read");
+    let offenders: Vec<String> = placements
+        .iter()
+        .filter(|placement| !placement.rules_above_background.is_empty())
+        .map(|placement| {
+            format!(
+                "{} declares its background below rule(s) at line(s) {:?}",
+                placement.path, placement.rules_above_background
+            )
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "a background declared below a rule belongs to that rule rather than to the feature, so \
+         a later rule takes the scenarios under it out of scope and leaves their given state \
+         unprovisioned: {offenders:?}"
+    );
+}
+
+#[then("the features read are not empty")]
+async fn the_features_read_are_not_empty(world: &mut TinmanWorld) {
+    let placements = world
+        .rule_placements
+        .as_ref()
+        .expect("the feature files were read");
+    // The floor guards the reader: a listing that found nothing and a tree with
+    // no backgrounds both report zero, and only one of those is a clean bill.
+    assert!(
+        !placements.is_empty(),
+        "no feature carrying a background was read, so the check asserted nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// proxied egress under the sandbox
+// ---------------------------------------------------------------------------
+
+/// The inference credential Tinman holds. One value serves both directions a
+/// scenario asserts, that the sandbox never saw it and that the upstream did,
+/// so a leak names itself.
+const HELD_CREDENTIAL: &str = "sk-tinman-held-credential";
+
+/// Run `script` as the sandboxed target under the staged specification and
+/// capture what it wrote, so what the target observed is read off its own
+/// output rather than from the configuration it was launched with.
+fn run_sandboxed_target(world: &mut TinmanWorld, script: &str) {
+    let spec = world.spec.clone().expect("a sandbox specification");
+    let command = CommandSpec {
+        program: "/bin/sh".to_string(),
+        args: vec!["-c".to_string(), script.to_string()],
+    };
+    let prepared = staged_backend(world)
+        .prepare(&spec, &command)
+        .expect("the Bubblewrap backend prepares the process");
+    world.screen = Some(tinman::pty::capture(&prepared).expect("the process is captured"));
+    world.prepared = Some(prepared);
+}
+
+/// Stage the proxy and the sandbox specification a plan names, reading the
+/// section through the production parser so the policy the plan states is the
+/// one the backend is handed.
+fn stage_proxied_plan(world: &mut TinmanWorld, network: &str) {
+    start_proxy(
+        world,
+        tinman::sandbox::Egress {
+            har: None,
+            fault: None,
+        },
+    );
+    world
+        .plan_sources
+        .push(format!("home: empty\nnetwork: {network}\n"));
+    world.spec = Some(sandbox_section(world));
+}
+
+#[given(expr = "a plan whose sandbox sets network to {string}")]
+async fn a_plan_whose_sandbox_sets_network_to(world: &mut TinmanWorld, network: String) {
+    stage_proxied_plan(world, &network);
+}
+
+#[when("the target requests the allowed host directly by address")]
+async fn the_target_requests_the_allowed_host_directly(world: &mut TinmanWorld) {
+    let url = upstream_url(world, RECORDED_PATH);
+    let proxy = world
+        .proxy
+        .as_ref()
+        .expect("the proxy started")
+        .address()
+        .to_string();
+    // Both routes are attempted in the one sandbox, so the outcome the policy
+    // must refuse and the outcome it must allow are read from a single run and
+    // cannot disagree about which sandbox produced them.
+    let script = format!(
+        "if /bin/curl -s -m 5 -o /dev/null {url}; then echo DIRECT_ANSWERED; else echo DIRECT_REFUSED; fi; \
+         if /bin/curl -s -m 5 -o /dev/null -x http://{proxy} {url}; then echo PROXIED_ANSWERED; else echo PROXIED_REFUSED; fi"
+    );
+    run_sandboxed_target(world, &script);
+}
+
+#[then("the direct request is refused")]
+async fn the_direct_request_is_refused(world: &mut TinmanWorld) {
+    let screen = world.screen.as_ref().expect("a captured virtual screen");
+    let contents = screen.contents();
+    // The target reports both outcomes, so an absent verdict is a target that
+    // never ran rather than a refusal, and it fails as loudly as a breach.
+    assert!(
+        contents.contains("DIRECT_REFUSED") || contents.contains("DIRECT_ANSWERED"),
+        "the sandboxed target reported no verdict on the direct request; screen:\n{contents}"
+    );
+    assert!(
+        contents.contains("DIRECT_REFUSED"),
+        "the sandboxed target reached the allowed host directly rather than being refused; \
+         screen:\n{contents}"
+    );
+}
+
+#[then("the same request through the proxy is answered")]
+async fn the_same_request_through_the_proxy_is_answered(world: &mut TinmanWorld) {
+    let screen = world.screen.as_ref().expect("a captured virtual screen");
+    let contents = screen.contents();
+    assert!(
+        contents.contains("PROXIED_ANSWERED"),
+        "the sandboxed target's request through the proxy was not answered; screen:\n{contents}"
+    );
+}
+
+#[given(
+    expr = "a plan whose sandbox sets network to {string} and an inference credential held by Tinman"
+)]
+async fn a_plan_with_network_and_a_held_credential(world: &mut TinmanWorld, network: String) {
+    // The credential is held in Tinman's own environment, which is what the
+    // backend reads, and is never granted into the sandbox. That is the whole
+    // of "held by Tinman": present where Tinman runs, absent where the target
+    // runs.
+    world
+        .handed_env
+        .get_or_insert_with(std::collections::BTreeMap::new)
+        .insert("TINMAN_API_KEY".to_string(), HELD_CREDENTIAL.to_string());
+    stage_proxied_plan(world, &network);
+}
+
+#[when("the target prints its whole environment and then calls the provider")]
+async fn the_target_prints_its_environment_and_calls_the_provider(world: &mut TinmanWorld) {
+    let url = upstream_url(world, RECORDED_PATH);
+    let proxy = world
+        .proxy
+        .as_ref()
+        .expect("the proxy started")
+        .address()
+        .to_string();
+    // `export -p` is a shell builtin, so the environment is read without a
+    // binary the sandbox would also have to grant.
+    let script = format!(
+        "export -p; echo ENV_PRINTED; /bin/curl -s -m 5 -o /dev/null -x http://{proxy} {url}"
+    );
+    run_sandboxed_target(world, &script);
+}
+
+#[then("the printed environment carries no inference credential")]
+async fn the_printed_environment_carries_no_credential(world: &mut TinmanWorld) {
+    let screen = world.screen.as_ref().expect("a captured virtual screen");
+    let contents = screen.contents();
+    // The marker proves the environment was actually printed, so an empty
+    // capture cannot pass as an absent credential.
+    assert!(
+        contents.contains("ENV_PRINTED"),
+        "the sandboxed target never printed its environment; screen:\n{contents}"
+    );
+    assert!(
+        !contents.contains(HELD_CREDENTIAL),
+        "the inference credential {HELD_CREDENTIAL} reached the sandbox; screen:\n{contents}"
+    );
+}
+
+#[then("the request the upstream received carries the credential")]
+async fn the_request_the_upstream_received_carries_the_credential(world: &mut TinmanWorld) {
+    let received = world
+        .upstream
+        .as_ref()
+        .expect("the upstream started")
+        .received();
+    let request = received.first().unwrap_or_else(|| {
+        panic!("the upstream received no request, so nothing carried the credential")
+    });
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|header| header.contains(HELD_CREDENTIAL)),
+        "the {} request the upstream received for {} carries no inference credential; its headers \
+         are {:?}",
+        request.method,
+        request.path,
+        request.headers
+    );
 }
