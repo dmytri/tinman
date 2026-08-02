@@ -8,7 +8,7 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 **The deck is at rest. 0.4.0 is shipped and verified on all three targets. There is no work in flight.**
 
-Run the Opening retrieval and believe it over this. State at close, 2026-08-02: the release is tagged `v0.4.0`, tree clean, **level with `origin/main`**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing.
+Run the Opening retrieval and believe it over this. State at close, 2026-08-02: the release is tagged `v0.4.0`, tree clean, **one commit ahead of `origin/main` and unpushed**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing. The operator has not been asked to approve the push at the time of writing, so an unpushed commit here is pending approval rather than a fault.
 
 **These notes name no HEAD hash, and that is deliberate rather than an omission.** Every earlier close recorded one, and every one was false within the minute, because the commit carrying the notes moves HEAD past whatever the notes just claimed. A hash here is wrong by construction. The tag is stable and the retrieval answers the rest.
 
@@ -16,7 +16,13 @@ Run the Opening retrieval and believe it over this. State at close, 2026-08-02: 
 
 Sailed from `d22bcfe` on the operator's "all of the above": the four open items plus the proxy slice, whole per the never-split ruling. Twelve targets, twelve green, then harbour, which wrote **zero** `@captain` skeletons and found no policy violation. Every tier green at close: `@logic` 271, `@sandbox` 100, `@inference` 2. Planks 804 against 777 patterns, 0 stale, 0 provisional.
 
-**One item open and it is the whole list.** `AGENTS.md`'s own durable-prose rules are largely unenforced: citation resolution is checked, but the watchbill-reference rule and the count rule have no derived check, so a sentence decaying either way passes silently, which is how that file rotted three times in one day. **The watchbill-reference rule is mechanically checkable** by scanning shipped Markdown for membership claims; the count rule almost certainly is not, and saying so is better than a filter that cannot identify its subject. Boatswain also flagged one marginal case already in the tree: the hudsucker download figures carry no date in their own sentence and lean on the section's framing. Next voyage, Captain authors the check.
+**That item is closed, and the closing corrected the note that opened it.** The watchbill-reference rule now has a check, `features/methodology-conformance.feature:no shipped document claims a scenario it names is on a watchbill`. The count rule is declined in that scenario's own `Rule:` prose rather than left open, which is where the decline belongs, since `AGENTS.md` is Shipwright's file.
+
+**The note said "scan shipped Markdown for membership claims" and that filter would have found nothing while reddening nine correct sentences.** Every mention of the watchbill in the shipped set is the rule, its reasoning, or the settled condemnation. What made it checkable was reading the two sentences that actually rotted out of `git log` instead of imagining what a fault looks like: both said "on the watchbill" **beside a backticked scenario citation**, where the rule's own definition speaks of a scenario generically. Two conditions, not one. `AGENTS.md:38` is the near miss that proves the pair is load-bearing, carrying a real reference beside the word and claiming nothing.
+
+**The count rule was declined on a measurement, not a hunch.** Thirty-six bare integers in the shipped set on 2026-08-02, being status codes, byte counts, sweep timings, package deltas and versions. Telling a live count from a dated measurement means reading which date governs a sentence, which is discourse rather than a line. The hudsucker download figures are the standing marginal case, their date in a neighbouring sentence.
+
+**Captain caught itself committing the fault while writing the paragraph declining to check it**: the first draft said "thirty-six bare integers" undated. The exemption is a date, and it is easy to agree with and easy to miss in the sentence.
 
 **Two facts to carry rather than rediscover.** `pasta` is installed from Ubuntu noble/universe at `0.0~git20240220.1e6f92b-1`, a 2024 snapshot whose binary reports no version of its own; if a seam needs something it lacks, building from source is the fallback. And the three held dependency versions, the `@logic` budget ruling, and the hudsucker decision are all recorded in `AGENTS.md` under Settled decisions, each closing on a repeating-a-settled-decision clause. Do not re-derive them here.
 
