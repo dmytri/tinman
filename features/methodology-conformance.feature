@@ -192,7 +192,7 @@ Feature: methodology conformance
 
   Rule: the budget check reads a whole-tier wall clock, so it can say a tier outran its ceiling and never say which scenarios spent it. Amortizing a fixture is only worth spending on the scenarios that carry the cost, and picking them without measurement is the guess this project keeps paying for. So the ceiling and the attribution are two checks: one says the suite has outgrown its budget, the other says where the time went.
 
-  Rule: this was recorded as needing a bespoke writer, and that was wrong. The runner ships junit and json writers, both carrying per-scenario timing behind a feature flag, so the measurement is a wiring job. Naming the correction here because the false claim is what deferred the work: a cost believed unmeasurable is a cost nobody measures.
+  Rule: this was recorded as needing a bespoke writer, and that was wrong twice over. The runner's own shipped writers do carry per-scenario timing, so no bespoke writer was ever owed. Each of them also pulls new crates, so neither is the route taken here, and the measurement costs no dependency at all. The correction is named because the false claim is what deferred the work, and a cost believed unmeasurable is a cost nobody measures.
 
   Rule: the record holds every run, and only some of them are sweeps. The concurrency check above runs generated fixtures through the same recorder, so a reader taking whichever complete run came last can attest four fixture scenarios while reporting on a tier. It passes either way, which is why the substitution never announces itself and why the sweep is identified rather than assumed.
 

@@ -6,9 +6,15 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**The deck is at rest. 0.4.0 is shipped and verified on all three targets. There is no work in flight.**
+**The deck is at rest and the work is unpushed. 0.4.0 is the last release; the tree is well past it.**
 
-Run the Opening retrieval and believe it over this. State at close, 2026-08-02: the release is tagged `v0.4.0`, tree clean, **one commit ahead of `origin/main` and unpushed**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing. The operator has not been asked to approve the push at the time of writing, so an unpushed commit here is pending approval rather than a fault.
+Run the Opening retrieval and believe it over this. State at close, 2026-08-02: tree clean, harbour inventory complete, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing, all three tiers green and inside their budgets. Several commits sit ahead of `origin/main`, unpushed, because outbound is the one call doctrine reserves for the operator and it was never given. That is pending approval rather than a fault.
+
+**A release owes one version bump covering two schema changes**, and the second is easy to miss because the first hides it: `harness-plan.schema.json` gained the locator form of `expect` and then a `conforms` step. Every published schema URI moves with the bump, per the coupling `AGENTS.md` records under Releases.
+
+**What landed after 0.4.0, in one line each.** A command-line surface that asks questions of a running program: `launch`, `press`, `expect`, `close`, with `--after` to reach a state through a plan and `--output` to write what held back out as one. Layout attestation, `expect --conforms`, which attests the whole model against a JSON Schema so a program drawing the right things in the wrong places fails where every text expectation still holds. A `press` that submits the key, which it never did. The `man` panic replaced by the diagnostic the parser already held. Per-scenario timing, recorded for the first time. And the declared worker count made real: `@sandbox` 128.5s to 108.3s, `@logic` 89.9s to 78.9s, ceiling untouched.
+
+**Standing verification debt, named by QM and worth the next budget breach's attention.** Only the `run_tinman` path yields to the executor; the PTY and driver waits still block it, so `@sandbox` remains largely serial and sits at 108s against a 120s ceiling. The remaining speedup is real and unclaimed.
 
 **These notes name no HEAD hash, and that is deliberate rather than an omission.** Every earlier close recorded one, and every one was false within the minute, because the commit carrying the notes moves HEAD past whatever the notes just claimed. A hash here is wrong by construction. The tag is stable and the retrieval answers the rest.
 
