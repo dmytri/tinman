@@ -50,6 +50,14 @@ Feature: command surface
     Then every one is emitted
     And the cross-references read are not empty
 
+  Rule: the parser and the man path hold two answers to one condition, and the operator meets the worse one. A command name the parser does not accept already has a diagnostic sentence written for it, and the man path aborts with a backtrace instead of returning that sentence. A packager piping the page into a build meets the same crash. The product already knows what to say here, so saying it is the whole of the fix.
+
+  Scenario: man refuses a command name the parser does not accept
+    When the operator executes "tinman man wormhole"
+    Then the command exits with a non-zero status
+    And the error stream reports Tinman has no "wormhole" command
+    And the error stream carries no panic
+
   Scenario: completions emits a script for the shell named
     When the operator runs "tinman completions bash" with stdout redirected to a file
     Then the output is a completion script naming "tinman"

@@ -56,6 +56,7 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator records {string} to that file with the streams captured separately")
 /// @planks("the Tinman driver is running")
 /// @planks("the operator starts the driver")
+/// @planks("the error stream reports Tinman has no {string} command")
 fn main() {
     let cli = Cli::parse();
     if cli.help || matches!(cli.command, Some(Command::Help)) {
@@ -248,12 +249,13 @@ fn main() {
             // A cross-reference is a claim that the page exists, so every
             // `tinman-<command>(1)` the page prints is one the binary writes.
             let man = match &command {
-                Some(name) => clap_mangen::Man::new(
-                    root.find_subcommand(name)
-                        .unwrap_or_else(|| panic!("tinman has no {name:?} command"))
-                        .clone(),
-                )
-                .title(format!("tinman-{name}")),
+                Some(name) => {
+                    let Some(subcommand) = root.find_subcommand(name) else {
+                        eprintln!("tinman has no {name:?} command");
+                        std::process::exit(1);
+                    };
+                    clap_mangen::Man::new(subcommand.clone()).title(format!("tinman-{name}"))
+                }
                 None => clap_mangen::Man::new(root),
             };
             let mut page = Vec::new();

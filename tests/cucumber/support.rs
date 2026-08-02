@@ -1326,6 +1326,29 @@ pub fn run_tinman(
     }
 }
 
+/// The same run, awaited rather than blocked on.
+///
+/// The runner polls every scenario future on one executor thread, so a step
+/// body that blocks that thread holds every scenario beside it and a worker
+/// count above one buys nothing. Handing the blocking work to a blocking thread
+/// and awaiting it lets the executor poll the scenarios that are waiting on
+/// their own processes, which is what makes the worker count real.
+///
+/// The arguments arrive owned because the work outlives this call's borrow.
+pub async fn run_tinman_awaited(
+    dir: std::path::PathBuf,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    stdout_file: Option<std::path::PathBuf>,
+) -> std::io::Result<RunOutcome> {
+    tokio::task::spawn_blocking(move || {
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_tinman(&dir, &borrowed, &env, stdout_file.as_deref())
+    })
+    .await
+    .expect("the tinman run finishes rather than being cancelled")
+}
+
 /// A running `tinman driver` process, spoken to over its real stdin and stdout
 /// with one JSON message per line, exactly as a test runner in any language
 /// would drive it. Every message exchanged is kept, so a scenario can attest
@@ -5563,6 +5586,308 @@ pub fn recorded_sweeps(rigging: &str) -> Vec<RecordedSweep> {
             })
         })
         .collect()
+}
+
+/// The environment variable naming the directory or file the suite runs its
+/// features from. The tiers leave it unset and sweep the specs directory; the
+/// concurrency measurement sets it to a generated fixture so it can run the
+/// suite against four scenarios of its own choosing.
+pub const FEATURE_ROOT_VARIABLE: &str = "TINMAN_FEATURES";
+
+/// How long each fixture scenario's sandboxed process sleeps.
+///
+/// The measurement needs scenarios whose wall clock is dominated by waiting on
+/// a real process rather than by starting one. Two seconds is long enough that
+/// the launch cost is a small fraction of it and short enough that the serial
+/// arm of the comparison stays inside the tier's budget.
+pub const FIXTURE_SLEEP_SECONDS: u64 = 2;
+
+/// What the fixture asserts about each sandboxed run.
+///
+/// The exit status is asserted rather than the screen, because inspect reads a
+/// program two ways and which way it reads this one is a race the measurement
+/// must not inherit. A program that exits inside `inspect`'s exit deadline has
+/// its whole output stream read, where a line of plain text is a region; one
+/// still running at that deadline has its drawn screen read instead, where the
+/// same plain text is no region at all. A sandboxed sleep sits near that
+/// deadline by construction, and concurrency moves it across, so an assertion
+/// on the output would redden precisely when four workers started overlapping.
+/// The exit status is zero down both paths.
+const FIXTURE_ASSERTION: &str = "the command exits with a zero status";
+
+/// How many scenarios the concurrency fixture carries. The scenario naming this
+/// count in its own text is what the fixture is written to satisfy, so the two
+/// are kept in one place.
+pub const FIXTURE_SCENARIO_COUNT: usize = 4;
+
+/// Write the concurrency fixture into `dir` and report the file written.
+///
+/// Every step the fixture uses is one the specs already bind, so the fixture
+/// adds no step definition and reaches the same support seam a sandboxed
+/// scenario reaches. A fixture with a private step of its own could be made to
+/// yield while the real tier still blocked, and the measurement would then
+/// describe the fixture rather than the suite.
+///
+/// It is generated rather than kept in the tree because a `.feature` file under
+/// the specs directory is a durable product contract, and this is neither: it
+/// is verification support that exists for the length of one scenario.
+pub fn write_concurrency_fixture(dir: &std::path::Path) -> std::path::PathBuf {
+    let mut text = String::from(
+        "Feature: runner concurrency fixture\n\
+         \n\
+           Rule: each scenario below blocks on a real sandboxed process, so the\n\
+         wall clock of a run over them reports what the runner overlaps.\n\
+         \n",
+    );
+    for ordinal in ["first", "second", "third", "fourth"] {
+        text.push_str(&format!(
+            "  Scenario: the {ordinal} scenario blocks on a sandboxed process\n    \
+             When the operator inspects the command \"sh -c 'sleep {FIXTURE_SLEEP_SECONDS}'\"\n    \
+             Then {FIXTURE_ASSERTION}\n\n"
+        ));
+    }
+    let path = dir.join("concurrency.feature");
+    std::fs::write(&path, text).unwrap_or_else(|e| {
+        panic!(
+            "the concurrency fixture {} was not written: {e}",
+            path.display()
+        )
+    });
+    path
+}
+
+/// What one run of the suite over a feature root observed: the wall clock it
+/// took and everything it wrote.
+#[derive(Debug)]
+pub struct FixtureRun {
+    pub elapsed: std::time::Duration,
+    pub output: String,
+}
+
+/// Run this same suite binary over `features` at `workers` concurrent
+/// scenarios, and report the wall clock it took.
+///
+/// The binary already built is re-executed rather than a fresh `cargo test`
+/// invocation, so the measurement carries no build and no contention on the
+/// build lock the running suite already holds.
+///
+/// The tag filter is cleared for the child. A sweep exports one, the fixture
+/// scenarios carry no tag, and a filter inherited from the parent would select
+/// none of them: both arms would then measure an empty run and their ratio
+/// would report concurrency nobody exercised.
+pub fn run_suite_over(features: &std::path::Path, workers: usize) -> FixtureRun {
+    let binary = std::env::current_exe().expect("the running suite binary is named");
+    let mut command = std::process::Command::new(binary);
+    command
+        .arg("-c")
+        .arg(workers.to_string())
+        .env(FEATURE_ROOT_VARIABLE, features)
+        .env_remove("CUCUMBER_FILTER_TAGS");
+    let started = std::time::Instant::now();
+    let output = command
+        .output()
+        .expect("the suite binary runs over the concurrency fixture");
+    let elapsed = started.elapsed();
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "the concurrency fixture did not pass at {workers} worker(s); it reported:\n{text}"
+    );
+    FixtureRun {
+        elapsed,
+        output: text,
+    }
+}
+
+/// The wake record the runner appends each scenario's own wall clock to.
+///
+/// The weather record carries one line per tier sweep, so it says a tier outran
+/// its ceiling and never says which scenarios spent it. This record carries the
+/// attribution. It is named here rather than in the rigging because the rigging
+/// names the wake records a role outside verification reads, and Shipwright
+/// reads this one at the harbour economy audit, so a `durations` key under
+/// `## Tiers` is owed there before that harbour opens.
+pub const DURATIONS_RECORD: &str = "target/tinman-durations.jsonl";
+
+/// This process's run identifier, so the entries of one sweep are told from
+/// another's in an append-only record. A pid repeats on a long-lived machine,
+/// so the moment the process started is carried beside it.
+pub fn current_run_id() -> &'static str {
+    static RUN_ID: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_millis())
+            .unwrap_or_default();
+        format!("{}-{started}", std::process::id())
+    });
+    &RUN_ID
+}
+
+/// The key a scenario is recorded under: the spec carrying it, the line it sits
+/// on, and its name. The line is carried because a `Scenario Outline` expands to
+/// one scenario per example row and every row shares the outline's name, so the
+/// name alone names several scenarios.
+pub fn scenario_key(
+    feature: &cucumber::gherkin::Feature,
+    scenario: &cucumber::gherkin::Scenario,
+) -> String {
+    let spec = feature
+        .path
+        .as_ref()
+        .map_or_else(|| feature.name.clone(), |path| path.display().to_string());
+    format!("{spec}:{}:{}", scenario.position.line, scenario.name)
+}
+
+/// The scenario starts this run has seen and not yet timed. Concurrent
+/// scenarios sharing a key are paired last in first out: which instance a
+/// duration is attributed to is arbitrary there, and the set of durations the
+/// record carries is the same either way.
+static SCENARIO_STARTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+> = std::sync::LazyLock::new(std::sync::Mutex::default);
+
+/// Append one line to the durations record, whole.
+///
+/// A failure to write is left to the check that reads the record rather than
+/// raised here: a wake write that cannot land empties the record, and the
+/// scenario watching the record is what reports it. Failing the scenario that
+/// happened to be running would name the wrong subject and take the suite with
+/// it.
+fn append_duration_line(line: &str) {
+    use std::io::Write as _;
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(parent) = std::path::Path::new(DURATIONS_RECORD).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(DURATIONS_RECORD)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{line}");
+}
+
+/// Record that a scenario started, before it runs. A scenario the runner started
+/// and never timed is a gap a reader can see; an unrecorded start is an absence
+/// nothing can.
+pub fn record_scenario_started(key: &str) {
+    SCENARIO_STARTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(key.to_string())
+        .or_default()
+        .push(std::time::Instant::now());
+    append_duration_line(
+        &serde_json::json!({ "run": current_run_id(), "scenario": key, "started": true })
+            .to_string(),
+    );
+}
+
+/// Record how long a scenario took, in the wall clock the run itself observed.
+pub fn record_scenario_finished(key: &str) {
+    let started = SCENARIO_STARTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_mut(key)
+        .and_then(Vec::pop);
+    let Some(started) = started else {
+        return;
+    };
+    let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    append_duration_line(
+        &serde_json::json!({ "run": current_run_id(), "scenario": key, "ms": ms }).to_string(),
+    );
+}
+
+/// Record that the run itself reached its end, so a reader tells a sweep that
+/// finished from one that was killed part way. A killed run leaves scenarios it
+/// never reached, and judging it would redden the attribution check for a fault
+/// that is the kill rather than the record.
+pub fn record_run_complete() {
+    append_duration_line(
+        &serde_json::json!({ "run": current_run_id(), "complete": true }).to_string(),
+    );
+}
+
+/// One run the durations record carries: the scenarios it started, the wall
+/// clock each of them took, and whether the run reached its end.
+#[derive(Debug, Clone, Default)]
+pub struct RecordedDurations {
+    pub run: String,
+    pub complete: bool,
+    pub started: Vec<String>,
+    pub timed: Vec<(String, u64)>,
+}
+
+impl RecordedDurations {
+    /// The scenarios this run started and recorded no duration for, each named
+    /// once per start the record left unpaired.
+    pub fn missing_durations(&self) -> Vec<String> {
+        let mut outstanding: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for key in &self.started {
+            *outstanding.entry(key.as_str()).or_default() += 1;
+        }
+        for (key, _) in &self.timed {
+            if let Some(count) = outstanding.get_mut(key.as_str()) {
+                *count = count.saturating_sub(1);
+            }
+        }
+        let mut missing: Vec<String> = outstanding
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .flat_map(|(key, count)| std::iter::repeat_n(key.to_string(), count))
+            .collect();
+        missing.sort();
+        missing
+    }
+}
+
+/// Every run the durations record carries, in the order the record names them.
+/// The record is the wake, so it is absent on a fresh clone where no sweep has
+/// run yet, and an absent record reads as no run rather than as a fault.
+pub fn recorded_durations() -> Vec<RecordedDurations> {
+    let Ok(text) = std::fs::read_to_string(DURATIONS_RECORD) else {
+        return Vec::new();
+    };
+    let mut runs: Vec<RecordedDurations> = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|e| {
+            panic!("the durations record {DURATIONS_RECORD} carries a line that is no entry: {e}\n{line}")
+        });
+        let Some(run) = entry.get("run").and_then(serde_json::Value::as_str) else {
+            panic!(
+                "the durations record {DURATIONS_RECORD} carries an entry naming no run:\n{line}"
+            );
+        };
+        let index = runs.iter().position(|carried| carried.run == run);
+        let index = index.unwrap_or_else(|| {
+            runs.push(RecordedDurations {
+                run: run.to_string(),
+                ..RecordedDurations::default()
+            });
+            runs.len() - 1
+        });
+        let carried = &mut runs[index];
+        let scenario = entry.get("scenario").and_then(serde_json::Value::as_str);
+        if entry.get("complete").and_then(serde_json::Value::as_bool) == Some(true) {
+            carried.complete = true;
+        } else if let (Some(key), Some(ms)) = (
+            scenario,
+            entry.get("ms").and_then(serde_json::Value::as_u64),
+        ) {
+            carried.timed.push((key.to_string(), ms));
+        } else if let Some(key) = scenario {
+            carried.started.push(key.to_string());
+        }
+    }
+    runs
 }
 
 /// One enumeration a scantling declares: the scantling declaring it, the JSON

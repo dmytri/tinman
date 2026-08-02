@@ -138,6 +138,17 @@ struct TinmanWorld {
     tier_budgets: Option<Vec<support::TierBudget>>,
     recorded_sweeps: Option<Vec<support::RecordedSweep>>,
     over_budget_sweeps: Option<Vec<String>>,
+    // the generated concurrency fixture, held so it outlives the runs that read
+    // it and is reclaimed with the scenario, and the wall clock each arm of the
+    // comparison observed
+    fixture_dir: Option<support::ScratchDir>,
+    fixture_features: Option<std::path::PathBuf>,
+    one_worker_run: Option<support::FixtureRun>,
+    four_worker_run: Option<support::FixtureRun>,
+    // the sweep whose per-scenario durations the wake carries, and the
+    // scenarios that sweep started without recording one
+    sweep_durations: Option<support::RecordedDurations>,
+    scenarios_missing_durations: Option<Vec<String>>,
     // published scantling contracts: the dialect-declaring scantlings, what the
     // meta-schema said of each, the packaged version, and the URIs consumers
     // fetch
@@ -921,7 +932,7 @@ async fn the_operator_inspects_a_command_writing_into_the_working_directory(
     text: String,
 ) {
     let command = writes_into_its_working_directory(&name, &text);
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[when(
@@ -961,7 +972,7 @@ async fn the_operator_runs_that_plan(world: &mut TinmanWorld) {
     let path = working_dir(world).join("plan.yaml");
     std::fs::write(&path, &source)
         .unwrap_or_else(|e| panic!("the plan {} was not written: {e}", path.display()));
-    run_tinman_command(world, &["test", &path.to_string_lossy()]);
+    run_tinman_command(world, &["test", &path.to_string_lossy()]).await;
 }
 
 #[then("the plan passes")]
@@ -981,7 +992,7 @@ async fn the_operator_inspects_a_command_printing_the_contents_of(
     name: String,
 ) {
     let command = format!("exec 2>&-; cat {name}");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -7927,7 +7938,7 @@ async fn the_operator_tests_that_plan(world: &mut TinmanWorld) {
     let path = dir.join("plan.yaml");
     std::fs::write(&path, &source)
         .unwrap_or_else(|e| panic!("the plan {} was not written: {e}", path.display()));
-    run_tinman_command(world, &["test", &path.to_string_lossy()]);
+    run_tinman_command(world, &["test", &path.to_string_lossy()]).await;
 }
 
 #[when("the operator tests that plan with the streams captured separately")]
@@ -7940,7 +7951,7 @@ async fn the_operator_tests_that_plan_with_streams_separated(world: &mut TinmanW
     let path = dir.join("plan.yaml");
     std::fs::write(&path, &source)
         .unwrap_or_else(|e| panic!("the plan {} was not written: {e}", path.display()));
-    run_tinman_command(world, &["test", &path.to_string_lossy()]);
+    run_tinman_command(world, &["test", &path.to_string_lossy()]).await;
 }
 
 #[given(expr = "no file named {string} exists")]
@@ -7955,7 +7966,7 @@ async fn no_file_named_exists(world: &mut TinmanWorld, name: String) {
 
 #[when(expr = "the operator tests the plan {string}")]
 async fn the_operator_tests_the_plan_named(world: &mut TinmanWorld, name: String) {
-    run_tinman_command(world, &["test", &name]);
+    run_tinman_command(world, &["test", &name]).await;
 }
 
 #[given("a plan file that is not valid YAML")]
@@ -8009,6 +8020,32 @@ async fn the_error_stream_reports_the_step_expecting(world: &mut TinmanWorld, te
     );
 }
 
+#[then(expr = "the error stream reports Tinman has no {string} command")]
+async fn the_error_stream_reports_no_such_command(world: &mut TinmanWorld, name: String) {
+    let reported = run_errors(world);
+    assert!(
+        reported.contains(name.as_str()),
+        "the error stream does not name the refused command {name:?}; it reads:\n{reported}"
+    );
+    // The refusal is read by its sense rather than by one wording, so the
+    // parser's own sentence and a sentence the man path returns both satisfy
+    // it, and neither is dictated here.
+    let lowered = reported.to_lowercase();
+    assert!(
+        lowered.contains("unrecognized") || lowered.contains("has no"),
+        "the error stream names {name:?} without reporting Tinman has no such command; it reads:\n{reported}"
+    );
+}
+
+#[then("the error stream carries no panic")]
+async fn the_error_stream_carries_no_panic(world: &mut TinmanWorld) {
+    let reported = run_errors(world);
+    assert!(
+        !reported.contains("panicked"),
+        "the error stream carries a panic where a reported failure belongs; it reads:\n{reported}"
+    );
+}
+
 #[then("the data stream carries nothing")]
 async fn the_data_stream_carries_nothing(world: &mut TinmanWorld) {
     let data = run_output(world);
@@ -8020,10 +8057,17 @@ async fn the_data_stream_carries_nothing(world: &mut TinmanWorld) {
 
 /// Run the real `tinman` binary in the scenario's working directory, keeping
 /// what it wrote and the status it left.
-fn run_tinman_command(world: &mut TinmanWorld, args: &[&str]) {
+///
+/// The run is awaited rather than blocked on, so the scenarios beside this one
+/// keep being polled while this one waits on its process. Blocking here holds
+/// the single executor thread the runner polls every scenario on, which is what
+/// made a worker count above one buy nothing.
+async fn run_tinman_command(world: &mut TinmanWorld, args: &[&str]) {
     let dir = working_dir(world);
     let env = configured_env(world);
-    let outcome = support::run_tinman(&dir, args, &env, None)
+    let owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let outcome = support::run_tinman_awaited(dir, owned, env, None)
+        .await
         .unwrap_or_else(|e| panic!("the tinman binary did not run: {e}"));
     world.run_stdout = Some(outcome.stdout);
     world.run_stderr = Some(outcome.stderr);
@@ -8051,19 +8095,19 @@ async fn the_operator_inspects_the_fixture(world: &mut TinmanWorld) {
     // relatively rather than by an absolute path the sandbox cannot reach.
     let workspace = working_dir(world);
     let program = support::stage_fixture_in(&workspace);
-    run_tinman_command(world, &["inspect", &program]);
+    run_tinman_command(world, &["inspect", &program]).await;
 }
 
 #[when("the operator inspects the fixture terminal program as JSON")]
 async fn the_operator_inspects_the_fixture_as_json(world: &mut TinmanWorld) {
     let workspace = working_dir(world);
     let program = support::stage_fixture_in(&workspace);
-    run_tinman_command(world, &["inspect", &program, "--json"]);
+    run_tinman_command(world, &["inspect", &program, "--json"]).await;
 }
 
 #[when(expr = "the operator inspects the command {string}")]
 async fn the_operator_inspects_the_command(world: &mut TinmanWorld, command: String) {
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[when(
@@ -8083,7 +8127,7 @@ async fn the_operator_inspects_a_command_writing_the_sentinel(
     // redirected: the refusal the sandbox issues must not be drawn on the
     // screen the assertion below reads.
     let command = format!("exec 2>&-; touch {sentinel}; printf {text}");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 /// One line of the inspect listing, read as the depth it is indented to, the
@@ -8111,7 +8155,7 @@ fn listing_rows(output: &str) -> Vec<(usize, String, Option<String>)> {
 
 #[when(expr = "the operator inspects {string}")]
 async fn the_operator_inspects(world: &mut TinmanWorld, program: String) {
-    run_tinman_command(world, &["inspect", &program]);
+    run_tinman_command(world, &["inspect", &program]).await;
 }
 
 #[given("a command the sandbox cannot execute")]
@@ -8134,7 +8178,7 @@ async fn the_operator_inspects_that_command_with_streams_separated(world: &mut T
         .unexecutable_command
         .clone()
         .expect("the starting state staged the command the sandbox cannot execute");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[then("the error stream reports the failure")]
@@ -8157,7 +8201,7 @@ async fn the_operator_inspects_a_terminfo_query(world: &mut TinmanWorld) {
     // nothing the database describes. A fixture writing its own escapes never
     // consults the database at all, so it would prove the harness rather than
     // the sandbox.
-    run_tinman_command(world, &["inspect", "tput cols"]);
+    run_tinman_command(world, &["inspect", "tput cols"]).await;
 }
 
 #[then("the inspect output reports the width rather than an unknown terminal")]
@@ -8234,7 +8278,7 @@ async fn the_operator_inspects_200_numbered_lines(world: &mut TinmanWorld) {
     // The PTY inspection opens is 24 rows high, so 200 lines is far more than
     // one screenful: only a reading of the whole stream carries the first line.
     let command = "i=1; while [ $i -le 200 ]; do printf 'line %s\\n' \"$i\"; i=$((i+1)); done";
-    run_tinman_command(world, &["inspect", command]);
+    run_tinman_command(world, &["inspect", command]).await;
 }
 
 #[then(expr = "the inspect output carries the line numbered {int}")]
@@ -8257,13 +8301,13 @@ async fn the_operator_inspects_three_lines(
     third: String,
 ) {
     let command = format!("printf '{first}\\n{second}\\n{third}\\n'");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[when("the operator inspects a command printing two two-line blocks separated by a blank line")]
 async fn the_operator_inspects_two_blocks(world: &mut TinmanWorld) {
     let command = "printf 'build started\\nat 10:00\\n\\nbuild finished\\nat 10:05\\n'";
-    run_tinman_command(world, &["inspect", command]);
+    run_tinman_command(world, &["inspect", command]).await;
 }
 
 #[when(expr = "the operator inspects a command printing {string}, a blank line and {string}")]
@@ -8273,7 +8317,7 @@ async fn the_operator_inspects_two_lines_apart(
     second: String,
 ) {
     let command = format!("printf '{first}\\n\\n{second}\\n'");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[then(expr = "the inspect output lists a {string} holding {int} {string} regions")]
@@ -8306,7 +8350,7 @@ async fn the_operator_inspects_two_lines(world: &mut TinmanWorld, first: String,
     // string, so a line beginning with a dash reaches the program as data
     // instead of being parsed by printf as an option.
     let command = format!("printf '%s\\n' '{first}' '{second}'");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[then(expr = "the inspect output lists a {string} holding at least {int} {string} region")]
@@ -8458,7 +8502,7 @@ async fn the_operator_inspects_a_command_printing_in_red(world: &mut TinmanWorld
     // A real SGR sequence sets the colour and clears it after, so the sandboxed
     // program draws the attribute rather than the fixture asserting one.
     let command = format!("printf '\\033[31m{text}\\033[0m'");
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[then(expr = "the inspect output reports that region is drawn in red")]
@@ -8516,7 +8560,7 @@ async fn the_operator_inspects_a_command_printing_attributed(
     // sandboxed program draws the presentation rather than the fixture
     // asserting one.
     let command = format!("printf '\\033[{}m{text}\\033[0m'", attribute.sgr());
-    run_tinman_command(world, &["inspect", &command]);
+    run_tinman_command(world, &["inspect", &command]).await;
 }
 
 #[then(expr = "the inspect output reports that region is {attribute}")]
@@ -8652,7 +8696,7 @@ async fn the_plan_is_replayed(world: &mut TinmanWorld) {
     let path = working_dir(world).join("plan.yaml");
     std::fs::write(&path, &source)
         .unwrap_or_else(|e| panic!("the plan {} was not written: {e}", path.display()));
-    run_tinman_command(world, &["test", &path.to_string_lossy()]);
+    run_tinman_command(world, &["test", &path.to_string_lossy()]).await;
 }
 
 #[when(expr = "that plan is replayed at {int} columns")]
@@ -8862,7 +8906,7 @@ async fn the_operator_records_to_that_file_with_streams_separated(
     let mut owned = vec!["record".to_string(), "--output".to_string(), name];
     owned.extend(command.split_whitespace().map(str::to_string));
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    run_tinman_command(world, &args);
+    run_tinman_command(world, &args).await;
 }
 
 #[then("the error stream reports the file already exists")]
@@ -11752,6 +11796,82 @@ async fn every_shipped_markdown_document_was_read(world: &mut TinmanWorld) {
 }
 
 // ---------------------------------------------------------------------------
+// methodology conformance: what a worker count buys
+// ---------------------------------------------------------------------------
+
+#[given("a fixture feature whose four scenarios each block on a real sandboxed process")]
+async fn a_fixture_feature_blocking_on_sandboxed_processes(world: &mut TinmanWorld) {
+    let dir = support::ScratchDir::new("concurrency-fixture");
+    let path = support::write_concurrency_fixture(dir.path());
+    // The fixture is what the whole measurement rests on, so its shape is read
+    // back rather than assumed. A fixture that lost a scenario would still run
+    // and still report a ratio, and the ratio would describe a workload the
+    // scenario never asked for.
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("the fixture at {} was not read back: {e}", path.display()));
+    let scenarios = text.matches("  Scenario: ").count();
+    assert_eq!(
+        scenarios,
+        support::FIXTURE_SCENARIO_COUNT,
+        "the fixture carries {scenarios} scenario(s) where this scenario names \
+         {}; it reads:\n{text}",
+        support::FIXTURE_SCENARIO_COUNT
+    );
+    world.fixture_features = Some(path);
+    world.fixture_dir = Some(dir);
+}
+
+#[when("it is run at one worker and again at four")]
+async fn the_fixture_is_run_at_one_worker_and_at_four(world: &mut TinmanWorld) {
+    let features = world
+        .fixture_features
+        .clone()
+        .expect("the concurrency fixture was written");
+    // The serial arm runs first so the parallel arm cannot be the run that pays
+    // a cold cache the other avoided. Both arms launch the same real sandboxed
+    // processes, so anything cached is cached before the comparison is made.
+    let one = support::run_suite_over(&features, 1);
+    let four = support::run_suite_over(&features, 4);
+    for (workers, run) in [(1, &one), (4, &four)] {
+        // A run that selected no scenario finishes fast and passes, and two of
+        // them would compare as a ratio nobody exercised. Each arm reports the
+        // scenarios it ran, so each arm is held to the fixture's own count.
+        let ran = format!("{} scenarios (", support::FIXTURE_SCENARIO_COUNT);
+        assert!(
+            run.output.contains(&ran),
+            "the {workers}-worker run did not report {} scenarios; it reported:\n{}",
+            support::FIXTURE_SCENARIO_COUNT,
+            run.output
+        );
+    }
+    world.one_worker_run = Some(one);
+    world.four_worker_run = Some(four);
+}
+
+#[then("the four-worker run takes less than three quarters of the one-worker wall clock")]
+async fn the_four_worker_run_is_materially_faster(world: &mut TinmanWorld) {
+    let one = world
+        .one_worker_run
+        .as_ref()
+        .expect("the one-worker run was measured");
+    let four = world
+        .four_worker_run
+        .as_ref()
+        .expect("the four-worker run was measured");
+    let ceiling = one.elapsed.mul_f64(0.75);
+    assert!(
+        four.elapsed < ceiling,
+        "four workers took {:?} against {:?} at one worker, which is no better \
+         than three quarters of it ({:?}). The worker count the rigging declares \
+         buys nothing while a step body holds the executor thread it shares with \
+         every scenario beside it.",
+        four.elapsed,
+        one.elapsed,
+        ceiling
+    );
+}
+
+// ---------------------------------------------------------------------------
 // methodology conformance: the tier ceilings the rigging declares
 // ---------------------------------------------------------------------------
 
@@ -11853,6 +11973,72 @@ async fn every_budgeted_tier_records_its_wall_clock(world: &mut TinmanWorld) {
          exceeded:\n{}",
         silent.len(),
         silent.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: where a tier sweep spent its wall clock
+// ---------------------------------------------------------------------------
+
+#[given("a tier sweep has run")]
+async fn a_tier_sweep_has_run(world: &mut TinmanWorld) {
+    // The sweep read here is a completed one other than the run carrying this
+    // scenario. A run reading its own record would see every scenario that had
+    // not finished yet as a gap, and a focused run would see no scenario but
+    // this one, so neither could judge what a sweep recorded.
+    let current = support::current_run_id();
+    let swept = support::recorded_durations()
+        .into_iter()
+        .rfind(|run| run.complete && run.run != current);
+    world.sweep_durations = Some(swept.unwrap_or_else(|| {
+        panic!(
+            "the wake at {} carries no completed sweep, so nothing recorded how long \
+             a scenario took",
+            support::DURATIONS_RECORD
+        )
+    }));
+}
+
+#[when("the durations the wake recorded are read")]
+async fn the_durations_the_wake_recorded_are_read(world: &mut TinmanWorld) {
+    let swept = world
+        .sweep_durations
+        .as_ref()
+        .expect("a tier sweep had already run");
+    world.scenarios_missing_durations = Some(swept.missing_durations());
+}
+
+#[then("every scenario the sweep ran carries its own duration")]
+async fn every_scenario_the_sweep_ran_carries_its_own_duration(world: &mut TinmanWorld) {
+    let swept = world
+        .sweep_durations
+        .as_ref()
+        .expect("a tier sweep had already run");
+    let missing = world
+        .scenarios_missing_durations
+        .as_ref()
+        .expect("the durations the wake recorded were read");
+    assert!(
+        missing.is_empty(),
+        "{} of the {} scenarios the {} sweep started carry no duration of their own:\n{}",
+        missing.len(),
+        swept.started.len(),
+        swept.run,
+        missing.join("\n")
+    );
+}
+
+#[then("the durations read are not empty")]
+async fn the_durations_read_are_not_empty(world: &mut TinmanWorld) {
+    let swept = world
+        .sweep_durations
+        .as_ref()
+        .expect("a tier sweep had already run");
+    assert!(
+        !swept.timed.is_empty(),
+        "the sweep {} recorded in the wake at {} carries no scenario duration at all",
+        swept.run,
+        support::DURATIONS_RECORD
     );
 }
 
@@ -12471,7 +12657,7 @@ async fn that_help_carries_the_keypress_example(world: &mut TinmanWorld, keypres
 
 #[when(expr = "the operator inspects {string} with its documented examples")]
 async fn the_operator_inspects_with_documented_examples(world: &mut TinmanWorld, program: String) {
-    run_tinman_command(world, &["inspect", "--examples", &program]);
+    run_tinman_command(world, &["inspect", "--examples", &program]).await;
 }
 
 #[when(expr = "the operator inspects {string} with its documented examples and writes a plan")]
@@ -12482,12 +12668,13 @@ async fn the_operator_inspects_with_documented_examples_writing_a_plan(
     run_tinman_command(
         world,
         &["inspect", "--examples", &program, "--output", "tinman.yaml"],
-    );
+    )
+    .await;
 }
 
 #[when("the operator inspects the fixture terminal program with its documented examples")]
 async fn the_operator_inspects_the_fixture_with_documented_examples(world: &mut TinmanWorld) {
-    run_tinman_command(world, &["inspect", "--examples", "./fixture"]);
+    run_tinman_command(world, &["inspect", "--examples", "./fixture"]).await;
 }
 
 #[when(
@@ -12505,7 +12692,8 @@ async fn the_operator_inspects_the_fixture_with_documented_examples_writing_a_pl
             "--output",
             "tinman.yaml",
         ],
-    );
+    )
+    .await;
 }
 
 /// Whether the inspect output reports `subject` marked as `marker`. The marker is
@@ -12740,10 +12928,45 @@ fn _pin_prepared_process(p: &PreparedProcess) -> &str {
 async fn main() {
     // `fail_on_skipped` makes undefined or unimplemented steps redden, so a
     // missing step definition is a failing verification target the QM can see.
-    TinmanWorld::cucumber()
+    //
+    // The hooks record each scenario's own wall clock into the wake, so the
+    // weather record's per-tier ceiling has a per-scenario attribution beside
+    // it. The run is closed by hand rather than by `run_and_exit` because the
+    // record's completion line has to land before the failure is raised: a
+    // sweep that ends red still says where its time went, and a reader tells
+    // that sweep from one that was killed part way.
+    //
+    // The feature root is the specs directory unless the environment names
+    // another. The concurrency measurement names a generated fixture, so it can
+    // run this same binary over four scenarios of its own and read the wall
+    // clock back; every tier leaves the variable unset and sweeps the specs.
+    use cucumber::writer::Stats as _;
+    let features =
+        std::env::var(support::FEATURE_ROOT_VARIABLE).unwrap_or_else(|_| "features".to_string());
+    let writer = TinmanWorld::cucumber()
+        .before(|feature, _rule, scenario, _world| {
+            let key = support::scenario_key(feature, scenario);
+            Box::pin(async move {
+                support::record_scenario_started(&key);
+            })
+        })
+        .after(|feature, _rule, scenario, _finished, _world| {
+            let key = support::scenario_key(feature, scenario);
+            Box::pin(async move {
+                support::record_scenario_finished(&key);
+            })
+        })
         .fail_on_skipped()
-        .run_and_exit("features")
+        .run(features)
         .await;
+    support::record_run_complete();
+    assert!(
+        !writer.execution_has_failed(),
+        "{} step(s) failed, {} parsing error(s), {} hook error(s)",
+        writer.failed_steps(),
+        writer.parsing_errors(),
+        writer.hook_errors()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -13556,7 +13779,7 @@ async fn the_operator_states_an_expectation_against_a_secret_reporting_target(
     name: String,
 ) {
     let program = stage_secret_reporting_target(world, &name);
-    run_tinman_command(world, &["expect", SECRET_ABSENT, &program]);
+    run_tinman_command(world, &["expect", SECRET_ABSENT, &program]).await;
 }
 
 /// The target reports the variable was absent exactly when the expectation
@@ -13708,11 +13931,11 @@ impl Drop for LaunchedSessions {
 const TOP_SCREEN_TEXT: &str = "PID";
 
 /// Launch `program` as the session `name`, registering its teardown first.
-fn launch_session(world: &mut TinmanWorld, name: &str, program: &str) {
+async fn launch_session(world: &mut TinmanWorld, name: &str, program: &str) {
     let dir = working_dir(world);
     let tmp = scenario_temp_dir(world);
     world.launched_sessions.register(&dir, &tmp, name);
-    run_tinman_command(world, &["launch", program, "--session", name]);
+    run_tinman_command(world, &["launch", program, "--session", name]).await;
 }
 
 /// Whether the operator can still address the session `name`, read by stating
@@ -13732,7 +13955,7 @@ fn session_answers(world: &mut TinmanWorld, name: &str) -> (i32, String) {
 
 #[given(expr = "a session named {string} running {string}")]
 async fn a_session_named_running(world: &mut TinmanWorld, name: String, program: String) {
-    launch_session(world, &name, &program);
+    launch_session(world, &name, &program).await;
     let status = world.run_status.expect("the launch ran");
     assert_eq!(
         status,
@@ -13822,7 +14045,7 @@ async fn the_operator_launches_a_session_against_a_secret_reporting_target(
     name: String,
 ) {
     let program = stage_secret_reporting_target(world, &name);
-    launch_session(world, "work", &program);
+    launch_session(world, "work", &program).await;
     let launch_status = world.run_status.expect("the launch ran");
     assert_eq!(
         launch_status,
@@ -13831,7 +14054,7 @@ async fn the_operator_launches_a_session_against_a_secret_reporting_target(
          reads:\n{}",
         run_errors(world)
     );
-    run_tinman_command(world, &["expect", SECRET_ABSENT, "--session", "work"]);
+    run_tinman_command(world, &["expect", SECRET_ABSENT, "--session", "work"]).await;
 }
 
 #[then(expr = "no sandbox resource created for {string} remains")]
@@ -13850,7 +14073,7 @@ async fn no_sandbox_resource_created_for_remains(world: &mut TinmanWorld, name: 
 /// Run one verb against the session a scenario is already holding, and fail
 /// where it did not hold: a plan written from steps that never ran would be
 /// asserted against below as though they had.
-fn verb_against_session(world: &mut TinmanWorld, args: &[&str]) {
+async fn verb_against_session(world: &mut TinmanWorld, args: &[&str]) {
     let session = world
         .launched_sessions
         .names
@@ -13860,12 +14083,12 @@ fn verb_against_session(world: &mut TinmanWorld, args: &[&str]) {
     let mut argv = args.to_vec();
     argv.push("--session");
     argv.push(&session);
-    run_tinman_command(world, &argv);
+    run_tinman_command(world, &argv).await;
 }
 
 #[given(expr = "the operator has expected {string} and pressed {string} in that session")]
 async fn the_operator_has_expected_and_pressed(world: &mut TinmanWorld, text: String, key: String) {
-    verb_against_session(world, &["expect", &text]);
+    verb_against_session(world, &["expect", &text]).await;
     let expected = world.run_status.expect("the expectation ran");
     assert_eq!(
         expected,
@@ -13874,7 +14097,7 @@ async fn the_operator_has_expected_and_pressed(world: &mut TinmanWorld, text: St
          stream reads:\n{}",
         run_errors(world)
     );
-    verb_against_session(world, &["press", &key]);
+    verb_against_session(world, &["press", &key]).await;
     let pressed = world.run_status.expect("the keypress ran");
     assert_eq!(
         pressed,
@@ -13891,7 +14114,7 @@ async fn the_operator_has_expected_and_then_expected(
     held: String,
     failed: String,
 ) {
-    verb_against_session(world, &["expect", &held]);
+    verb_against_session(world, &["expect", &held]).await;
     let status = world.run_status.expect("the expectation ran");
     assert_eq!(
         status,
@@ -13900,7 +14123,7 @@ async fn the_operator_has_expected_and_then_expected(
          stream reads:\n{}",
         run_errors(world)
     );
-    verb_against_session(world, &["expect", &failed]);
+    verb_against_session(world, &["expect", &failed]).await;
     let status = world.run_status.expect("the expectation ran");
     assert_ne!(
         status, 0,
@@ -13910,7 +14133,7 @@ async fn the_operator_has_expected_and_then_expected(
 
 #[given(expr = "a plan written from a session that expected {string} against {string}")]
 async fn a_plan_written_from_a_session(world: &mut TinmanWorld, text: String, program: String) {
-    launch_session(world, "written", &program);
+    launch_session(world, "written", &program).await;
     let status = world.run_status.expect("the launch ran");
     assert_eq!(
         status,
@@ -13918,7 +14141,7 @@ async fn a_plan_written_from_a_session(world: &mut TinmanWorld, text: String, pr
         "the session was not launched; the error stream reads:\n{}",
         run_errors(world)
     );
-    verb_against_session(world, &["expect", &text]);
+    verb_against_session(world, &["expect", &text]).await;
     let status = world.run_status.expect("the expectation ran");
     assert_eq!(
         status,
@@ -13929,7 +14152,8 @@ async fn a_plan_written_from_a_session(world: &mut TinmanWorld, text: String, pr
     run_tinman_command(
         world,
         &["close", "--session", "written", "--output", "probe.yaml"],
-    );
+    )
+    .await;
     let status = world.run_status.expect("the close ran");
     assert_eq!(
         status,
@@ -14092,7 +14316,7 @@ async fn the_plan_declares_the_sandbox_the_session_ran_under(
 
 #[given(expr = "the operator has expected {string} in that session")]
 async fn the_operator_has_expected_in_that_session(world: &mut TinmanWorld, text: String) {
-    verb_against_session(world, &["expect", &text]);
+    verb_against_session(world, &["expect", &text]).await;
     let status = world.run_status.expect("the expectation ran");
     assert_eq!(
         status,
@@ -14128,7 +14352,7 @@ async fn the_replay_ran_the_expectation(world: &mut TinmanWorld) {
          performed, so nothing here reads whether the replay ran it; it reads:\n{performed}"
     );
     stage_working_file(world, "replay-probe.yaml", &mutated);
-    run_tinman_command(world, &["test", "replay-probe.yaml"]);
+    run_tinman_command(world, &["test", "replay-probe.yaml"]).await;
     let status = world.run_status.expect("the contrary replay ran");
     assert_ne!(
         status, 0,
@@ -14196,7 +14420,7 @@ async fn the_operator_expects_after_a_plan_against_the_fixture(
 ) {
     let workspace = working_dir(world);
     let program = support::stage_fixture_in(&workspace);
-    run_tinman_command(world, &["expect", &text, "--after", &plan, &program]);
+    run_tinman_command(world, &["expect", &text, "--after", &plan, &program]).await;
 }
 
 #[given(expr = "a plan at {string} whose steps expect {string} against {string}")]
@@ -14295,7 +14519,7 @@ async fn a_session_whose_program_has_exited(world: &mut TinmanWorld, name: Strin
             .as_nanos()
     );
     let program = stage_recorded_program(world, &mark, "#!/bin/sh\nprintf 'READY\\n'\nsleep 1\n");
-    launch_session(world, &name, &program);
+    launch_session(world, &name, &program).await;
     let status = world.run_status.expect("the launch ran");
     assert_eq!(
         status,
@@ -14710,7 +14934,8 @@ async fn the_operator_attests_after_a_plan_against_the_fixture(
             &plan,
             &program,
         ],
-    );
+    )
+    .await;
 }
 
 /// The steps a plan document carries, from whichever of the two roots the plan

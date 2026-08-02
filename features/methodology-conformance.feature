@@ -180,6 +180,27 @@ Feature: methodology conformance
     Then every background is declared before any rule
     And the features read are not empty
 
+  Rule: a worker count is a claim about how a suite runs, and this one was never true. The runner polls every scenario future on a single executor thread, so a step body that blocks on a real process or sleeps holds that thread and the scenarios beside it wait. Measured on 2026-08-02, one feature ran 18795ms at one worker, 18778ms at four and 18790ms at eight, and a scenario costing 19ms alone recorded 5146ms inside a wave. The recorded cost was overlap rather than work, which is why the tier looked expensive and no fixture was to blame.
+
+  Rule: the check is the comparison rather than the count, because a count is what the rigging already claimed. A tier that runs no faster with four workers than with one has a concurrency value that documents an intention, and every conclusion drawn from its wall clock inherits that. Reading a budget against a serialized tier measures the executor rather than the suite.
+
+  @sandbox
+  Scenario: a tier runs materially faster with four workers than with one
+    Given a fixture feature whose four scenarios each block on a real sandboxed process
+    When it is run at one worker and again at four
+    Then the four-worker run takes less than three quarters of the one-worker wall clock
+
+  Rule: the budget check reads a whole-tier wall clock, so it can say a tier outran its ceiling and never say which scenarios spent it. Amortizing a fixture is only worth spending on the scenarios that carry the cost, and picking them without measurement is the guess this project keeps paying for. So the ceiling and the attribution are two checks: one says the suite has outgrown its budget, the other says where the time went.
+
+  Rule: this was recorded as needing a bespoke writer, and that was wrong. The runner ships junit and json writers, both carrying per-scenario timing behind a feature flag, so the measurement is a wiring job. Naming the correction here because the false claim is what deferred the work: a cost believed unmeasurable is a cost nobody measures.
+
+  @conformance
+  Scenario: the wake records how long each scenario took
+    Given a tier sweep has run
+    When the durations the wake recorded are read
+    Then every scenario the sweep ran carries its own duration
+    And the durations read are not empty
+
   Rule: a tier budget is a ceiling rather than advice, so it needs a check that reads it. The sweep commands already append their wall clock to the weather record, so no new instrumentation is owed. The check reads the most recent sweep of each tier rather than every entry retained, because the record is append-only and unbounded: one historical outlier would redden the check permanently while saying nothing about what the suite costs now, and the only remedy left would be deleting run data to clear a red. Yesterday's weather is the next run's starting prior, so the last observation is the one a ceiling judges. The floor guards the producer rather than the run history: a budget declared for a tier whose sweep command records nothing could never be exceeded, and a check that reads an empty record would report a clean bill for a suite it never measured. Verifying the producer structurally keeps a fresh clone honest, where no sweep has run yet and there is nothing to compare.
 
   @conformance
