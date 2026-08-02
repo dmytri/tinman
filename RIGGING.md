@@ -44,6 +44,7 @@
 - budget-sandbox: 120s
 - budget-inference: 300s
 - weather: target/tinman-weather.jsonl
+- durations: target/tinman-durations.jsonl
 - runrecord: target/tinman-runrecord.jsonl
 
 ## Dependencies

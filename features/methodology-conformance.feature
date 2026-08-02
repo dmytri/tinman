@@ -194,12 +194,24 @@ Feature: methodology conformance
 
   Rule: this was recorded as needing a bespoke writer, and that was wrong. The runner ships junit and json writers, both carrying per-scenario timing behind a feature flag, so the measurement is a wiring job. Naming the correction here because the false claim is what deferred the work: a cost believed unmeasurable is a cost nobody measures.
 
+  Rule: the record holds every run, and only some of them are sweeps. The concurrency check above runs generated fixtures through the same recorder, so a reader taking whichever complete run came last can attest four fixture scenarios while reporting on a tier. It passes either way, which is why the substitution never announces itself and why the sweep is identified rather than assumed.
+
+  Rule: a run whose filter matched no feature is not a sweep either, and the runner cannot be leaned on to say so: it reports no features, no scenarios, and exits clean, which is the same silent pass a glob reading no file gives. A completion line written for such a run makes the next reader attest an empty set, and the red then lands a run late and names the empty sweep rather than the invocation that wrote it.
+
   @conformance
   Scenario: the wake records how long each scenario took
-    Given a tier sweep has run
-    When the durations the wake recorded are read
-    Then every scenario the sweep ran carries its own duration
+    Given the most recent tier sweep the wake recorded
+    When the durations it recorded are read
+    Then every scenario it ran carries its own duration
+    And the sweep read covered a whole tier rather than a generated fixture
     And the durations read are not empty
+
+  @conformance
+  Scenario: a run that matched no scenario is not offered as a sweep
+    Given a run whose filter matched no feature
+    When the durations the wake recorded are read
+    Then that run is not offered as a sweep
+    And the runs read are not empty
 
   Rule: a tier budget is a ceiling rather than advice, so it needs a check that reads it. The sweep commands already append their wall clock to the weather record, so no new instrumentation is owed. The check reads the most recent sweep of each tier rather than every entry retained, because the record is append-only and unbounded: one historical outlier would redden the check permanently while saying nothing about what the suite costs now, and the only remedy left would be deleting run data to clear a red. Yesterday's weather is the next run's starting prior, so the last observation is the one a ceiling judges. The floor guards the producer rather than the run history: a budget declared for a tier whose sweep command records nothing could never be exceeded, and a check that reads an empty record would report a clean bill for a suite it never measured. Verifying the producer structurally keeps a fresh clone honest, where no sweep has run yet and there is nothing to compare.
 

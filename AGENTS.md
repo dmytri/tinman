@@ -51,7 +51,7 @@ Sandboxed execution is the default. `tinman record` launches its target inside a
 
 ## Run data
 
-The wake carries two records, both git-ignored under `target/` and both named in `RIGGING.md` under `## Tiers`.
+The wake carries three records, all git-ignored under `target/` and all named in `RIGGING.md` under `## Tiers`.
 
 `target/tinman-runrecord.jsonl` is the voyage run record. A role appends one line after a fresh green, in the shape the Transient output policy fixes.
 
@@ -63,9 +63,21 @@ The wake carries two records, both git-ignored under `target/` and both named in
 
 `result` is the sweep's exit status, so a reader tells a green worker count from a red one. The `coverage` commands deliberately do not append: `cargo llvm-cov` instruments the build, and its wall clock is not the prior a later uninstrumented sweep should start from.
 
+`target/tinman-durations.jsonl` is the per-scenario duration record, and it carries the attribution the weather record cannot. A sweep appends one line as each scenario starts, one carrying that scenario's own wall clock as it ends, and one as the run itself reaches its end:
+
+```json
+{"ms":230,"run":"2490178-1785703080650","scenario":"/home/exedev/tinman/features/driver-protocol.feature:70:the driver exits when its stdin closes"}
+```
+
+A scenario is keyed by the spec carrying it, the line it sits on, and its name, because a `Scenario Outline` expands to one scenario per example row and every row shares the outline's name. The spec is the path the runner reports, which is absolute, so joining this record to a watchbill reference means relativising it first. `run` tells one sweep's entries from another's in an append-only record, and it carries the moment the process started beside its pid, because a pid repeats on a long-lived machine. The start lines and the completion line are what let a reader tell a sweep that finished from one that was killed part way: a scenario that started and was never timed reads as a gap, where an unrecorded start would read as nothing at all. `features/methodology-conformance.feature:the wake records how long each scenario took` is the check that reads this record.
+
 Worker counts are derived per tier from that tier's binding constraint and are passed explicitly with `-c`, so the recorded count is a fact rather than the cucumber-rs default of 64. The default tier is local and pure, and runs at 64. The `@sandbox` tier spawns a real Bubblewrap process and PTY per scenario, so it is bound by local compute and runs at 4, one per core. The `@inference` tier is bound by the provider's rate limits and by cost, and runs at 2. Raise a count only on headroom this record confirms.
 
-Weather is per-tier because of how the runner is built here, rather than because the runner cannot report more. cucumber-rs ships a `JUnit` writer that records each scenario's own wall clock and a `Json` writer that records each step's duration, behind the crate's `output-junit` and `output-json` features, each of which turns on its `timestamps` feature. This project enables neither, so nothing records a per-scenario duration. Enabling one and wiring its writer is verification support and QM's to write, and it needs no bespoke `Writer`. A structured pressure signal is the fact the runner genuinely does not carry: rate-limit and memory pressure are read from the sweep's own output rather than from a recorded field, and closing that does need a custom `Writer`.
+Weather is per-tier and the durations record is per-scenario, and the split follows from where each is produced rather than from a limit of the runner. A sweep command wraps the whole run, so it can time the tier and nothing finer. The per-scenario clock is taken by the before and after hooks in `tests/cucumber.rs`, which the runner calls around each scenario, and the run is closed by hand rather than by `run_and_exit` so the completion line lands before a red is raised. A sweep that ends red still says where its time went.
+
+cucumber-rs also ships a `JUnit` writer that records each scenario's own wall clock and a `Json` writer that records each step's duration, behind the crate's `output-junit` and `output-json` features, each of which turns on its `timestamps` feature. This project enables neither, and the hooks reach the same per-scenario measurement without them: `output-junit` pulls `junit-report`, and `output-json` pulls `base64`, `Inflector` and `mime`. Read a later proposal to enable one as a trade of dependencies for step-level timing, which is finer than anything here reads.
+
+A structured pressure signal is the fact the runner genuinely does not carry: rate-limit and memory pressure are read from the sweep's own output rather than from a recorded field, and closing that does need a custom `Writer`.
 
 ## Methodology checks
 
@@ -202,7 +214,9 @@ The specs stay crate-neutral, and deliberately so. Nothing in `features/proxied-
 
 The operator ruled on 2026-08-01. The 2026-08-01 harbour reported three resolved versions sitting behind current stable, and all three are held: `clap` at 4.6.4 against 4.6.5, `clap_complete` at 4.6.7 against 4.6.8, and `jsonschema` at 0.48.5 against 0.49.2. Every other dependency stood at latest stable that day.
 
-No advisory reaches any of the three, no spec needs anything a newer version carries, and `jsonschema` is a dev-dependency rather than a shipped one.
+No advisory reaches any of the three, and no spec needs anything a newer version carries.
+
+`jsonschema` is a shipped dependency, carried under `[dependencies]` in `Cargo.toml` with default features off, because `src/expect.rs` validates against a scantling at run time. So the pin reaches what a user receives rather than only what verification builds.
 
 **The `locked` policy exists so that a version moves on a reason rather than on drift.** A version delta is not itself a reason. Read a report of one as an observation, never as a finding, because treating the delta as the trigger makes the policy mean its opposite: it would move every version the moment upstream published, which is the drift the pin was chosen to prevent.
 

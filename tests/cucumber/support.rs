@@ -5588,11 +5588,41 @@ pub fn recorded_sweeps(rigging: &str) -> Vec<RecordedSweep> {
         .collect()
 }
 
+/// The directory the specs live in, which is the root every tier sweeps.
+///
+/// It is named here because the durations record carries the root each run
+/// swept, and that root is what tells a tier sweep from a generated fixture run
+/// through the same recorder.
+pub const SPECS_DIRECTORY: &str = "features";
+
 /// The environment variable naming the directory or file the suite runs its
 /// features from. The tiers leave it unset and sweep the specs directory; the
 /// concurrency measurement sets it to a generated fixture so it can run the
 /// suite against four scenarios of its own choosing.
 pub const FEATURE_ROOT_VARIABLE: &str = "TINMAN_FEATURES";
+
+/// The command-line flags that narrow a run to part of a tier: a glob over the
+/// feature files and a regex over the scenario names.
+///
+/// A tag filter is not among them, because a tag is what names a tier rather
+/// than what narrows one, and every sweep command exports one.
+const NARROWING_FLAGS: [&str; 5] = ["-i", "--input", "-n", "--name", "--scenario-name"];
+
+/// Whether the command line narrowed this run to part of a tier.
+///
+/// The focused command selects one scenario by feature path and name, and such
+/// a run declares the specs directory as its root exactly as a sweep does. A
+/// reader taking the root alone would attest one scenario while reporting on a
+/// tier, which is the same substitution a generated fixture makes.
+pub fn run_is_narrowed() -> bool {
+    std::env::args().any(|argument| {
+        NARROWING_FLAGS.contains(&argument.as_str())
+            || NARROWING_FLAGS
+                .iter()
+                .filter(|flag| flag.starts_with("--"))
+                .any(|flag| argument.starts_with(&format!("{flag}=")))
+    })
+}
 
 /// How long each fixture scenario's sandboxed process sleeps.
 ///
@@ -5698,6 +5728,69 @@ pub fn run_suite_over(features: &std::path::Path, workers: usize) -> FixtureRun 
         elapsed,
         output: text,
     }
+}
+
+/// Run this same suite binary with a filter that matches no feature, and report
+/// the run identifier the durations record gained.
+///
+/// The runner reports no feature, no scenario and exits clean for such a run, so
+/// the wake is the only place it announces itself at all. The identifier is
+/// taken from the child's own pid rather than parsed from its output, because
+/// the child prints nothing naming its run, and it is joined against the runs
+/// already recorded so a pid the machine has reused names the child alone.
+///
+/// The binary already built is re-executed rather than a fresh `cargo test`
+/// invocation, for the reason `run_suite_over` gives. The feature root is
+/// cleared, so the child sweeps the specs directory as a tier does, and the
+/// filter is a tag no scenario carries rather than a narrowing flag: the run
+/// this describes is sweep-shaped in every respect but the set it matched, so
+/// the emptiness is the only thing that can keep it from being offered.
+pub fn run_suite_matching_no_feature() -> String {
+    /// A tag no scenario in the specs carries.
+    const NO_FEATURE_TAG: &str = "@matches-no-scenario";
+    /// How long the child has to exit. A run that reads no feature does no work
+    /// at all, so this is a failure ceiling far above the real cost rather than
+    /// an expectation of it.
+    const EXIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
+
+    let already_recorded: std::collections::HashSet<String> = recorded_durations()
+        .into_iter()
+        .map(|run| run.run)
+        .collect();
+    let binary = std::env::current_exe().expect("the running suite binary is named");
+    let mut child = std::process::Command::new(binary)
+        .env_remove(FEATURE_ROOT_VARIABLE)
+        .env("CUCUMBER_FILTER_TAGS", NO_FEATURE_TAG)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the suite binary runs with a filter matching no feature");
+    let pid = child.id();
+    let exited = exited_within(EXIT_BUDGET, || matches!(child.try_wait(), Ok(Some(_))));
+    assert!(
+        exited,
+        "the run whose filter matched no feature did not exit within {EXIT_BUDGET:?}"
+    );
+    let output = child
+        .wait_with_output()
+        .expect("the run whose filter matched no feature was read");
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "a run whose filter matches no feature exits clean, which is what makes it \
+         indistinguishable from a sweep; this one did not:\n{text}"
+    );
+    recorded_durations()
+        .into_iter()
+        .map(|run| run.run)
+        .find(|run| run.starts_with(&format!("{pid}-")) && !already_recorded.contains(run))
+        .unwrap_or_else(|| {
+            panic!(
+                "the run whose filter matched no feature left no entry under pid {pid} in the \
+                 wake at {DURATIONS_RECORD}; it reported:\n{text}"
+            )
+        })
 }
 
 /// The wake record the runner appends each scenario's own wall clock to.
@@ -5809,23 +5902,84 @@ pub fn record_scenario_finished(key: &str) {
 /// finished from one that was killed part way. A killed run leaves scenarios it
 /// never reached, and judging it would redden the attribution check for a fault
 /// that is the kill rather than the record.
-pub fn record_run_complete() {
+///
+/// The line carries the root the run swept and whether the command line
+/// narrowed it, so a run is offered as a tier sweep on what it covered rather
+/// than on having merely finished. Both are recorded because both substitutions
+/// have been observed: the concurrency measurement runs generated fixtures
+/// through this same recorder, and a focused run declares the specs directory
+/// exactly as a sweep does while running one scenario.
+pub fn record_run_complete(features: &str, narrowed: bool) {
     append_duration_line(
-        &serde_json::json!({ "run": current_run_id(), "complete": true }).to_string(),
+        &serde_json::json!({
+            "run": current_run_id(),
+            "complete": true,
+            "features": features,
+            "narrowed": narrowed,
+        })
+        .to_string(),
     );
 }
 
 /// One run the durations record carries: the scenarios it started, the wall
-/// clock each of them took, and whether the run reached its end.
+/// clock each of them took, whether the run reached its end, and the root it
+/// swept and the narrowing it carried when it did.
 #[derive(Debug, Clone, Default)]
 pub struct RecordedDurations {
     pub run: String,
     pub complete: bool,
+    pub features: Option<String>,
+    /// Whether the command line narrowed the run, as the completion line
+    /// reports it. `None` where the line carries no such report, which a run
+    /// recorded before the field existed does.
+    pub narrowed: Option<bool>,
     pub started: Vec<String>,
     pub timed: Vec<(String, u64)>,
 }
 
 impl RecordedDurations {
+    /// Whether the record offers this run as a tier sweep.
+    ///
+    /// Four conditions, and each closes a run that reads as a sweep and is not
+    /// one. A run that never reached its end left scenarios it never started. A
+    /// run whose filter matched no feature reports no feature, no scenario and
+    /// exits clean, so completion alone would offer an empty set to a reader
+    /// that attests over it. A run whose root is a generated fixture measured
+    /// four scenarios of its own. A narrowed run declares the specs directory
+    /// exactly as a sweep does and ran the part of it a filter selected.
+    pub fn is_sweep(&self) -> bool {
+        self.complete
+            && !self.started.is_empty()
+            && self.features.as_deref() == Some(SPECS_DIRECTORY)
+            && self.narrowed == Some(false)
+    }
+
+    /// The scenarios this run started that name a spec outside the specs
+    /// directory, each named once.
+    ///
+    /// A run is offered as a sweep on the root it declared, and this reads the
+    /// specs it actually ran, so the two are different evidence: a recorder
+    /// declaring one root while running another is caught rather than trusted.
+    /// The parent directory is compared by component, because the runner
+    /// reports a spec path as the feature root gave it and that root is
+    /// absolute for one invocation and relative for another.
+    pub fn scenarios_outside_the_specs(&self) -> Vec<String> {
+        let mut outside: Vec<String> = self
+            .started
+            .iter()
+            .filter(|key| {
+                let spec = std::path::Path::new(key.split(':').next().unwrap_or_default());
+                !spec
+                    .parent()
+                    .is_some_and(|directory| directory.ends_with(SPECS_DIRECTORY))
+            })
+            .cloned()
+            .collect();
+        outside.sort();
+        outside.dedup();
+        outside
+    }
+
     /// The scenarios this run started and recorded no duration for, each named
     /// once per start the record left unpaired.
     pub fn missing_durations(&self) -> Vec<String> {
@@ -5878,6 +6032,11 @@ pub fn recorded_durations() -> Vec<RecordedDurations> {
         let scenario = entry.get("scenario").and_then(serde_json::Value::as_str);
         if entry.get("complete").and_then(serde_json::Value::as_bool) == Some(true) {
             carried.complete = true;
+            carried.features = entry
+                .get("features")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            carried.narrowed = entry.get("narrowed").and_then(serde_json::Value::as_bool);
         } else if let (Some(key), Some(ms)) = (
             scenario,
             entry.get("ms").and_then(serde_json::Value::as_u64),

@@ -145,10 +145,13 @@ struct TinmanWorld {
     fixture_features: Option<std::path::PathBuf>,
     one_worker_run: Option<support::FixtureRun>,
     four_worker_run: Option<support::FixtureRun>,
-    // the sweep whose per-scenario durations the wake carries, and the
-    // scenarios that sweep started without recording one
+    // the sweep whose per-scenario durations the wake carries, the scenarios
+    // that sweep started without recording one, every run the record carries,
+    // and the run made with a filter that matched no feature
     sweep_durations: Option<support::RecordedDurations>,
     scenarios_missing_durations: Option<Vec<String>>,
+    recorded_runs: Option<Vec<support::RecordedDurations>>,
+    empty_filter_run: Option<String>,
     // published scantling contracts: the dialect-declaring scantlings, what the
     // meta-schema said of each, the packaged version, and the URIs consumers
     // fetch
@@ -11980,44 +11983,45 @@ async fn every_budgeted_tier_records_its_wall_clock(world: &mut TinmanWorld) {
 // methodology conformance: where a tier sweep spent its wall clock
 // ---------------------------------------------------------------------------
 
-#[given("a tier sweep has run")]
-async fn a_tier_sweep_has_run(world: &mut TinmanWorld) {
-    // The sweep read here is a completed one other than the run carrying this
-    // scenario. A run reading its own record would see every scenario that had
-    // not finished yet as a gap, and a focused run would see no scenario but
-    // this one, so neither could judge what a sweep recorded.
+#[given("the most recent tier sweep the wake recorded")]
+async fn the_most_recent_tier_sweep_the_wake_recorded(world: &mut TinmanWorld) {
+    // The sweep read here is one the record offers as a sweep, and one other
+    // than the run carrying this scenario. A run reading its own record would
+    // see every scenario that had not finished yet as a gap, and a focused run
+    // would see no scenario but this one, so neither could judge what a sweep
+    // recorded.
     let current = support::current_run_id();
     let swept = support::recorded_durations()
         .into_iter()
-        .rfind(|run| run.complete && run.run != current);
+        .rfind(|run| run.is_sweep() && run.run != current);
     world.sweep_durations = Some(swept.unwrap_or_else(|| {
         panic!(
-            "the wake at {} carries no completed sweep, so nothing recorded how long \
-             a scenario took",
+            "the wake at {} carries no tier sweep, so nothing recorded how long a \
+             scenario took",
             support::DURATIONS_RECORD
         )
     }));
 }
 
-#[when("the durations the wake recorded are read")]
-async fn the_durations_the_wake_recorded_are_read(world: &mut TinmanWorld) {
+#[when("the durations it recorded are read")]
+async fn the_durations_it_recorded_are_read(world: &mut TinmanWorld) {
     let swept = world
         .sweep_durations
         .as_ref()
-        .expect("a tier sweep had already run");
+        .expect("a tier sweep was read from the wake");
     world.scenarios_missing_durations = Some(swept.missing_durations());
 }
 
-#[then("every scenario the sweep ran carries its own duration")]
-async fn every_scenario_the_sweep_ran_carries_its_own_duration(world: &mut TinmanWorld) {
+#[then("every scenario it ran carries its own duration")]
+async fn every_scenario_it_ran_carries_its_own_duration(world: &mut TinmanWorld) {
     let swept = world
         .sweep_durations
         .as_ref()
-        .expect("a tier sweep had already run");
+        .expect("a tier sweep was read from the wake");
     let missing = world
         .scenarios_missing_durations
         .as_ref()
-        .expect("the durations the wake recorded were read");
+        .expect("the durations the sweep recorded were read");
     assert!(
         missing.is_empty(),
         "{} of the {} scenarios the {} sweep started carry no duration of their own:\n{}",
@@ -12028,16 +12032,88 @@ async fn every_scenario_the_sweep_ran_carries_its_own_duration(world: &mut Tinma
     );
 }
 
+#[then("the sweep read covered a whole tier rather than a generated fixture")]
+async fn the_sweep_read_covered_a_whole_tier(world: &mut TinmanWorld) {
+    // The record offers a run as a sweep on the root it declared it swept. This
+    // reads the specs it actually ran, which is the other half of the same
+    // claim: a recorder naming the specs directory while running a generated
+    // fixture would otherwise hand this scenario four fixture scenarios to
+    // attest while it reported on a tier.
+    let swept = world
+        .sweep_durations
+        .as_ref()
+        .expect("a tier sweep was read from the wake");
+    let outside = swept.scenarios_outside_the_specs();
+    assert!(
+        outside.is_empty(),
+        "the {} sweep declared it swept {} and ran {} scenario(s) from outside it:\n{}",
+        swept.run,
+        support::SPECS_DIRECTORY,
+        outside.len(),
+        outside.join("\n")
+    );
+}
+
 #[then("the durations read are not empty")]
 async fn the_durations_read_are_not_empty(world: &mut TinmanWorld) {
     let swept = world
         .sweep_durations
         .as_ref()
-        .expect("a tier sweep had already run");
+        .expect("a tier sweep was read from the wake");
     assert!(
         !swept.timed.is_empty(),
         "the sweep {} recorded in the wake at {} carries no scenario duration at all",
         swept.run,
+        support::DURATIONS_RECORD
+    );
+}
+
+#[given("a run whose filter matched no feature")]
+async fn a_run_whose_filter_matched_no_feature(world: &mut TinmanWorld) {
+    world.empty_filter_run = Some(support::run_suite_matching_no_feature());
+}
+
+#[when("the durations the wake recorded are read")]
+async fn the_durations_the_wake_recorded_are_read(world: &mut TinmanWorld) {
+    world.recorded_runs = Some(support::recorded_durations());
+}
+
+#[then("that run is not offered as a sweep")]
+async fn that_run_is_not_offered_as_a_sweep(world: &mut TinmanWorld) {
+    let empty = world
+        .empty_filter_run
+        .as_ref()
+        .expect("a run whose filter matched no feature was made");
+    let runs = world
+        .recorded_runs
+        .as_ref()
+        .expect("the durations the wake recorded were read");
+    let recorded = runs
+        .iter()
+        .find(|run| &run.run == empty)
+        .unwrap_or_else(|| panic!("the wake carries no run {empty}"));
+    assert!(
+        !recorded.is_sweep(),
+        "the run {empty} matched no feature and is offered as a sweep, so the next \
+         reader attests an empty set: it started {} scenario(s), it timed {}, and it \
+         declared it swept {:?}",
+        recorded.started.len(),
+        recorded.timed.len(),
+        recorded.features
+    );
+}
+
+#[then("the runs read are not empty")]
+async fn the_runs_read_are_not_empty(world: &mut TinmanWorld) {
+    let runs = world
+        .recorded_runs
+        .as_ref()
+        .expect("the durations the wake recorded were read");
+    // The floor guards the reader rather than the count. A record nothing could
+    // read and one carrying no run report the same clean bill above.
+    assert!(
+        !runs.is_empty(),
+        "the wake at {} carries no run at all, so the assertion above read nothing",
         support::DURATIONS_RECORD
     );
 }
@@ -12941,8 +13017,8 @@ async fn main() {
     // run this same binary over four scenarios of its own and read the wall
     // clock back; every tier leaves the variable unset and sweeps the specs.
     use cucumber::writer::Stats as _;
-    let features =
-        std::env::var(support::FEATURE_ROOT_VARIABLE).unwrap_or_else(|_| "features".to_string());
+    let features = std::env::var(support::FEATURE_ROOT_VARIABLE)
+        .unwrap_or_else(|_| support::SPECS_DIRECTORY.to_string());
     let writer = TinmanWorld::cucumber()
         .before(|feature, _rule, scenario, _world| {
             let key = support::scenario_key(feature, scenario);
@@ -12957,9 +13033,9 @@ async fn main() {
             })
         })
         .fail_on_skipped()
-        .run(features)
+        .run(&features)
         .await;
-    support::record_run_complete();
+    support::record_run_complete(&features, support::run_is_narrowed());
     assert!(
         !writer.execution_has_failed(),
         "{} step(s) failed, {} parsing error(s), {} hook error(s)",
