@@ -314,6 +314,10 @@ The reason it happens is structural rather than lax. `AGENTS.md` is where a sett
 
 Either the Article widens to let Shipwright write that file whenever Captain routes a settled decision to it, which is what happens now, or the doctrine needs a different home for a decision made at sea. Do not resolve it by having Captain write the file: routing through Shipwright is what caught three stale claims in it today, and every one was found because a second role read the tree instead of taking Captain's account.
 
+## The dispatch-surplus fault recurred 2026-08-02, after the note about it was read
+
+Boatswain flagged a Captain dispatch carrying a sentence characterizing the diff beyond the contract row of job, base commit and advanced targets. It quarantined rather than refused, on the ground that the sentence restated a deck read the role makes anyway and carried no product intent. **The note below from 2026-08-01 describes the identical fault, and reading it did not prevent it**, which is the shape the `Background`-above-`Rule` note already records: the mistake and the helpful instinct are one motion, so knowing the rule does not stop the hand. There is no check for it; the contract row is short enough to type from memory, so type only that.
+
 ## Four harbour findings ruled 2026-08-02, by doctrine rather than by asking
 
 The operator asked why these were put to them at all, and they were right: doctrine answered all four and Captain was surfacing findings instead of deciding them. That is the latency the "no backlog debt" rule names, wearing caution's clothes. Route to `AGENTS.md` under Settled decisions at the next harbour, so the file a fresh role reads carries them.
