@@ -8,7 +8,9 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 **The deck is at rest. 0.4.0 is shipped and verified on all three targets. There is no work in flight.**
 
-Run the Opening retrieval and believe it over this. State at close, 2026-08-02: HEAD `3319b2b`, tagged `v0.4.0`, tree clean, **level with `origin/main`**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing.
+Run the Opening retrieval and believe it over this. State at close, 2026-08-02: the release is tagged `v0.4.0`, tree clean, **level with `origin/main`**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing.
+
+**These notes name no HEAD hash, and that is deliberate rather than an omission.** Every earlier close recorded one, and every one was false within the minute, because the commit carrying the notes moves HEAD past whatever the notes just claimed. A hash here is wrong by construction. The tag is stable and the retrieval answers the rest.
 
 **Verified, not merely reported.** crates.io and npm each installed from the registry and the shipped binary ran and answered `tinman 0.4.0`; jsdelivr answers 200 at `@v0.4.0`, so all 24 published schema URIs resolve. **The tag shipped first, deliberately**, which is the lesson `@v0.2.0` paid for by answering 404 from the day it shipped.
 
