@@ -6,11 +6,17 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**The voyage is complete and uncommitted work is nil. Run the Opening retrieval and believe it over this.**
+**The deck is at rest. 0.4.0 is shipped and verified on all three targets. There is no work in flight.**
 
-State at close, 2026-08-01: HEAD `7c0f884`, tree clean, **ahead of `origin/main` by 2**, watchbill struck, no `@captain` or `@shipwright` scenario, no perturbation standing. **Outbound is pending and owes a version bump before it ships.**
+Run the Opening retrieval and believe it over this. State at close, 2026-08-02: HEAD `3319b2b`, tagged `v0.4.0`, tree clean, **level with `origin/main`**, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing.
 
-Sailed from `d22bcfe` on the operator's "all of the above": the four open items plus the proxy slice, whole per the never-split ruling. Twelve targets, twelve green. Every tier swept green at close: `@logic` 271, `@sandbox` 100, `@inference` 2. Planks 804 against 777 patterns, 0 stale, 0 provisional.
+**Verified, not merely reported.** crates.io and npm each installed from the registry and the shipped binary ran and answered `tinman 0.4.0`; jsdelivr answers 200 at `@v0.4.0`, so all 24 published schema URIs resolve. **The tag shipped first, deliberately**, which is the lesson `@v0.2.0` paid for by answering 404 from the day it shipped.
+
+Sailed from `d22bcfe` on the operator's "all of the above": the four open items plus the proxy slice, whole per the never-split ruling. Twelve targets, twelve green, then harbour, which wrote **zero** `@captain` skeletons and found no policy violation. Every tier green at close: `@logic` 271, `@sandbox` 100, `@inference` 2. Planks 804 against 777 patterns, 0 stale, 0 provisional.
+
+**One item open and it is the whole list.** `AGENTS.md`'s own durable-prose rules are largely unenforced: citation resolution is checked, but the watchbill-reference rule and the count rule have no derived check, so a sentence decaying either way passes silently, which is how that file rotted three times in one day. **The watchbill-reference rule is mechanically checkable** by scanning shipped Markdown for membership claims; the count rule almost certainly is not, and saying so is better than a filter that cannot identify its subject. Boatswain also flagged one marginal case already in the tree: the hudsucker download figures carry no date in their own sentence and lean on the section's framing. Next voyage, Captain authors the check.
+
+**Two facts to carry rather than rediscover.** `pasta` is installed from Ubuntu noble/universe at `0.0~git20240220.1e6f92b-1`, a 2024 snapshot whose binary reports no version of its own; if a seam needs something it lacks, building from source is the fallback. And the three held dependency versions, the `@logic` budget ruling, and the hudsucker decision are all recorded in `AGENTS.md` under Settled decisions, each closing on a repeating-a-settled-decision clause. Do not re-derive them here.
 
 Durable artifacts authored this pass: `scantlings/verification-conformance/unshared-corpus-read.yml`; three `@conformance` scenarios and an extended rule-set floor in `features/methodology-conformance.feature`; `features/proxied-egress.feature`; `allowedConstants` in `scantlings/duplication-allowance.json`; `network: proxy` and an `egress` block in `scantlings/sandbox-spec.schema.json`; `hudsucker` and `har` under `## Dependencies`.
 
