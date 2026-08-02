@@ -377,6 +377,19 @@ struct TinmanWorld {
     // shipped text rather than a copy of it
     refusal_text: Option<String>,
     refusal_link: Option<String>,
+    // the column header a layout scantling constrained by position, so the step
+    // asserting what the failure reported reads the position that region was
+    // drawn at in the model rather than a value restated here
+    constrained_column_header: Option<String>,
+    // the region a staged layout demanded and the program does not draw, so the
+    // step asserting what the failure named reads the name the layout carried
+    // rather than a value restated in the assertion
+    attested_absent_region: Option<String>,
+    // the file a launch would write and the directory holding the recorder that
+    // writes it, held so the recorder outlives the run and is reclaimed with the
+    // scenario
+    launch_record: Option<std::path::PathBuf>,
+    launch_recorder_dir: Option<support::ScratchDir>,
 }
 
 /// The scenario's working directory: the one a dotenv file is staged in and the
@@ -7753,7 +7766,7 @@ async fn the_program_shows_another_outside(world: &mut TinmanWorld, role: String
 /// alternatives at the root, and no single plan is written both ways. Each step
 /// kind the schema declares appears, so a kind production cannot read costs its
 /// own properties their credit and leaves the rest of the set creditable.
-const RECORDED_PLAN_FORMS: [&str; 4] = [
+const RECORDED_PLAN_FORMS: [&str; 5] = [
     "sandbox: {}\n\
      flow:\n\
      \x20 - run:\n\
@@ -7780,6 +7793,9 @@ const RECORDED_PLAN_FORMS: [&str; 4] = [
      sources:\n\
      \x20 - source: \"https://github.com/tldr-pages/tldr\"\n\
      \x20   licence: \"CC-BY-4.0\"\n",
+    "tui: \"./fixture-tui\"\n\
+     steps:\n\
+     \x20 - conforms: \"top-layout.json\"\n",
 ];
 
 #[given(expr = "the properties declared by {string}")]
@@ -14321,4 +14337,516 @@ fn still_held(holder: &std::path::Path) -> bool {
     };
     let pid = recorded.trim();
     !pid.is_empty() && std::path::Path::new("/proc").join(pid).exists()
+}
+
+// ---------------------------------------------------------------------------
+// layout attestation
+// ---------------------------------------------------------------------------
+
+/// The JSON Schema dialect every scantling in this project declares, so a layout
+/// a scenario stages is the same kind of document as one an operator commits.
+const LAYOUT_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+/// Stage a layout scantling in the workspace the sandbox binds, named relatively
+/// as every other command-line step names its files, because a path outside that
+/// workspace is unreachable from inside the sandbox.
+fn stage_layout_scantling(world: &mut TinmanWorld, file: &str, schema: &serde_json::Value) {
+    let text = serde_json::to_string_pretty(schema).expect("the layout scantling serializes");
+    stage_working_file(world, file, &text);
+}
+
+/// A layout constraining the children of the model's root region. The root is
+/// the only node every model carries, so a layout reaches everything below it
+/// from there, and constraining `children` rather than the root itself leaves
+/// the root's own name to the program.
+fn layout_over_root_children(children: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "$schema": LAYOUT_DIALECT,
+        "type": "object",
+        "required": ["root"],
+        "properties": {
+            "root": {
+                "type": "object",
+                "required": ["children"],
+                "properties": { "children": children }
+            }
+        }
+    })
+}
+
+/// A layout demanding that a table stand among the regions, carrying a column
+/// header of each named name. `contains` is the form a demand for presence
+/// takes: the model orders its children, and a layout naming what must exist
+/// says nothing about where in that order it sits.
+#[given(
+    expr = "a layout scantling at {string} requiring a table whose column headers name {string} and {string}"
+)]
+async fn a_layout_requiring_a_table_with_column_headers(
+    world: &mut TinmanWorld,
+    file: String,
+    first: String,
+    second: String,
+) {
+    let schema = layout_requiring_table_column_headers(&first, &second);
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// The layout the step above states, built apart from it so a plan's own
+/// attestation step is staged against the same demand the command line is.
+fn layout_requiring_table_column_headers(first: &str, second: &str) -> serde_json::Value {
+    let header = |name: &str| {
+        serde_json::json!({
+            "type": "array",
+            "contains": {
+                "type": "object",
+                "required": ["role", "name"],
+                "properties": {
+                    "role": { "const": "columnheader" },
+                    "name": { "const": name }
+                }
+            }
+        })
+    };
+    layout_over_root_children(serde_json::json!({
+        "type": "array",
+        "contains": {
+            "type": "object",
+            "required": ["role", "children"],
+            "properties": { "role": { "const": "table" } },
+            "allOf": [
+                { "properties": { "children": header(first) } },
+                { "properties": { "children": header(second) } }
+            ]
+        }
+    }))
+}
+
+/// A layout demanding a region carrying `name` stand among the root's children.
+#[given(expr = "a layout scantling at {string} requiring a region named {string}")]
+async fn a_layout_requiring_a_region_named(world: &mut TinmanWorld, file: String, name: String) {
+    let schema = layout_requiring_region_named(&name);
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// The layout the step above states, built apart from it so a plan's own
+/// attestation step is staged against the same demand the command line is.
+fn layout_requiring_region_named(name: &str) -> serde_json::Value {
+    layout_over_root_children(serde_json::json!({
+        "type": "array",
+        "contains": {
+            "type": "object",
+            "required": ["name"],
+            "properties": { "name": { "const": name } }
+        }
+    }))
+}
+
+/// A layout constraining where a named column header is drawn: wherever a region
+/// carrying that name stands, its rectangle starts at or beyond `column`. The
+/// constraint is conditional on the name rather than pinned to an ordinal, so it
+/// addresses the region the operator means on a screen whose other columns may
+/// come and go, and the constraint that fails is the position itself rather than
+/// a demand for presence that reports only an absence.
+#[given(
+    expr = "a layout scantling at {string} requiring the {string} column header to start beyond column {int}"
+)]
+async fn a_layout_requiring_a_column_header_beyond(
+    world: &mut TinmanWorld,
+    file: String,
+    header: String,
+    column: usize,
+) {
+    let schema = layout_over_root_children(serde_json::json!({
+        "type": "array",
+        "items": {
+            "if": {
+                "type": "object",
+                "required": ["role"],
+                "properties": { "role": { "const": "table" } }
+            },
+            "then": {
+                "required": ["children"],
+                "properties": {
+                    "children": {
+                        "type": "array",
+                        "items": {
+                            "if": {
+                                "type": "object",
+                                "required": ["name"],
+                                "properties": { "name": { "const": header } }
+                            },
+                            "then": {
+                                "required": ["rect"],
+                                "properties": {
+                                    "rect": {
+                                        "required": ["x"],
+                                        "properties": { "x": { "minimum": column } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }));
+    world.constrained_column_header = Some(header);
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// Arrange the scenario's run so that launching a program leaves a durable
+/// trace. Every route to a launch goes through the sandbox backend, which names
+/// `bwrap` rather than locating it, so a `PATH` leading with a directory of our
+/// own and a recording `bwrap` standing in it turns a launch into a file on
+/// disk. The `expect` command reaches Bubblewrap only through that launch, so
+/// nothing else on these runs writes the record.
+///
+/// The recorder refuses after writing, which is what a launch that got as far
+/// as the sandbox and no further would do anyway. What the run then reports is
+/// beside the point: the record is written before the refusal, so the trace
+/// stands however the run ends.
+fn record_any_launch(world: &mut TinmanWorld) {
+    let dir = support::ScratchDir::new("launch-record");
+    let record = dir.path().join("launched");
+    let recorder = dir.path().join("bwrap");
+    std::fs::write(
+        &recorder,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\nexit 1\n",
+            record.display()
+        ),
+    )
+    .unwrap_or_else(|e| panic!("the recorder {} was not written: {e}", recorder.display()));
+    support::set_executable(&recorder);
+    // Led rather than replaced: the run reaches every other tool it would
+    // normally reach, and only the one name the sandbox launches by is answered
+    // by the recorder.
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    world.env_vars.insert(
+        "PATH".to_string(),
+        format!("{}:{inherited}", dir.path().display()),
+    );
+    world.launch_record = Some(record);
+    world.launch_recorder_dir = Some(dir);
+}
+
+/// A document that parses as JSON and is not a schema: `type` takes a simple
+/// type name, and a string that names no type is a value the meta-schema
+/// refuses. Real invalidity rather than a mangled file, because a file that does
+/// not parse is refused by the parser and never reaches the question this asks.
+///
+/// The run is arranged to record a launch, because the scenario asserts the
+/// program was never launched and a refusal reported after a launch carries the
+/// same message as one reported before it.
+#[given(expr = "a layout scantling at {string} that is valid JSON and not a valid schema")]
+async fn a_layout_that_is_not_a_schema(world: &mut TinmanWorld, file: String) {
+    let schema = serde_json::json!({
+        "$schema": LAYOUT_DIALECT,
+        "type": "quadrilateral"
+    });
+    record_any_launch(world);
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// A schema carrying no keyword any instance can fail, which every model
+/// satisfies. This is the attestation that cannot fail, and the scenario asks
+/// that it be refused rather than reported as held.
+///
+/// The run is arranged to record a launch, for the reason the step above states.
+#[given(expr = "a layout scantling at {string} that constrains nothing")]
+async fn a_layout_constraining_nothing(world: &mut TinmanWorld, file: String) {
+    let schema = serde_json::json!({});
+    record_any_launch(world);
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// The record a launch would have written, read after the run. Absence is the
+/// assertion: the scantling was judged and the run ended without the sandbox
+/// ever being reached, which is what puts these scenarios in a tier that needs
+/// no external tool.
+#[then("the program was never launched")]
+async fn the_program_was_never_launched(world: &mut TinmanWorld) {
+    let record = world
+        .launch_record
+        .clone()
+        .expect("the run was arranged to record a launch");
+    let launched = std::fs::read_to_string(&record).unwrap_or_default();
+    assert!(
+        launched.is_empty(),
+        "the run reached the sandbox and launched the program before refusing the scantling, so \
+         the operator waits on a real process to be told their schema is broken; the launch was \
+         made with:\n{launched}"
+    );
+}
+
+#[then(expr = "the failure names {string} as the region the model lacked")]
+async fn the_failure_names_the_absent_region(world: &mut TinmanWorld, name: String) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&name),
+        "the failure does not name {name:?}, so the operator is not told which region departed; \
+         the error stream reads:\n{errors}"
+    );
+}
+
+/// The position a region was drawn at is a fact about the model, so it is read
+/// off the model rather than restated here: a value written into the assertion
+/// would hold against a report naming any position at all, including one the
+/// program never drew.
+#[then("the failure reports the position the region was drawn at")]
+async fn the_failure_reports_the_drawn_position(world: &mut TinmanWorld) {
+    let header = world
+        .constrained_column_header
+        .clone()
+        .expect("the layout constrained a column header by position");
+    let drawn = drawn_x_of_region(world, &header);
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&drawn.to_string()),
+        "the failure does not report that the {header:?} column header was drawn at column \
+         {drawn}, so the operator is not told where it went; the error stream reads:\n{errors}"
+    );
+}
+
+/// Where the region carrying `name` was drawn, read from the model of the same
+/// program the run under assertion was made against. The program is taken off
+/// the argument list that run was made with, so the model read is the model that
+/// run read.
+fn drawn_x_of_region(world: &mut TinmanWorld, name: &str) -> i64 {
+    let program = world
+        .run_argv
+        .as_ref()
+        .and_then(|argv| argv.last())
+        .cloned()
+        .expect("the run named a program");
+    let dir = working_dir(world);
+    let env = configured_env(world);
+    let outcome = support::run_tinman(&dir, &["inspect", "--json", &program], &env, None)
+        .unwrap_or_else(|e| panic!("the model of {program:?} was not read: {e}"));
+    let model: serde_json::Value = serde_json::from_str(&outcome.stdout).unwrap_or_else(|e| {
+        panic!(
+            "the model of {program:?} is not JSON: {e}\nit reads:\n{}\nand its error stream \
+             reads:\n{}",
+            outcome.stdout, outcome.stderr
+        )
+    });
+    let root = model.get("root").expect("the model carries a root region");
+    region_named(root, name)
+        .and_then(|region| region.get("rect")?.get("x")?.as_i64())
+        .unwrap_or_else(|| panic!("the model of {program:?} carries no region named {name:?}"))
+}
+
+/// The first region carrying `name`, anywhere below `region`.
+fn region_named<'a>(region: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+    if region.get("name").and_then(serde_json::Value::as_str) == Some(name) {
+        return Some(region);
+    }
+    region
+        .get("children")?
+        .as_array()?
+        .iter()
+        .find_map(|child| region_named(child, name))
+}
+
+#[then("the failure reports the scantling is not a schema")]
+async fn the_failure_reports_not_a_schema(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains("not a schema"),
+        "the failure does not report that the scantling is not a schema, so the operator reads it \
+         as a layout the model failed; the error stream reads:\n{errors}"
+    );
+}
+
+#[then("the failure reports the scantling constrains nothing")]
+async fn the_failure_reports_no_constraint(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains("constrains nothing"),
+        "the failure does not report that the scantling constrains nothing, so an attestation that \
+         cannot fail is reported as one that held; the error stream reads:\n{errors}"
+    );
+}
+
+/// The keypress the plan sends draws `Quit?` on the fixture's status line, so
+/// the layout the attestation is read against demands that region and nothing
+/// the opening screen already carries. A layout satisfied before the plan ran
+/// would hold whether or not its steps reached anything.
+#[given(expr = "a layout scantling at {string} requiring the region the keypress draws")]
+async fn a_layout_requiring_the_region_the_keypress_draws(world: &mut TinmanWorld, file: String) {
+    let schema = layout_over_root_children(serde_json::json!({
+        "type": "array",
+        "contains": {
+            "type": "object",
+            "required": ["role", "text"],
+            "properties": {
+                "role": { "const": "status" },
+                "text": { "const": "Quit?" }
+            }
+        }
+    }));
+    stage_layout_scantling(world, &file, &schema);
+}
+
+/// The attestation is stated against the same staged fixture the plan drives, so
+/// the plan's steps and the layout address one program. Staging is by name and
+/// content, so naming it again here answers the same relative path the `Given`
+/// wrote into the plan.
+#[when(expr = "the operator attests {string} after {string} against the fixture terminal program")]
+async fn the_operator_attests_after_a_plan_against_the_fixture(
+    world: &mut TinmanWorld,
+    scantling: String,
+    plan: String,
+) {
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    run_tinman_command(
+        world,
+        &[
+            "expect",
+            "--conforms",
+            &scantling,
+            "--after",
+            &plan,
+            &program,
+        ],
+    );
+}
+
+/// The steps a plan document carries, from whichever of the two roots the plan
+/// scantling declares it is written in: the shorthand form names one program and
+/// carries `steps` at the top level, and the full form carries them under the
+/// `tui` entry of its `flow`. A reader pinned to one root reports the other as a
+/// plan carrying no steps, which is a fact about the document's form rather than
+/// about what it attests.
+fn plan_document_steps(document: &serde_yaml::Value) -> Option<&Vec<serde_yaml::Value>> {
+    if let Some(steps) = document
+        .get("steps")
+        .and_then(serde_yaml::Value::as_sequence)
+    {
+        return Some(steps);
+    }
+    document
+        .get("flow")?
+        .as_sequence()?
+        .iter()
+        .find_map(|step| step.get("tui")?.get("steps")?.as_sequence())
+}
+
+/// The written plan is read as the document it is rather than through the
+/// production types, for the same reason validation reads it that way: the file
+/// an operator commits and the plan scantling governs is this document, and
+/// reading it back through production would attest whatever production
+/// normalized it to.
+#[then(expr = "{string} is a plan whose only step attests {string}")]
+async fn the_plan_carries_only_the_attestation(
+    world: &mut TinmanWorld,
+    file: String,
+    scantling: String,
+) {
+    let text = written_plan_text(world, &file);
+    let document: serde_yaml::Value = serde_yaml::from_str(&text)
+        .unwrap_or_else(|e| panic!("the written plan is not YAML: {e}\nit reads:\n{text}"));
+    let steps = plan_document_steps(&document)
+        .unwrap_or_else(|| panic!("the written plan carries no steps; it reads:\n{text}"));
+    assert_eq!(
+        steps.len(),
+        1,
+        "the plan carries {} steps rather than the one attestation; it reads:\n{text}",
+        steps.len()
+    );
+    let step = steps.first().expect("the plan carries one step");
+    let mapping = step
+        .as_mapping()
+        .unwrap_or_else(|| panic!("the plan's only step is not a step; it reads:\n{text}"));
+    assert_eq!(
+        mapping.len(),
+        1,
+        "the plan's only step names {} things rather than the one attestation; it reads:\n{text}",
+        mapping.len()
+    );
+    assert_eq!(
+        step.get("conforms").and_then(serde_yaml::Value::as_str),
+        Some(scantling.as_str()),
+        "the plan's only step does not attest {scantling:?}; it reads:\n{text}"
+    );
+}
+
+/// The scantling a replayed plan's attestation step names. Staged in the
+/// workspace the plan is read from and named relatively, because replay resolves
+/// the scantling against that workspace exactly as the command line does.
+const REPLAYED_LAYOUT: &str = "attested-layout.json";
+
+/// The region a layout demands of a program that does not draw it. `top` draws a
+/// process table and the regions around it; a footer is not among them, so the
+/// demand reaches the model and departs from it.
+const UNDRAWN_REGION: &str = "Footer";
+
+/// Write a plan driving `program` whose one step attests the scantling at
+/// `scantling`. The shorthand root is the form the plan scantling declares for a
+/// plan naming one program, and it is the form the attesting command writes.
+fn stage_attesting_plan(world: &mut TinmanWorld, file: &str, program: &str, scantling: &str) {
+    stage_working_file(
+        world,
+        file,
+        &format!("tui: {program}\nsteps:\n  - conforms: {scantling}\n"),
+    );
+}
+
+/// A committed plan reaching attestation through replay rather than through the
+/// command line. The layout demands the table the program draws, which is the
+/// same demand the command-line attestation is stated against, so a replay that
+/// ran the step attests a real constraint rather than a document every model
+/// holds against.
+#[given(expr = "a plan at {string} whose attestation names a layout {string} satisfies")]
+async fn a_plan_whose_attestation_names_a_satisfied_layout(
+    world: &mut TinmanWorld,
+    file: String,
+    program: String,
+) {
+    let schema = layout_requiring_table_column_headers("PID", "%CPU");
+    stage_layout_scantling(world, REPLAYED_LAYOUT, &schema);
+    stage_attesting_plan(world, &file, &program, REPLAYED_LAYOUT);
+}
+
+/// The same plan against a layout demanding a region the program does not draw,
+/// so the attestation is reached and departs. The region is kept on the world
+/// because the failure has to name what departed, and a name restated in the
+/// assertion would hold against a report naming any region at all.
+#[given(expr = "a plan at {string} whose attestation names a region {string} does not draw")]
+async fn a_plan_whose_attestation_names_an_undrawn_region(
+    world: &mut TinmanWorld,
+    file: String,
+    program: String,
+) {
+    let schema = layout_requiring_region_named(UNDRAWN_REGION);
+    stage_layout_scantling(world, REPLAYED_LAYOUT, &schema);
+    world.attested_absent_region = Some(UNDRAWN_REGION.to_string());
+    stage_attesting_plan(world, &file, &program, REPLAYED_LAYOUT);
+}
+
+/// The region that departed is read back off the layout the `Given` staged, so
+/// the assertion names what the scenario set up rather than a value written here
+/// that a failure reporting any region at all would satisfy.
+#[then("the failure names the region the model lacked")]
+async fn the_failure_names_the_region_the_model_lacked(world: &mut TinmanWorld) {
+    let region = world
+        .attested_absent_region
+        .clone()
+        .expect("the staged layout demanded a region the program does not draw");
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&region),
+        "the failure does not name {region:?}, so the operator is not told which region departed; \
+         the error stream reads:\n{errors}"
+    );
+}
+
+/// A plan whose one step attests a layout, the form the plan scantling grows to
+/// carry when a command able to write it exists.
+const ATTESTATION_PLAN: &str = "tui: top\nsteps:\n  - conforms: top-layout.json\n";
+
+#[given("the plan fixture carrying a step that attests a layout scantling")]
+async fn the_plan_fixture_carrying_an_attestation(world: &mut TinmanWorld) {
+    world.plan_sources.push(ATTESTATION_PLAN.to_string());
 }

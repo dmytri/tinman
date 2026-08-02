@@ -87,6 +87,9 @@ pub enum Command {
         /// The plan whose steps reach the screen the expectation is read against
         #[arg(long)]
         after: Option<String>,
+        /// The layout scantling the whole model is attested against
+        #[arg(long)]
+        conforms: Option<String>,
         /// The text expected where no role is named, and the terminal program
         /// the expectation is stated against
         #[arg(required = true)]

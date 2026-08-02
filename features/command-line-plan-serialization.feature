@@ -59,7 +59,7 @@ Feature: command-line plan serialization
     When the operator executes "tinman expect PID top --output probe.yaml"
     Then "probe.yaml" is a plan whose only step is the expectation naming "PID"
 
-  @contract
+  @contract @sandbox
   Scenario: a plan written from a session satisfies the plan schema
     Given a plan written from a session that expected "PID" against "top"
     When the plan is validated

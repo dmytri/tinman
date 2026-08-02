@@ -22,19 +22,26 @@ use std::time::{Duration, Instant};
 /// writes the plan it proved at `output`, so what survives the moment is a plan
 /// the operator commits and re-runs. A stated `after` names the plan whose steps
 /// reach the screen the expectation is read against, so the command line grows
-/// no driving verbs of its own.
+/// no driving verbs of its own. A stated `conforms` names the layout scantling
+/// the whole model is attested against, which is a constraint on every region
+/// rather than a spot check, so every argument names the program.
 ///
 /// @planks("the operator executes {string}")
 /// @planks("the operator states an expectation against a target that prints whether it read {string}")
 /// @planks("the operator expects {string} after {string} against the fixture terminal program")
+/// @planks("the operator attests {string} after {string} against the fixture terminal program")
 pub fn state(
     args: &[String],
     role: Option<&str>,
     name: Option<&str>,
     output: Option<&str>,
     after: Option<&str>,
+    conforms: Option<&str>,
     workspace: &Path,
 ) -> Result<(), String> {
+    if let Some(conforms) = conforms {
+        return attested(&args.join(" "), conforms, output, after, workspace);
+    }
     let (text, program) = match role {
         Some(_) => (None, args),
         None => {
@@ -64,6 +71,181 @@ pub fn state(
         sources: Vec::new(),
     };
     crate::examples::write_plan(&plan, &workspace.join(output))
+}
+
+/// Attest the model `command` draws against the layout the scantling at
+/// `conforms` states. A stated `after` names the plan whose steps reach the
+/// screen the model is read off, so the layout is attested against what the
+/// plan left rather than the opening screen. An attestation that held writes
+/// the plan it proved at `output`, which carries the attestation as its own
+/// step, so the operator commits and re-runs what the probe proved.
+///
+/// @planks("the operator executes {string}")
+/// @planks("the operator attests {string} after {string} against the fixture terminal program")
+fn attested(
+    command: &str,
+    conforms: &str,
+    output: Option<&str>,
+    after: Option<&str>,
+    workspace: &Path,
+) -> Result<(), String> {
+    let scantling = layout(conforms, workspace)?;
+    let validator = compiled(&scantling, conforms)?;
+    match after {
+        Some(after) => {
+            let session = reached(after, workspace)?;
+            settled(&validator, &scantling, &session, command, conforms)?;
+        }
+        None => {
+            let drawn = serde_json::to_value(inspect::model(command, workspace)?)
+                .expect("the model is written as JSON");
+            conformed(&validator, &scantling, &drawn, command, conforms)?;
+        }
+    }
+    let Some(output) = output else {
+        return Ok(());
+    };
+    let plan = Plan {
+        sandbox: SandboxSpec::default(),
+        flow: vec![FlowStep::Tui(TuiProcess {
+            command: command.to_string(),
+            steps: vec![Action::Conforms(conforms.to_string())],
+        })],
+        sources: Vec::new(),
+    };
+    crate::examples::write_plan(&plan, &workspace.join(output))
+}
+
+/// Attest the model `session` is drawing against the layout the scantling at
+/// `conforms` states, which is the form a plan's own attestation step takes:
+/// the program is already running and the screen to read is the one its steps
+/// reached.
+///
+/// @planks("the operator attests {string} after {string} against the fixture terminal program")
+/// @planks("that plan is replayed")
+pub(crate) fn attest_session(
+    session: &InteractiveCapture,
+    command: &str,
+    conforms: &str,
+    workspace: &Path,
+) -> Result<(), String> {
+    let scantling = layout(conforms, workspace)?;
+    let validator = compiled(&scantling, conforms)?;
+    settled(&validator, &scantling, session, command, conforms)
+}
+
+/// The attestation read off the screen `session` is drawing. A key reaches the
+/// program before the program has answered it, so the reading is given the same
+/// deadline a plan's own expectation step has, and the departures the last
+/// reading found are the evidence a failure carries.
+///
+/// @planks("the operator attests {string} after {string} against the fixture terminal program")
+fn settled(
+    validator: &jsonschema::Validator,
+    scantling: &serde_json::Value,
+    session: &InteractiveCapture,
+    command: &str,
+    conforms: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + EXPECT_DEADLINE;
+    loop {
+        let drawn =
+            serde_json::to_value(build(&session.screen())).expect("the model is written as JSON");
+        match conformed(validator, scantling, &drawn, command, conforms) {
+            Ok(()) => return Ok(()),
+            Err(report) if Instant::now() >= deadline => return Err(report),
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+/// The layout the scantling at `conforms` states. The scantling is judged
+/// before the program is launched, because a document that is not a schema, and
+/// one carrying no keyword any model can fail, both hold against everything:
+/// reporting either as an attestation that passed would report a check that
+/// cannot fail as one that did.
+///
+/// @planks("the operator executes {string}")
+fn layout(conforms: &str, workspace: &Path) -> Result<serde_json::Value, String> {
+    let path = workspace.join(conforms);
+    let source = std::fs::read_to_string(&path)
+        .map_err(|e| format!("the layout scantling {} was not read: {e}", path.display()))?;
+    let scantling: serde_json::Value = serde_json::from_str(&source)
+        .map_err(|e| format!("the layout scantling {conforms:?} is not JSON: {e}"))?;
+    jsonschema::draft202012::meta::validate(&scantling).map_err(|e| {
+        format!(
+            "the layout scantling {conforms:?} is not a schema: {e} at {}",
+            e.instance_path()
+        )
+    })?;
+    // The dialect a scantling declares says which schema language it is written
+    // in, and nothing about the model, so a document carrying that and nothing
+    // else constrains nothing.
+    if scantling
+        .as_object()
+        .is_some_and(|keywords| keywords.keys().all(|keyword| keyword == "$schema"))
+    {
+        return Err(format!(
+            "the layout scantling {conforms:?} constrains nothing, so every model holds against \
+             it and the attestation cannot fail"
+        ));
+    }
+    Ok(scantling)
+}
+
+/// The validator the layout compiles to.
+///
+/// @planks("the operator executes {string}")
+fn compiled(
+    scantling: &serde_json::Value,
+    conforms: &str,
+) -> Result<jsonschema::Validator, String> {
+    jsonschema::validator_for(scantling)
+        .map_err(|e| format!("the layout scantling {conforms:?} is not a schema: {e}"))
+}
+
+/// The attestation of one model against the compiled layout. A model that
+/// departs from the layout carries every departure, since the operator's next
+/// act is to correct the program or the layout and one departure at a time
+/// tells them only where to start.
+///
+/// @planks("the operator executes {string}")
+fn conformed(
+    validator: &jsonschema::Validator,
+    scantling: &serde_json::Value,
+    drawn: &serde_json::Value,
+    command: &str,
+    conforms: &str,
+) -> Result<(), String> {
+    let departures: Vec<String> = validator
+        .iter_errors(drawn)
+        .map(|failure| departure(&failure, scantling))
+        .collect();
+    if departures.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the model {command:?} drew does not conform to the layout {conforms:?}:\n{}",
+        departures.join("\n")
+    ))
+}
+
+/// One departure from the layout, told so the operator can act on it: what the
+/// model carries, where in the model it sits, and the demand it failed. The
+/// demand is read back out of the scantling at the failing location, because
+/// the validator names the keyword that failed and the value the model drew,
+/// and never the region or the position the layout asked for.
+///
+/// @planks("the operator executes {string}")
+fn departure(failure: &jsonschema::ValidationError<'_>, scantling: &serde_json::Value) -> String {
+    let location = failure.schema_path().as_str();
+    let demand = scantling
+        .pointer(location)
+        .map_or_else(String::new, |demand| format!(", which demands {demand}"));
+    format!(
+        "  {failure}\n    at {} of the model, against the layout at {location}{demand}",
+        failure.instance_path()
+    )
 }
 
 /// Run the plan at `after` over the operator's own tree, so its steps reach the

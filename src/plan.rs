@@ -168,6 +168,7 @@ pub struct TuiProcess {
 /// @planks("parsing fails and reports the unknown step keyword {string}")
 /// @planks("the written plan records a key press {string}")
 /// @planks("a recorded plan is serialized and read back")
+/// @planks("{string} is a plan whose only step attests {string}")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
@@ -176,6 +177,7 @@ pub enum Action {
     Press(String),
     Expect(Expectation),
     Capture(Capture),
+    Conforms(String),
 }
 
 /// Collect the items of a pane into named structured data: the role the pane

@@ -200,6 +200,11 @@
             }
           ]
         },
+        "conforms": {
+          "description": "Attest the whole terminal object model against a layout scantling at this path. A locator names one region and a text names one string, where a layout constrains which regions exist, where they sit and how they are drawn, so a program drawing the right things in the wrong places fails here and passes every other step.",
+          "type": "string",
+          "minLength": 1
+        },
         "capture": {
           "description": "Collect the items of a pane into named structured data.",
           "type": "object",

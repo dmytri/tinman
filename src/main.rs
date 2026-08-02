@@ -185,6 +185,7 @@ fn main() {
             session,
             output,
             after,
+            conforms,
             expectation,
         }) => {
             let workspace = std::env::current_dir().expect("the working directory is read");
@@ -199,6 +200,7 @@ fn main() {
                     name.as_deref(),
                     output.as_deref(),
                     after.as_deref(),
+                    conforms.as_deref(),
                     &workspace,
                 ),
             };

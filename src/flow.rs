@@ -207,6 +207,14 @@ fn run_flow(
                             bindings.push(activate(&mut session, locator)?)
                         }
                         Action::Fill(fill) => session.press_key(&fill.value),
+                        Action::Conforms(scantling) => {
+                            crate::expect::attest_session(
+                                &session,
+                                &tui.command,
+                                scantling,
+                                workspace,
+                            )?;
+                        }
                         Action::Capture(capture) => {
                             // The capture reads the screen the earlier steps
                             // left, so what it collects is what the flow had
