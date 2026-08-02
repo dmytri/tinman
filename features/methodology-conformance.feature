@@ -86,6 +86,21 @@ Feature: methodology conformance
     Then every citation names a scenario the specs carry
     And the citations read are not empty
 
+  Rule: the shipped Markdown documents are the tracked files the package manifest does not exclude, which is the set the citation check above reads. Defining the set by the manifest rather than by a list kept here means a document added to the tree is surveyed the moment it is tracked, and one the manifest excludes is never opened. Captain's private notes sit outside the set by that exclusion, and they are transient by design, so a membership claim in them decays without costing a reader anything.
+
+  Rule: a membership claim and the sentence forbidding one carry the same words, so a check keyed on the word alone reddens the rule that defines the fault. Not one mention of the watchbill in the shipped documents is a claim: they are the rule, its reasoning, and a settled condemnation recorded so a later harbour stops re-deriving it. What separates a claim from a definition is that a claim names which scenario stands on the watch, where the definition speaks of a scenario generically.
+
+  Rule: so the subject is given a findable form rather than a wider filter, which is the shape the child-wait census above already took. A claim is a membership construction on a line that also names a scenario or a spec, and both instances this closes took that form: one said a newly authored doubles check stood on the watchbill and named it, the other said the same of a manifest join. Each was true the day it was written and false the moment custody struck the file, and nothing announced the change, because a struck watchbill leaves the sentence exactly as it was.
+
+  Rule: the count rule stated beside this one in the durable-prose rules gets no check, and admitting that is better than a filter that cannot name its subject. A decaying count is a live claim about what the tree carries now, and the shipped documents carried thirty-six bare integers on 2026-08-02 that were status codes, byte counts, sweep timings, package deltas and versions. Telling a live count from a dated measurement means reading which date governs a sentence, which is discourse rather than a line, and the marginal case is already in the tree: the download figures under the proxy decision carry their date in a neighbouring sentence rather than their own. That enumeration stays a judgment made at harbour.
+
+  @conformance
+  Scenario: no shipped document claims a scenario it names is on a watchbill
+    Given the shipped Markdown documents
+    When each line naming a scenario or a spec is read for a watchbill membership claim
+    Then no line claims the scenario it names is on a watchbill
+    And every shipped Markdown document was read
+
   Rule: nothing reads the outbound section. Every other rigging value that matters carries a check: the tiers have the budget scenario, the plank commands have their join, the scantlings have their reachability. The one section only a release executes had none, and three of its four values were wrong through two releases, one of them shipping schema URIs that answered 404 from the day they were published. A release is too rare to be the thing that finds a broken release command.
 
   @conformance

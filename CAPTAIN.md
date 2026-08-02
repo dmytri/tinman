@@ -302,6 +302,14 @@ The reason it happens is structural rather than lax. `AGENTS.md` is where a sett
 
 Either the Article widens to let Shipwright write that file whenever Captain routes a settled decision to it, which is what happens now, or the doctrine needs a different home for a decision made at sea. Do not resolve it by having Captain write the file: routing through Shipwright is what caught three stale claims in it today, and every one was found because a second role read the tree instead of taking Captain's account.
 
+## A fourth doctrine gap, found by QM 2026-08-02
+
+**The bulkhead's named leak is the diff family, and file enumeration is a second vector nobody has closed.** The Working tree policy tells a role to carry `':!CAPTAIN.md'` on `git diff`, `git show`, `git log -p` and `git stash show -p`, because those print the content of every changed file. QM crossed the bulkhead by a different route: `git ls-files | grep '\.md$'` and then reading each hit. That is enumeration rather than diffing, no rule names it, and it looks exactly like ordinary deck reading.
+
+**This target makes the trap structural rather than incidental.** The scenario's subject is shipped Markdown, so a role implementing it enumerates Markdown by construction, and the private notes are Markdown. **A report does not cross the Captain to QM boundary, so warning the next QM is impossible by design.** The answer taken was durable rather than procedural: the feature now defines the shipped set as what the manifest packages. That is true on its own merits, it sharpens a term both scenarios already leaned on, and it reaches the reader by describing the contract instead of carrying an instruction.
+
+**QM stopped and reported rather than working through it, which is the protocol working.** Raise the pathspec rule upstream as needing a companion for enumeration.
+
 ## Two doctrine gaps worth raising upstream
 
 1. **A release version bump has no owner, and 2026-07-29 is the third time it has cost something.** The write-scope list gives Shipwright the manifest for dependency work only, and Shipwright is a harbour role while a release is mid-outbound. Crew is dispatched only for a failing target and a bump has none. Boatswain writes hygiene, not new content. So the one edit every release requires is the one edit no role owns, and Captain takes it under authority at sea each time, recorded as a departure. Captain bumped `Cargo.toml` to 0.1.2 that way; Boatswain named the same gap independently.

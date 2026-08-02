@@ -4805,6 +4805,87 @@ pub fn cited_scenario_references() -> Vec<Citation> {
     found
 }
 
+/// The membership constructions a watchbill claim is written with.
+///
+/// A claim is a membership construction, not the word `watchbill`. The rule
+/// forbidding these claims, its reasoning, and a settled condemnation all name
+/// the watchbill in the shipped prose, so a filter keyed on the word reddens
+/// the sentences that define the fault. Each entry here is a preposition
+/// against a watch noun, and each is a prefix of its `watchbill` form, so
+/// `on the watch` also catches `on the watchbill`.
+const WATCHBILL_MEMBERSHIP_CONSTRUCTIONS: [&str; 5] = [
+    "on the watch",
+    "on a watch",
+    "on this watch",
+    "in the watch",
+    "in a watch",
+];
+
+/// One line of a shipped document claiming the scenario it names stands on a
+/// watchbill: the document, the line it sits on, the construction that made it
+/// a claim, and the line itself.
+#[derive(Debug, Clone)]
+pub struct WatchbillClaim {
+    pub document: String,
+    pub line: usize,
+    pub construction: String,
+    pub text: String,
+}
+
+/// What a survey of the shipped documents for watchbill membership claims read
+/// and what it found.
+#[derive(Debug, Clone)]
+pub struct WatchbillSurvey {
+    pub documents_read: Vec<String>,
+    pub claims: Vec<WatchbillClaim>,
+}
+
+/// The shipped-document lines that claim a scenario they name is on a
+/// watchbill.
+///
+/// The subject is given a findable form rather than a wider filter, the shape
+/// the citation survey above already takes: a line names a scenario or a spec
+/// when it carries a backticked span holding `.feature`. That is what separates
+/// a claim from a definition. A claim names which scenario stands on the watch,
+/// where the rule forbidding claims speaks of a scenario generically and cites
+/// none, so the definition carries no reference for this filter to catch. A
+/// line naming the reference form the watchbill uses carries a reference and no
+/// membership construction, so it is not read as a claim either.
+pub fn watchbill_membership_claims(documents: &[String]) -> WatchbillSurvey {
+    let mut documents_read = Vec::new();
+    let mut claims = Vec::new();
+    for document in documents {
+        let text = std::fs::read_to_string(document)
+            .unwrap_or_else(|e| panic!("shipped document {document} unreadable: {e}"));
+        documents_read.push(document.clone());
+        for (offset, line) in text.lines().enumerate() {
+            let names_a_spec = line
+                .split('`')
+                .enumerate()
+                .any(|(index, span)| index % 2 == 1 && span.contains(".feature"));
+            if !names_a_spec {
+                continue;
+            }
+            let lowered = line.to_lowercase();
+            if let Some(construction) = WATCHBILL_MEMBERSHIP_CONSTRUCTIONS
+                .iter()
+                .find(|construction| lowered.contains(*construction))
+            {
+                claims.push(WatchbillClaim {
+                    document: document.clone(),
+                    line: offset + 1,
+                    construction: (*construction).to_string(),
+                    text: line.trim().to_string(),
+                });
+            }
+        }
+    }
+    WatchbillSurvey {
+        documents_read,
+        claims,
+    }
+}
+
 /// The `ast-grep` project configuration, read for the rule directories the
 /// derived verification-conformance rule set lives in.
 #[derive(Debug, Deserialize)]

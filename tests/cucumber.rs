@@ -124,6 +124,10 @@ struct TinmanWorld {
     // naming no scenario the specs carry
     shipped_citations: Option<Vec<support::Citation>>,
     unresolved_citations: Option<Vec<String>>,
+    // the shipped Markdown documents, and the survey reading each line that
+    // names a scenario or a spec for a watchbill membership claim
+    shipped_documents: Option<Vec<String>>,
+    watchbill_claim_survey: Option<support::WatchbillSurvey>,
     // the provisional planks the implementation carries, and the spent ones,
     // naming a scenario Captain has already disposed of
     provisional_planks: Option<support::ProvisionalInventory>,
@@ -11618,6 +11622,68 @@ async fn the_citations_read_are_not_empty(world: &mut TinmanWorld) {
     assert!(
         !citations.is_empty(),
         "the shipped Markdown documents cite no scenario, so the join asserted nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: the watchbill membership the shipped prose claims
+// ---------------------------------------------------------------------------
+
+#[given("the shipped Markdown documents")]
+async fn the_shipped_markdown_documents(world: &mut TinmanWorld) {
+    world.shipped_documents = Some(support::shipped_markdown_documents());
+}
+
+#[when("each line naming a scenario or a spec is read for a watchbill membership claim")]
+async fn each_line_naming_a_spec_is_read_for_a_membership_claim(world: &mut TinmanWorld) {
+    let documents = world
+        .shipped_documents
+        .as_ref()
+        .expect("the shipped documents were listed");
+    world.watchbill_claim_survey = Some(support::watchbill_membership_claims(documents));
+}
+
+#[then("no line claims the scenario it names is on a watchbill")]
+async fn no_line_claims_the_scenario_it_names_is_on_a_watchbill(world: &mut TinmanWorld) {
+    let survey = world
+        .watchbill_claim_survey
+        .as_ref()
+        .expect("each line naming a scenario or a spec was read");
+    let reported: Vec<String> = survey
+        .claims
+        .iter()
+        .map(|claim| {
+            format!(
+                "{}:{} claims membership with \"{}\":\n    {}",
+                claim.document, claim.line, claim.construction, claim.text
+            )
+        })
+        .collect();
+    assert!(
+        reported.is_empty(),
+        "{} shipped line(s) claim a scenario they name is on a watchbill, which decays silently the moment custody strikes the file:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+#[then("every shipped Markdown document was read")]
+async fn every_shipped_markdown_document_was_read(world: &mut TinmanWorld) {
+    let shipped = world
+        .shipped_documents
+        .as_ref()
+        .expect("the shipped documents were listed");
+    let survey = world
+        .watchbill_claim_survey
+        .as_ref()
+        .expect("each line naming a scenario or a spec was read");
+    assert!(
+        !shipped.is_empty(),
+        "the packaged manifest excludes every tracked Markdown document, so the survey read nothing"
+    );
+    assert_eq!(
+        &survey.documents_read, shipped,
+        "the survey read a different set of documents than the shipped set"
     );
 }
 
