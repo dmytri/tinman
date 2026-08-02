@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/assistant-command-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.4.0/scantlings/assistant-command-boundary.json",
   "title": "Interactive assistant / command parser boundary",
   "description": "intent/help.md invariant: the interactive assistant must never execute arbitrary shell commands and must never bypass Tinman's existing CLI. Every action it proposes reaches the operating system only through Tinman's normal command parser. Discharged by the assistant-command-boundary checker in verification support, which scans the assistant source. Attested by the @contract scenario in features/interactive-help.feature.",
   "module": "src/assistant.rs",

@@ -3919,7 +3919,7 @@ dependencies = [
 
 [[package]]
 name = "tinman"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "alacritty_terminal",
  "clap",

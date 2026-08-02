@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.3.0/scantlings/duplication-allowance.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.4.0/scantlings/duplication-allowance.json",
   "title": "Duplication allowance",
   "description": "The duplicates that are structural coincidence rather than copied logic, in two lists because two censuses read the sources. Every entry names why. Anything a census reports that this file does not name is a finding, so the gate is zero outside these lists rather than a tuned threshold. allowedGroups answers the duplication scanner, which reads functions. allowedConstants answers the constant census, which exists because the scanner carries no unit kind for a constant and so cannot see one at any threshold. Both are discharged by verification support joining a census against its list, and both are attested by @conformance scenarios in features/methodology-conformance.feature.",
   "allowedGroups": [
