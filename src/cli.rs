@@ -29,9 +29,14 @@ pub struct Cli {
 /// @planks("the operator records the command {string} with {string}")
 /// @planks("the operator runs {string} with stdout redirected to a file")
 /// @planks("the operator executes {string}")
+/// @planks("a session named {string} running {string}")
+/// @planks("the operator launches a session against a target that prints whether it read {string}")
+/// @planks("the operator states an expectation against a target that prints whether it read {string}")
+/// @planks("the operator has expected {string} and pressed {string} in that session")
 /// @planks("each is requested from {string}")
 /// @planks("each is passed to the command parser")
 /// @planks("{string} is passed to the command parser")
+/// @planks("the accepted command set is read")
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Capture a live session into an editable plan
@@ -47,6 +52,54 @@ pub enum Command {
     Test {
         /// The plan file to run
         plan: std::path::PathBuf,
+    },
+    /// Start a named session against a program
+    Launch {
+        /// The name the session takes
+        #[arg(long)]
+        session: String,
+        /// The terminal program the session runs, and the arguments it takes
+        #[arg(required = true)]
+        command: Vec<String>,
+    },
+    /// Send one key to the program
+    Press {
+        /// The session the key is sent to
+        #[arg(long)]
+        session: String,
+        /// The key the program is sent
+        key: String,
+    },
+    /// State one expectation against the screen
+    Expect {
+        /// The role the expected region plays
+        #[arg(long)]
+        role: Option<String>,
+        /// The name the expected region carries
+        #[arg(long)]
+        name: Option<String>,
+        /// The session the expectation is stated against
+        #[arg(long)]
+        session: Option<String>,
+        /// Where the plan is written
+        #[arg(long)]
+        output: Option<String>,
+        /// The plan whose steps reach the screen the expectation is read against
+        #[arg(long)]
+        after: Option<String>,
+        /// The text expected where no role is named, and the terminal program
+        /// the expectation is stated against
+        #[arg(required = true)]
+        expectation: Vec<String>,
+    },
+    /// End a named session
+    Close {
+        /// The name of the session to end
+        #[arg(long)]
+        session: String,
+        /// Where the plan the session performed is written
+        #[arg(long)]
+        output: Option<String>,
     },
     /// Print the terminal object model of a running program
     Inspect {

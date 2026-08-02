@@ -27,6 +27,11 @@ use tinman::cli::{Cli, Command};
 /// @planks("the operator runs {string} in an interactive terminal")
 /// @planks("the operator runs {string} in an interactive terminal with stdin redirected from a file")
 /// @planks("the operator executes {string}")
+/// @planks("a session named {string} running {string}")
+/// @planks("the operator launches a session against a target that prints whether it read {string}")
+/// @planks("the operator states an expectation against a target that prints whether it read {string}")
+/// @planks("the operator has expected {string} and pressed {string} in that session")
+/// @planks("a plan written from a session that expected {string} against {string}")
 /// @planks("the operator tests that plan")
 /// @planks("the operator tests that plan with the streams captured separately")
 /// @planks("the operator tests the plan {string}")
@@ -172,6 +177,54 @@ fn main() {
                     eprintln!("{failure}");
                     std::process::exit(1);
                 }
+            }
+        }
+        Some(Command::Expect {
+            role,
+            name,
+            session,
+            output,
+            after,
+            expectation,
+        }) => {
+            let workspace = std::env::current_dir().expect("the working directory is read");
+            // A named session is the program the expectation is stated against,
+            // so the verb reads the screen that session is showing rather than
+            // launching a program of its own.
+            let stated = match &session {
+                Some(session) => tinman::session::expect_text(session, &expectation),
+                None => tinman::expect::state(
+                    &expectation,
+                    role.as_deref(),
+                    name.as_deref(),
+                    output.as_deref(),
+                    after.as_deref(),
+                    &workspace,
+                ),
+            };
+            if let Err(failure) = stated {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Launch { session, command }) => {
+            let workspace = std::env::current_dir().expect("the working directory is read");
+            if let Err(failure) = tinman::session::launch(&command, &session, &workspace) {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Close { session, output }) => {
+            let workspace = std::env::current_dir().expect("the working directory is read");
+            if let Err(failure) = tinman::session::close(&session, output.as_deref(), &workspace) {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
+        }
+        Some(Command::Press { session, key }) => {
+            if let Err(failure) = tinman::session::press(&session, &key) {
+                eprintln!("{failure}");
+                std::process::exit(1);
             }
         }
         Some(Command::Driver) => {

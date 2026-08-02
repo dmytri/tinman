@@ -27,7 +27,7 @@ The TOM is the terminal's document object model: a tree of nested rectangles, fo
 
 The roles are drawn from WAI-ARIA, so a role assistive technology understands is a role you already understand. Tinman coins none of its own. The full set:
 
-`application`, `region`, `menu`, `menuitem`, `list`, `listitem`, `button`, `textbox`, `status`, `log`, `article`.
+`application`, `region`, `menu`, `menuitem`, `list`, `listitem`, `button`, `textbox`, `status`, `log`, `article`, `table`, `row`, `columnheader`, `cell`.
 
 A role is added when a scenario needs it, not in anticipation, so this list is the whole of what a locator can address today.
 
@@ -51,6 +51,8 @@ tinman inspect opencode
 
 - `tinman record <command...>` captures a live session into an editable plan.
 - `tinman test <plan>` runs a plan and reports whether it passed, replaying it exactly with no model invocation and no network.
+- `tinman launch <command...> --session <name>` starts a named session, and `tinman close --session <name>` ends it.
+- `tinman expect` states one expectation against the screen. It takes `--session <name>` to address a running session, and with no session it launches the program, asserts and closes. Driving is a plan's job: `--after <plan>` runs a plan's steps first, so an expectation can be made against a state only interaction reaches.
 - `tinman inspect <command...>` prints the terminal object model of a running program.
 - `tinman driver` speaks the JSON driver protocol on stdin and stdout.
 - `tinman man` writes Tinman's manual page as roff on stdout.
@@ -64,6 +66,26 @@ tinman completions bash
 ```
 
 Running `tinman` with no arguments on a terminal opens the interactive assistant, which answers questions about Tinman and proposes commands for you to confirm. Redirect stdin or stdout and you get the conventional help instead.
+
+## Exploring from the command line
+
+The plan's steps are also commands, so you can ask one question of a program without writing a plan first:
+
+```
+tinman expect Saved opencode
+```
+
+The exit status is the answer: zero if it held, non-zero with the screen it read if it did not.
+
+To look around between steps, name a session and drive it:
+
+```
+tinman launch opencode --session work
+tinman expect Saved --session work
+tinman close --session work --output probe.yaml
+```
+
+`--output` writes what held as an ordinary plan. Nothing in it records that you arrived interactively, because it is a plan like any other: read it, edit it, commit it, and replay it with `tinman test`. A step that failed is left out, since a plan describing a screen that never held is a red test you did nothing to earn.
 
 ## Driving Tinman from your own test suite
 

@@ -199,6 +199,20 @@ struct TinmanWorld {
     // are compared against each other rather than either asserted alone
     example_placeholders: Option<Vec<String>>,
     example_values: Option<Vec<(String, String)>>,
+    // the command-line sessions a scenario launched, closed when the scenario
+    // ends: a session outlives the command that launched it, so one left by a
+    // scenario that failed part-way is a real program still running.
+    //
+    // Declared before `scratch`: fields drop in declaration order, and the
+    // teardown runs `tinman close` from the scratch directory, so a scratch
+    // dropped first leaves the close with no working directory to spawn in.
+    launched_sessions: LaunchedSessions,
+    // the temporary directory this scenario's runs of the binary see. A session
+    // is addressed by the name the operator gave it, and two scenarios of one
+    // tier name the same session `work`, so workers sharing one temporary
+    // directory address one another's sessions. Dropped after
+    // `launched_sessions`, whose teardown reads it.
+    session_tmp: Option<support::ScratchDir>,
     // running the real binary
     scratch: Option<support::ScratchDir>,
     terminal_session: Option<support::TerminalSession>,
@@ -206,6 +220,13 @@ struct TinmanWorld {
     run_stdout: Option<String>,
     run_stderr: Option<String>,
     run_status: Option<i32>,
+    // the argument list the operator's command line was run as, so a step
+    // asserting what the run was contingent on restates that same command line
+    // rather than carrying a second copy of the scenario's own flags
+    run_argv: Option<Vec<String>>,
+    // what the plan a scenario staged expects, so a step reading the failure it
+    // reported addresses the step that actually failed
+    staged_plan_expectation: Option<String>,
     // the file a scenario put in a run's way, so a step reading "that file"
     // addresses the one the starting state created
     existing_file: Option<String>,
@@ -365,12 +386,37 @@ fn working_dir(world: &mut TinmanWorld) -> std::path::PathBuf {
     if world.scratch.is_none() {
         world.scratch = Some(support::ScratchDir::new("workdir"));
     }
+    // Every run of the binary is given this scenario's own temporary directory,
+    // so the sessions it creates are addressable by it alone. Set here because
+    // every path that runs the binary reads the working directory first and the
+    // configured environment after, so a scenario naming no starting state is
+    // isolated too.
+    scenario_temp_dir(world);
     world
         .scratch
         .as_ref()
         .expect("a working directory")
         .path()
         .to_path_buf()
+}
+
+/// The temporary directory this scenario's runs of the binary see, created on
+/// first use and put on their environment as `TMPDIR`.
+fn scenario_temp_dir(world: &mut TinmanWorld) -> std::path::PathBuf {
+    if world.session_tmp.is_none() {
+        world.session_tmp = Some(support::ScratchDir::new("tmp"));
+    }
+    let path = world
+        .session_tmp
+        .as_ref()
+        .expect("a temporary directory")
+        .path()
+        .to_path_buf();
+    world
+        .env_vars
+        .entry("TMPDIR".to_string())
+        .or_insert_with(|| path.display().to_string());
+    path
 }
 
 /// The environment the scenario configured, as the pairs a launched process is
@@ -2291,7 +2337,11 @@ async fn operator_executes(world: &mut TinmanWorld, line: String) {
         .unwrap_or_else(|e| panic!("running {line:?} failed: {e}"));
     world.run_elapsed = Some(started.elapsed());
     world.run_stdout = Some(outcome.stdout);
+    // A failing run writes its diagnosis to stderr, so a step asserting what a
+    // failure reported reads nothing unless the run's error stream is kept.
+    world.run_stderr = Some(outcome.stderr);
     world.run_status = Some(outcome.status);
+    world.run_argv = Some(args);
 }
 
 #[then(expr = "the output begins with a roff title macro naming {string}")]
@@ -2816,8 +2866,8 @@ async fn the_accepted_command_set_is_read(world: &mut TinmanWorld) {
     world.read_command_set = Some(commands);
 }
 
-#[then("it is exactly the seven commands named")]
-async fn the_command_set_is_exactly_the_seven_named(world: &mut TinmanWorld) {
+#[then("it is exactly the commands named")]
+async fn the_command_set_is_exactly_the_commands_named(world: &mut TinmanWorld) {
     let read = world
         .read_command_set
         .as_ref()
@@ -2826,11 +2876,9 @@ async fn the_command_set_is_exactly_the_seven_named(world: &mut TinmanWorld) {
         .named_command_set
         .clone()
         .expect("the scenario named its commands");
-    assert_eq!(
-        named.len(),
-        7,
-        "the scenario names {} commands, and this step asserts seven",
-        named.len()
+    assert!(
+        !named.is_empty(),
+        "the scenario named no command, so this step would assert nothing"
     );
     named.sort();
     named.dedup();
@@ -13342,4 +13390,935 @@ async fn the_request_the_upstream_received_carries_the_credential(world: &mut Ti
         request.path,
         request.headers
     );
+}
+
+// ---------------------------------------------------------------------------
+// command-line expectation
+// ---------------------------------------------------------------------------
+
+#[then("the command exits with a zero status")]
+async fn the_command_exits_zero(world: &mut TinmanWorld) {
+    let status = world.run_status.expect("a command was run");
+    assert_eq!(
+        status,
+        0,
+        "the command exited {status}; it wrote to the data stream:\n{}\nand to the error \
+         stream:\n{}",
+        run_output(world),
+        run_errors(world)
+    );
+}
+
+/// A failed expectation shows the screen it read, so the assertion is that the
+/// failure carries what the program itself drew rather than a bare status. The
+/// scenarios state their expectation against `top`, whose column header `PID`
+/// is the text the feature's holding expectation names, so a failure carrying
+/// it is carrying the screen.
+#[then("the failure carries the screen the program drew")]
+async fn the_failure_carries_the_screen(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains("PID"),
+        "the failure carries nothing the program drew, so it does not show the screen it read; \
+         the error stream reads:\n{errors}"
+    );
+}
+
+#[then(expr = "the failure reports that {string} is not a role the model produces")]
+async fn the_failure_reports_an_unproduced_role(world: &mut TinmanWorld, role: String) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&role) && errors.contains("role"),
+        "the failure does not report {role:?} as a role the model does not produce; the error \
+         stream reads:\n{errors}"
+    );
+}
+
+/// Ambiguity is reported as ambiguity, so the failure names how many regions
+/// the locator reached and that count is more than one. A message reporting a
+/// single match would be a resolution reported as a failure.
+#[then("the failure reports the locator matched more than one region")]
+async fn the_failure_reports_the_ambiguity(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains("matches"),
+        "the failure does not report what the locator matched; the error stream reads:\n{errors}"
+    );
+    let count: usize = errors
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|piece| !piece.is_empty())
+        .filter_map(|piece| piece.parse().ok())
+        .max()
+        .unwrap_or_else(|| panic!("the failure reports no count of matches; it reads:\n{errors}"));
+    assert!(
+        count > 1,
+        "the failure reports {count} matches, so it does not report an ambiguity; the error \
+         stream reads:\n{errors}"
+    );
+}
+
+#[then(expr = "no file is written at {string}")]
+async fn no_file_is_written_at(world: &mut TinmanWorld, name: String) {
+    let path = working_dir(world).join(&name);
+    assert!(
+        !path.exists(),
+        "a file was written at {}, and it reads:\n{}",
+        path.display(),
+        std::fs::read_to_string(&path).unwrap_or_default()
+    );
+}
+
+#[then(expr = "{string} is a plan whose expectation names the role {string} and the name {string}")]
+async fn the_plan_expectation_names_role_and_name(
+    world: &mut TinmanWorld,
+    file: String,
+    role: String,
+    name: String,
+) {
+    let plan = written_plan(world, &file);
+    let locators: Vec<tinman::plan::Locator> = plan
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => expectation.locator,
+            _ => None,
+        })
+        .collect();
+    assert!(
+        locators
+            .iter()
+            .any(|locator| locator.role.as_deref() == Some(role.as_str()) && locator.name == name),
+        "the plan carries no expectation naming the {role} {name:?}; its expectation locators \
+         are {locators:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// command-line isolation
+// ---------------------------------------------------------------------------
+
+/// The value the operator's own environment carries. A sandbox that let it
+/// through would put this text on the target's screen, which is what the
+/// scenarios assert never happens.
+const OPERATOR_SECRET: &str = "hunter2";
+
+/// What the target prints when the variable did not reach it.
+const SECRET_ABSENT: &str = "SECRET=[]";
+
+/// Stage a target that prints whether it read `name` and then holds its screen,
+/// so an expectation stated against it reads a drawn screen rather than racing
+/// a program that has already exited.
+fn stage_secret_reporting_target(world: &mut TinmanWorld, name: &str) -> String {
+    stage_recorded_program(
+        world,
+        "reports-secret",
+        &format!("#!/bin/sh\nprintf 'SECRET=[%s]\\n' \"${name}\"\nsleep 5\n"),
+    )
+}
+
+#[given(expr = "the operator's environment carries {string}")]
+async fn the_operators_environment_carries(world: &mut TinmanWorld, name: String) {
+    world
+        .env_vars
+        .insert(name.clone(), OPERATOR_SECRET.to_string());
+    world.secret_name = Some(name);
+    world.secret_value = Some(OPERATOR_SECRET.to_string());
+}
+
+// The pattern stays on one line: a Rust line continuation puts the escape and
+// the indent into the literal `step-usage` reports, so an exact-string join
+// against a plank carrying the pattern the runner binds could never match.
+#[when(
+    expr = "the operator states an expectation against a target that prints whether it read {string}"
+)]
+async fn the_operator_states_an_expectation_against_a_secret_reporting_target(
+    world: &mut TinmanWorld,
+    name: String,
+) {
+    let program = stage_secret_reporting_target(world, &name);
+    run_tinman_command(world, &["expect", SECRET_ABSENT, &program]);
+}
+
+/// The target reports the variable was absent exactly when the expectation
+/// naming the absent form held. A leak draws the operator's own value on the
+/// screen instead, the expectation fails, and the failure carries the screen
+/// that shows it.
+#[then("the target reports the variable was absent")]
+async fn the_target_reports_the_variable_absent(world: &mut TinmanWorld) {
+    let status = world.run_status.expect("a command was run");
+    assert_eq!(
+        status,
+        0,
+        "the target did not report {:?} absent, so the operator's environment reached inside the \
+         sandbox; the data stream reads:\n{}\nand the error stream reads:\n{}",
+        world
+            .secret_name
+            .clone()
+            .expect("the scenario named the variable"),
+        run_output(world),
+        run_errors(world)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the locator form of an expectation, against the plan scantling
+// ---------------------------------------------------------------------------
+
+/// A plan whose one step states an expectation as a locator: a role and a name,
+/// the same locator an activation addresses a region with.
+const LOCATOR_EXPECTATION_PLAN: &str =
+    "tui: top\nsteps:\n  - expect:\n      role: columnheader\n      name: PID\n";
+
+#[given("the plan fixture carrying an expectation naming a role and a name")]
+async fn the_plan_fixture_carrying_a_locator_expectation(world: &mut TinmanWorld) {
+    world
+        .plan_sources
+        .push(LOCATOR_EXPECTATION_PLAN.to_string());
+}
+
+/// Validation reads the plan as it is written. Reading it back through
+/// production would attest whatever production normalized it to, which is a
+/// different document from the one an operator commits and this scantling
+/// governs.
+#[when("the plan is validated")]
+async fn the_plan_is_validated(world: &mut TinmanWorld) {
+    let source = world
+        .plan_sources
+        .first()
+        .expect("a harness plan was given")
+        .clone();
+    let value: serde_yaml::Value = serde_yaml::from_str(&source)
+        .unwrap_or_else(|e| panic!("the plan is not YAML: {e}\nit reads:\n{source}"));
+    world.serialized = Some(to_json(&value));
+}
+
+// ---------------------------------------------------------------------------
+// command-line session
+// ---------------------------------------------------------------------------
+
+/// The command-line sessions a scenario launched, with the directory they were
+/// launched from. A session outlives the command that launched it, so a
+/// scenario that fails between launch and close leaves a real program running
+/// and a real sandbox standing. Teardown is registered before the launch and
+/// reports what it could not close, since a quiet failure here leaks the very
+/// resource the feature exists to reclaim.
+#[derive(Debug, Default)]
+struct LaunchedSessions {
+    dir: Option<std::path::PathBuf>,
+    names: Vec<String>,
+    /// The temporary directory the runs that created these sessions were given,
+    /// so teardown addresses the same sessions the scenario launched.
+    tmp: Option<std::path::PathBuf>,
+    /// What stood in that directory before the first launch, so a resource the
+    /// session created is one that appeared after it. Matching on the session
+    /// name alone reads the suite's own scratch directory,
+    /// `tinman-workdir-<pid>-<nanos>`, as a resource of the session `work`.
+    before: Option<std::collections::BTreeSet<std::path::PathBuf>>,
+}
+
+/// What stands in `dir` now.
+fn temp_entries(dir: &std::path::Path) -> std::collections::BTreeSet<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return std::collections::BTreeSet::new();
+    };
+    entries.flatten().map(|entry| entry.path()).collect()
+}
+
+impl LaunchedSessions {
+    /// Register `name` before the launch that creates it.
+    fn register(&mut self, dir: &std::path::Path, tmp: &std::path::Path, name: &str) {
+        self.before.get_or_insert_with(|| temp_entries(tmp));
+        self.tmp = Some(tmp.to_path_buf());
+        self.dir = Some(dir.to_path_buf());
+        self.names.push(name.to_string());
+    }
+
+    /// What appeared in the temporary directory since the first launch and
+    /// carries `name`, which is what a session of that name created.
+    fn created_for(&self, name: &str) -> Vec<std::path::PathBuf> {
+        let Some(tmp) = self.tmp.as_ref() else {
+            return Vec::new();
+        };
+        let before = self.before.clone().unwrap_or_default();
+        temp_entries(tmp)
+            .into_iter()
+            .filter(|path| !before.contains(path))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|entry| entry.to_str())
+                    .is_some_and(|entry| entry.contains(name))
+            })
+            .collect()
+    }
+}
+
+impl Drop for LaunchedSessions {
+    fn drop(&mut self) {
+        let Some(dir) = self.dir.clone() else { return };
+        let env = match self.tmp.as_ref() {
+            Some(tmp) => vec![("TMPDIR".to_string(), tmp.display().to_string())],
+            None => Vec::new(),
+        };
+        for name in &self.names {
+            match support::run_tinman(&dir, &["close", "--session", name], &env, None) {
+                // Closing an already-closed session is the ordinary case, so
+                // only the report of what stands is worth the noise.
+                Ok(outcome) if outcome.status != 0 => {
+                    let standing = self.created_for(name);
+                    if !standing.is_empty() {
+                        eprintln!(
+                            "the session {name:?} was not closed at teardown and left \
+                             {standing:?} standing: {}",
+                            outcome.stderr
+                        );
+                    }
+                }
+                Err(e) => eprintln!("the session {name:?} could not be closed at teardown: {e}"),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The text `top` draws that every session scenario addresses it by, proven
+/// present by `a text expectation that holds exits zero`. Addressing a session
+/// with an expectation that holds is how a scenario reads whether the session
+/// is running, through the operator's own surface rather than through a store
+/// the command line does not expose.
+const TOP_SCREEN_TEXT: &str = "PID";
+
+/// Launch `program` as the session `name`, registering its teardown first.
+fn launch_session(world: &mut TinmanWorld, name: &str, program: &str) {
+    let dir = working_dir(world);
+    let tmp = scenario_temp_dir(world);
+    world.launched_sessions.register(&dir, &tmp, name);
+    run_tinman_command(world, &["launch", program, "--session", name]);
+}
+
+/// Whether the operator can still address the session `name`, read by stating
+/// an expectation that holds against it.
+fn session_answers(world: &mut TinmanWorld, name: &str) -> (i32, String) {
+    let dir = working_dir(world);
+    let env = configured_env(world);
+    let outcome = support::run_tinman(
+        &dir,
+        &["expect", TOP_SCREEN_TEXT, "--session", name],
+        &env,
+        None,
+    )
+    .unwrap_or_else(|e| panic!("the tinman binary did not run: {e}"));
+    (outcome.status, outcome.stderr)
+}
+
+#[given(expr = "a session named {string} running {string}")]
+async fn a_session_named_running(world: &mut TinmanWorld, name: String, program: String) {
+    launch_session(world, &name, &program);
+    let status = world.run_status.expect("the launch ran");
+    assert_eq!(
+        status,
+        0,
+        "the session {name:?} running {program:?} was not launched, so the scenario starts from a \
+         state it did not reach; the error stream reads:\n{}",
+        run_errors(world)
+    );
+}
+
+#[then(expr = "a session named {string} is running")]
+async fn a_session_named_is_running(world: &mut TinmanWorld, name: String) {
+    let (status, errors) = session_answers(world, &name);
+    assert_eq!(
+        status, 0,
+        "the session {name:?} does not answer, so it is not running; the error stream \
+         reads:\n{errors}"
+    );
+}
+
+#[then(expr = "the session named {string} is still running")]
+async fn the_session_named_is_still_running(world: &mut TinmanWorld, name: String) {
+    let (status, errors) = session_answers(world, &name);
+    assert_eq!(
+        status, 0,
+        "the session {name:?} no longer answers, so the verb that addressed it ended it; the \
+         error stream reads:\n{errors}"
+    );
+}
+
+/// A one-shot verb closes around its step, so what it launched is gone when it
+/// returns. A session left standing is a sandbox whose launcher has exited,
+/// which is what the suite's own sweep reads off the system.
+#[then("no session is left running")]
+async fn no_session_is_left_running(world: &mut TinmanWorld) {
+    for name in world.launched_sessions.names.clone() {
+        let (status, _) = session_answers(world, &name);
+        assert_ne!(
+            status, 0,
+            "the session {name:?} still answers, so it was left running"
+        );
+    }
+    // Read against this scenario's own temporary directory rather than the
+    // system's: a system-wide sweep reads a session another worker is legally
+    // holding as this run's leak, since a live session is by design a sandbox
+    // whose launching command has exited.
+    let tmp = scenario_temp_dir(world);
+    let standing: Vec<std::path::PathBuf> = temp_entries(&tmp)
+        .into_iter()
+        .filter(|path| !is_staging_cache(path))
+        .collect();
+    assert!(
+        standing.is_empty(),
+        "the run left {standing:?} standing, so a session outlived the command that launched it"
+    );
+}
+
+/// Whether `path` is one of the staging caches a run builds beside its
+/// sessions, such as the terminfo database a sandboxed terminal is given.
+/// These are provisioned per run rather than per session, so a session ending
+/// says nothing about them and a check for a standing session must not read
+/// one as a session.
+fn is_staging_cache(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|entry| entry.to_str()) else {
+        return false;
+    };
+    ["tinman-terminfo-", "tinman-copy-mount-"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
+#[then(expr = "the failure reports no session named {string} is running")]
+async fn the_failure_reports_no_such_session(world: &mut TinmanWorld, name: String) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&name) && errors.contains("session"),
+        "the failure does not report that no session named {name:?} is running; the error stream \
+         reads:\n{errors}"
+    );
+}
+
+#[when(
+    expr = "the operator launches a session against a target that prints whether it read {string}"
+)]
+async fn the_operator_launches_a_session_against_a_secret_reporting_target(
+    world: &mut TinmanWorld,
+    name: String,
+) {
+    let program = stage_secret_reporting_target(world, &name);
+    launch_session(world, "work", &program);
+    let launch_status = world.run_status.expect("the launch ran");
+    assert_eq!(
+        launch_status,
+        0,
+        "the session was not launched, so nothing read the target's screen; the error stream \
+         reads:\n{}",
+        run_errors(world)
+    );
+    run_tinman_command(world, &["expect", SECRET_ABSENT, "--session", "work"]);
+}
+
+#[then(expr = "no sandbox resource created for {string} remains")]
+async fn no_sandbox_resource_created_for_remains(world: &mut TinmanWorld, name: String) {
+    let standing = world.launched_sessions.created_for(&name);
+    assert!(
+        standing.is_empty(),
+        "closing the session {name:?} left {standing:?} standing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// command-line plan serialization
+// ---------------------------------------------------------------------------
+
+/// Run one verb against the session a scenario is already holding, and fail
+/// where it did not hold: a plan written from steps that never ran would be
+/// asserted against below as though they had.
+fn verb_against_session(world: &mut TinmanWorld, args: &[&str]) {
+    let session = world
+        .launched_sessions
+        .names
+        .last()
+        .cloned()
+        .expect("a session was launched");
+    let mut argv = args.to_vec();
+    argv.push("--session");
+    argv.push(&session);
+    run_tinman_command(world, &argv);
+}
+
+#[given(expr = "the operator has expected {string} and pressed {string} in that session")]
+async fn the_operator_has_expected_and_pressed(world: &mut TinmanWorld, text: String, key: String) {
+    verb_against_session(world, &["expect", &text]);
+    let expected = world.run_status.expect("the expectation ran");
+    assert_eq!(
+        expected,
+        0,
+        "the expectation {text:?} did not hold, so the session never performed it; the error \
+         stream reads:\n{}",
+        run_errors(world)
+    );
+    verb_against_session(world, &["press", &key]);
+    let pressed = world.run_status.expect("the keypress ran");
+    assert_eq!(
+        pressed,
+        0,
+        "the key {key:?} was not pressed, so the session never performed it; the error stream \
+         reads:\n{}",
+        run_errors(world)
+    );
+}
+
+#[given(expr = "the operator has expected {string} and then expected {string} in that session")]
+async fn the_operator_has_expected_and_then_expected(
+    world: &mut TinmanWorld,
+    held: String,
+    failed: String,
+) {
+    verb_against_session(world, &["expect", &held]);
+    let status = world.run_status.expect("the expectation ran");
+    assert_eq!(
+        status,
+        0,
+        "the expectation {held:?} did not hold, so the session never performed it; the error \
+         stream reads:\n{}",
+        run_errors(world)
+    );
+    verb_against_session(world, &["expect", &failed]);
+    let status = world.run_status.expect("the expectation ran");
+    assert_ne!(
+        status, 0,
+        "the expectation {failed:?} held, so the scenario has no failed step to leave out"
+    );
+}
+
+#[given(expr = "a plan written from a session that expected {string} against {string}")]
+async fn a_plan_written_from_a_session(world: &mut TinmanWorld, text: String, program: String) {
+    launch_session(world, "written", &program);
+    let status = world.run_status.expect("the launch ran");
+    assert_eq!(
+        status,
+        0,
+        "the session was not launched; the error stream reads:\n{}",
+        run_errors(world)
+    );
+    verb_against_session(world, &["expect", &text]);
+    let status = world.run_status.expect("the expectation ran");
+    assert_eq!(
+        status,
+        0,
+        "the expectation {text:?} did not hold; the error stream reads:\n{}",
+        run_errors(world)
+    );
+    run_tinman_command(
+        world,
+        &["close", "--session", "written", "--output", "probe.yaml"],
+    );
+    let status = world.run_status.expect("the close ran");
+    assert_eq!(
+        status,
+        0,
+        "the session was not closed, so no plan was written; the error stream reads:\n{}",
+        run_errors(world)
+    );
+    let text = written_plan_text(world, "probe.yaml");
+    world.plan_sources.push(text);
+}
+
+/// The actions a written plan carries, in the order it carries them.
+fn written_plan_actions(world: &mut TinmanWorld, file: &str) -> Vec<tinman::plan::Action> {
+    written_plan(world, file)
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .collect()
+}
+
+/// What an expectation names: its text, or the name its locator addresses.
+fn expectation_names(expectation: &tinman::plan::Expectation) -> String {
+    match expectation.locator.as_ref() {
+        Some(locator) => locator.name.clone(),
+        None => expectation.text.clone(),
+    }
+}
+
+#[then(expr = "{string} is a plan whose steps are the expectation and the keypress in that order")]
+async fn the_plan_carries_the_expectation_then_the_keypress(world: &mut TinmanWorld, file: String) {
+    let actions = written_plan_actions(world, &file);
+    assert_eq!(
+        actions.len(),
+        2,
+        "the plan carries {} steps rather than the expectation and the keypress: {actions:?}",
+        actions.len()
+    );
+    assert!(
+        matches!(actions.first(), Some(tinman::plan::Action::Expect(_))),
+        "the plan's first step is not the expectation: {actions:?}"
+    );
+    assert!(
+        matches!(actions.get(1), Some(tinman::plan::Action::Press(_))),
+        "the plan's second step is not the keypress: {actions:?}"
+    );
+}
+
+#[then(expr = "{string} is a plan whose only step is the expectation naming {string}")]
+async fn the_plan_carries_only_the_expectation_naming(
+    world: &mut TinmanWorld,
+    file: String,
+    named: String,
+) {
+    let actions = written_plan_actions(world, &file);
+    assert_eq!(
+        actions.len(),
+        1,
+        "the plan carries {} steps rather than the one expectation: {actions:?}",
+        actions.len()
+    );
+    match actions.first() {
+        Some(tinman::plan::Action::Expect(expectation)) => assert_eq!(
+            expectation_names(expectation),
+            named,
+            "the plan's only step names something other than {named:?}: {expectation:?}"
+        ),
+        other => panic!("the plan's only step is not an expectation: {other:?}"),
+    }
+}
+
+#[then(expr = "{string} names the program {string} and carries no session name")]
+async fn the_plan_names_the_program_and_no_session(
+    world: &mut TinmanWorld,
+    file: String,
+    program: String,
+) {
+    let session = world
+        .launched_sessions
+        .names
+        .last()
+        .cloned()
+        .expect("a session was launched");
+    let text = written_plan_text(world, &file);
+    let commands: Vec<String> = written_plan(world, &file)
+        .flow
+        .iter()
+        .filter_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => Some(tui.command.clone()),
+            tinman::plan::FlowStep::Run(_) => None,
+        })
+        .collect();
+    assert!(
+        commands.iter().any(|command| command.contains(&program)),
+        "the plan names no program {program:?}; it drives {commands:?}"
+    );
+    let document: serde_yaml::Value = serde_yaml::from_str(&text)
+        .unwrap_or_else(|e| panic!("the written plan is not YAML: {e}\nit reads:\n{text}"));
+    assert!(
+        !yaml_carries(&document, &session),
+        "the plan carries the session name {session:?}, which the plan language has no concept \
+         of; it reads:\n{text}"
+    );
+    assert!(
+        !yaml_carries(&document, "session"),
+        "the plan carries a session key, which the plan language has no concept of; it \
+         reads:\n{text}"
+    );
+}
+
+/// Whether `wanted` appears in `document` as a key or as a whole scalar value.
+///
+/// Matched on whole nodes rather than as a substring of the serialized text: a
+/// plan declaring `network: deny` carries the session name `work` inside the
+/// key `network`, and a substring search reads that as the session name the
+/// plan is being checked for.
+fn yaml_carries(document: &serde_yaml::Value, wanted: &str) -> bool {
+    match document {
+        serde_yaml::Value::String(text) => text == wanted,
+        serde_yaml::Value::Mapping(map) => map
+            .iter()
+            .any(|(key, nested)| key.as_str() == Some(wanted) || yaml_carries(nested, wanted)),
+        serde_yaml::Value::Sequence(items) => items.iter().any(|item| yaml_carries(item, wanted)),
+        _ => false,
+    }
+}
+
+/// The plan declares its isolation rather than leaning on the reader's default:
+/// a plan that omits the sandbox replays under whatever the defaults are on the
+/// day it is replayed, which is not the run it describes. So the declaration is
+/// read off the written text rather than off a parsed plan, which would fill
+/// the default in and report an omission as a declaration.
+///
+/// What is read is that the block is written and names the isolation, which is
+/// what the scenario pins: isolation is not selectable from the command line
+/// today, so a step asserting which policy the block names would hold whether
+/// serialization wrote the session's isolation or a hardcoded default.
+#[then(expr = "{string} declares the sandbox the session ran under")]
+async fn the_plan_declares_the_sandbox_the_session_ran_under(
+    world: &mut TinmanWorld,
+    file: String,
+) {
+    let text = written_plan_text(world, &file);
+    let document: serde_yaml::Value = serde_yaml::from_str(&text)
+        .unwrap_or_else(|e| panic!("the written plan is not YAML: {e}\nit reads:\n{text}"));
+    let sandbox = document
+        .get("sandbox")
+        .unwrap_or_else(|| panic!("the plan declares no sandbox; it reads:\n{text}"));
+    let declared = sandbox.as_mapping().unwrap_or_else(|| {
+        panic!("the plan's sandbox is not a block of isolation settings; it reads:\n{text}")
+    });
+    assert!(
+        !declared.is_empty(),
+        "the plan's sandbox block names no isolation, so it declares nothing the reader's own \
+         defaults would not have supplied; it reads:\n{text}"
+    );
+}
+
+#[given(expr = "the operator has expected {string} in that session")]
+async fn the_operator_has_expected_in_that_session(world: &mut TinmanWorld, text: String) {
+    verb_against_session(world, &["expect", &text]);
+    let status = world.run_status.expect("the expectation ran");
+    assert_eq!(
+        status,
+        0,
+        "the expectation {text:?} did not hold, so the session never performed it; the error \
+         stream reads:\n{}",
+        run_errors(world)
+    );
+}
+
+/// A replay that ran no step at all exits zero exactly as one that ran every
+/// step does, so the zero status the scenario already asserted cannot tell the
+/// two apart. The expectation is read as contingent instead: the same plan,
+/// carrying an expectation the program never draws, must fail and must report
+/// that expectation. A replay that reported the written plan's steps ran while
+/// executing none of them is the reframing this feature exists to catch.
+#[then("the replay ran the expectation the session performed")]
+async fn the_replay_ran_the_expectation(world: &mut TinmanWorld) {
+    let status = world.run_status.expect("the replay ran");
+    assert_eq!(
+        status,
+        0,
+        "the replay did not pass, so it ran no expectation the session performed; the error \
+         stream reads:\n{}",
+        run_errors(world)
+    );
+    let performed = written_plan_text(world, "probe.yaml");
+    let never_drawn = "NOSUCHTEXTONTHISSCREEN";
+    let mutated = performed.replace(TOP_SCREEN_TEXT, never_drawn);
+    assert_ne!(
+        mutated, performed,
+        "the written plan does not carry the expectation {TOP_SCREEN_TEXT:?} the session \
+         performed, so nothing here reads whether the replay ran it; it reads:\n{performed}"
+    );
+    stage_working_file(world, "replay-probe.yaml", &mutated);
+    run_tinman_command(world, &["test", "replay-probe.yaml"]);
+    let status = world.run_status.expect("the contrary replay ran");
+    assert_ne!(
+        status, 0,
+        "the same plan expecting {never_drawn:?} replayed green, so the replay does not read \
+         the expectation it carries and the passing replay proved nothing"
+    );
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(never_drawn),
+        "the replay's failure does not report the expectation it ran, so what it executed is \
+         not readable from it; the error stream reads:\n{errors}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// an expectation stated after a plan
+// ---------------------------------------------------------------------------
+
+/// Write `text` into the scenario's working directory as `name`. The command
+/// line addresses it relatively, as an operator's own file is.
+fn stage_working_file(world: &mut TinmanWorld, name: &str, text: &str) {
+    let path = working_dir(world).join(name);
+    std::fs::write(&path, text)
+        .unwrap_or_else(|e| panic!("the file {} was not written: {e}", path.display()));
+}
+
+/// The value the operator's command line gave `flag`, read off the argument
+/// list the run was made with rather than restated here, so a step asserting
+/// what the run reported addresses the run the scenario actually made.
+fn argv_value(world: &TinmanWorld, flag: &str) -> Option<String> {
+    let argv = world.run_argv.as_ref()?;
+    let at = argv.iter().position(|arg| arg == flag)?;
+    argv.get(at + 1).cloned()
+}
+
+/// The plan reaches a screen only a keypress draws, so it is staged against the
+/// fixture terminal program rather than a named one: the fixture's opening frame
+/// carries `READY` and only the keypress replaces it, so an expectation naming
+/// what the keypress draws cannot hold on a screen the plan never advanced. The
+/// fixture is staged in the workspace the sandbox binds and named relatively, as
+/// every other command-line step does, because a program outside that workspace
+/// is unreachable from inside the sandbox.
+#[given(
+    expr = "a plan at {string} whose steps press {string} against the fixture terminal program"
+)]
+async fn a_plan_whose_steps_press_the_fixture(world: &mut TinmanWorld, file: String, key: String) {
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    stage_working_file(
+        world,
+        &file,
+        &format!("tui: {program}\nsteps:\n  - press: \"{key}\"\n"),
+    );
+}
+
+/// The expectation is stated against the same staged fixture the plan drives, so
+/// the plan's steps and the expectation address one program. Staging is by name
+/// and content, so naming it again here answers the same relative path the
+/// `Given` wrote into the plan.
+#[when(expr = "the operator expects {string} after {string} against the fixture terminal program")]
+async fn the_operator_expects_after_a_plan_against_the_fixture(
+    world: &mut TinmanWorld,
+    text: String,
+    plan: String,
+) {
+    let workspace = working_dir(world);
+    let program = support::stage_fixture_in(&workspace);
+    run_tinman_command(world, &["expect", &text, "--after", &plan, &program]);
+}
+
+#[given(expr = "a plan at {string} whose steps expect {string} against {string}")]
+async fn a_plan_whose_steps_expect(
+    world: &mut TinmanWorld,
+    file: String,
+    text: String,
+    program: String,
+) {
+    world.staged_plan_expectation = Some(text.clone());
+    stage_working_file(
+        world,
+        &file,
+        &format!("tui: {program}\nsteps:\n  - expect: {text}\n"),
+    );
+}
+
+/// The plan's own failing step is what the operator has to fix, so the failure
+/// names the expectation the plan carried rather than the one the command was
+/// asked to state.
+#[then("the failure reports the plan step that failed")]
+async fn the_failure_reports_the_plan_step_that_failed(world: &mut TinmanWorld) {
+    let expectation = world
+        .staged_plan_expectation
+        .clone()
+        .expect("the staged plan named an expectation");
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&expectation),
+        "the failure does not report the plan step expecting {expectation:?}, so the operator is \
+         not told which step broke; the error stream reads:\n{errors}"
+    );
+}
+
+/// Reporting the command's own expectation would say it was read against a
+/// screen the plan never reached, which is the failure being reported as held
+/// wearing a different coat.
+#[then("the failure does not report the expectation as read")]
+async fn the_failure_does_not_report_the_expectation_as_read(world: &mut TinmanWorld) {
+    let named = argv_value(world, "--name").expect("the command line named an expectation");
+    let errors = run_errors(world);
+    assert!(
+        !errors.contains(&named),
+        "the failure reports the expectation naming {named:?}, which was never read because the \
+         plan failed on its way to the screen; the error stream reads:\n{errors}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// a session whose program has gone
+// ---------------------------------------------------------------------------
+
+/// How long a staged program is given to run to completion before the wait on
+/// it is called a failure. A ceiling rather than a delay: the wait ends on the
+/// holding process going, which happens as soon as the program does.
+const PROGRAM_EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether any process on the system is running the program `mark`, read off
+/// `/proc`, which is the kernel's own answer about what is running and which
+/// sees a sandboxed process as readily as any other.
+///
+/// Matched against the head of the command line rather than the whole of it.
+/// Every process in the chain that launched the program names it somewhere in
+/// its arguments, the holding process and the sandbox launcher included, and a
+/// match anywhere would read the holder standing over a program that has gone
+/// as the program itself still running.
+fn a_process_runs(mark: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        std::fs::read(entry.path().join("cmdline")).is_ok_and(|line| {
+            String::from_utf8_lossy(&line)
+                .split('\0')
+                .take(2)
+                .any(|argument| argument.contains(mark))
+        })
+    })
+}
+
+#[given(expr = "a session named {string} whose program has exited")]
+async fn a_session_whose_program_has_exited(world: &mut TinmanWorld, name: String) {
+    // A program that draws a screen and returns: the launch reads the screen it
+    // drew, and the program is gone directly after, which is the stale session
+    // the scenario starts from. A program the sandbox never drew would fail the
+    // launch instead and the scenario would assert reclamation of nothing.
+    //
+    // Its name carries a nonce, so the wait below reads this scenario's own
+    // process rather than one a concurrent worker is legally still running.
+    let mark = format!(
+        "{name}-exits-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is set")
+            .as_nanos()
+    );
+    let program = stage_recorded_program(world, &mark, "#!/bin/sh\nprintf 'READY\\n'\nsleep 1\n");
+    launch_session(world, &name, &program);
+    let status = world.run_status.expect("the launch ran");
+    assert_eq!(
+        status,
+        0,
+        "the session {name:?} was not launched, so it never held a program to lose; the error \
+         stream reads:\n{}",
+        run_errors(world)
+    );
+    // Two signals, both observed, because the program's exit and the session's
+    // settling into staleness are not the same moment. The holding process ends
+    // because its program did, so a wait on the program alone returns while the
+    // holder is still on its way out, and the launch under assertion then races
+    // it. That race lives in the starting state rather than in the behaviour,
+    // and a scenario that fails on it reports the wrong thing.
+    let holder = scenario_temp_dir(world)
+        .join(format!("tinman-session-{name}"))
+        .join("holder");
+    let deadline = std::time::Instant::now() + PROGRAM_EXIT_DEADLINE;
+    while a_process_runs(&mark) || still_held(&holder) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the session {name:?} had not gone stale after {PROGRAM_EXIT_DEADLINE:?}, so the \
+             scenario starts from a state it did not reach; its program is running: {}, and its \
+             holder at {} is running: {}",
+            a_process_runs(&mark),
+            holder.display(),
+            still_held(&holder)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Whether the process recorded in the holder file at `holder` is still on the
+/// system. A holder file that has gone was reclaimed, which is the same answer
+/// as a holder that has ended.
+fn still_held(holder: &std::path::Path) -> bool {
+    let Ok(recorded) = std::fs::read_to_string(holder) else {
+        return false;
+    };
+    let pid = recorded.trim();
+    !pid.is_empty() && std::path::Path::new("/proc").join(pid).exists()
 }

@@ -10,6 +10,10 @@ Usage:
 Commands:
   record         Capture a live session into an editable plan
   test           Run a plan and report whether it passed
+  launch         Start a named session against a program
+  press          Send one key to the program
+  expect         State one expectation against the screen
+  close          End a named session
   inspect        Print the terminal object model of a running program
   driver         Speak the JSON driver protocol on stdin and stdout
   man            Write Tinman's manual page as roff
@@ -33,12 +37,22 @@ Examples:
   Probe a program's own documentation and write what held as a plan:
     tinman inspect --examples {{program}} --output {{path/to/plan.yaml}}
 
+  Ask one question of a program without writing a plan:
+    tinman expect {{text}} {{program}}
+
+  Explore a program step by step, then keep what you did:
+    tinman launch {{program}} --session {{session}}
+    tinman expect {{text}} --session {{session}}
+    tinman close --session {{session}} --output {{path/to/plan.yaml}}
+
   Write the manual page so man can find it:
     tinman man
 
 Example values:
   program: opencode
   path/to/plan.yaml: tinman.yaml
+  text: Saved
+  session: work
 
 Tinman drives real terminal programs through a sandboxed PTY. Capture time may
 infer; replay time is deterministic, with no model invocation and no network.

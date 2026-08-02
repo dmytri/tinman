@@ -42,7 +42,7 @@
       "reason": "Three accessors a trait requires separately. Collapsing them would mean not implementing the trait."
     },
     {
-      "fingerprint": "155a7c22dff1e395",
+      "fingerprint": "e5323be8a394fba6",
       "members": [
         "execute",
         "execute_over_tree"

@@ -172,7 +172,7 @@
           "minLength": 1
         },
         "expect": {
-          "description": "Assert text is present on screen. A bare string is the text.",
+          "description": "Assert the screen carries a text, or that a locator resolves to a region. A bare string is the text. The locator form is the same locator `activate` addresses a region with, and a region's name is its content in this model, so naming a role and a name is how an expectation states a value.",
           "oneOf": [
             {
               "type": "string",
@@ -194,6 +194,9 @@
                   "minLength": 1
                 }
               }
+            },
+            {
+              "$ref": "#/$defs/locator"
             }
           ]
         },

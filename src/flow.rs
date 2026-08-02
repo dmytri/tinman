@@ -60,7 +60,7 @@ pub struct FlowOutcome {
 /// @planks("that plan is replayed at {int} columns")
 /// @planks("replaying the written plan reproduces the recorded interaction")
 pub fn execute(plan: &Plan, workspace: &Path, columns: Option<u16>) -> Result<FlowOutcome, String> {
-    run_flow(plan, workspace, columns, false)
+    Ok(run_flow(plan, workspace, columns, false)?.0)
 }
 
 /// Execute a plan's flow over the operator's own tree: every step reads that
@@ -75,7 +75,17 @@ pub fn execute_over_tree(
     tree: &Path,
     columns: Option<u16>,
 ) -> Result<FlowOutcome, String> {
-    run_flow(plan, tree, columns, true)
+    Ok(run_flow(plan, tree, columns, true)?.0)
+}
+
+/// Execute a plan's flow over the operator's own tree and answer the session its
+/// last driven program is still running in, so a caller reads the screen the
+/// plan's steps reached rather than the opening screen of a fresh launch. A plan
+/// that drives no terminal program leaves no session to read.
+///
+/// @planks("the operator expects {string} after {string} against the fixture terminal program")
+pub fn reach_over_tree(plan: &Plan, tree: &Path) -> Result<Option<InteractiveCapture>, String> {
+    Ok(run_flow(plan, tree, None, true)?.1)
 }
 
 /// Execute a plan's flow in the order written, every step in the one workspace
@@ -85,7 +95,9 @@ pub fn execute_over_tree(
 /// plan, so the caller states the width every driven program is given, and an
 /// unstated width leaves the run on the operator's own terminal size. An
 /// overlaid workspace is the operator's own tree, which the steps read and never
-/// write through.
+/// write through. The session the last driven program is still running in is
+/// answered alongside the outcome, so a caller reading the screen the flow
+/// reached reads it live rather than after the program was let go.
 ///
 /// @planks("the flow is executed")
 /// @planks("the flow passes")
@@ -103,17 +115,19 @@ pub fn execute_over_tree(
 /// @planks("the plan is replayed")
 /// @planks("the capture carries a {string} named {string}")
 /// @planks("the verifier checks the backend construction boundary")
+/// @planks("the operator expects {string} after {string} against the fixture terminal program")
 fn run_flow(
     plan: &Plan,
     workspace: &Path,
     columns: Option<u16>,
     overlaid: bool,
-) -> Result<FlowOutcome, String> {
+) -> Result<(FlowOutcome, Option<InteractiveCapture>), String> {
     let resolved = resolve(std::env::consts::OS).map_err(|e| format!("{e:?}"))?;
     let backend = resolved.backend();
     let mut steps = Vec::new();
     let mut bindings = Vec::new();
     let mut captures = BTreeMap::new();
+    let mut reached = None;
     for step in &plan.flow {
         match step {
             FlowStep::Run(run) => {
@@ -178,7 +192,17 @@ fn run_flow(
                         Action::Expect(expectation) => {
                             await_text(&session, &expectation.text)?;
                         }
-                        Action::Press(key) => session.press_key(key),
+                        Action::Press(key) => {
+                            // A press submits the key, the way the driver's own
+                            // press submits it, because a program reading its
+                            // terminal a line at a time is never reached by a
+                            // key left sitting in the line the terminal is
+                            // still collecting.
+                            session.press_key(key);
+                            if key != "Enter" {
+                                session.press_key("Enter");
+                            }
+                        }
                         Action::Activate(locator) => {
                             bindings.push(activate(&mut session, locator)?)
                         }
@@ -196,14 +220,18 @@ fn run_flow(
                     output: session.screen().contents(),
                     error: String::new(),
                 });
+                reached = Some(session);
             }
         }
     }
-    Ok(FlowOutcome {
-        steps,
-        bindings,
-        captures,
-    })
+    Ok((
+        FlowOutcome {
+            steps,
+            bindings,
+            captures,
+        },
+        reached,
+    ))
 }
 
 /// How long a capture waits for the driven program to draw the items it

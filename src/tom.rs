@@ -105,6 +105,15 @@ impl Role {
         }
     }
 
+    /// Whether `name` is a role this model produces. A locator naming a role no
+    /// reading yields matches nothing whatever the screen shows, so a mistyped
+    /// role is answered as one rather than as an absent region.
+    ///
+    /// @planks("the operator executes {string}")
+    pub fn is_produced(name: &str) -> bool {
+        ROLES.iter().any(|role| role.as_str() == name)
+    }
+
     /// The role `name` addresses.
     ///
     /// @planks("a terminal object model with a {string} containing the menu items {string}, {string}, and {string}")
@@ -1327,6 +1336,19 @@ impl Locator {
         Locator {
             role: role.to_string(),
             name: Some(name.to_string()),
+            scope: None,
+            ordinal: None,
+        }
+    }
+
+    /// A locator for every region playing `role`, carrying no name, so an
+    /// address stating a role alone reports what that role reaches on its own.
+    ///
+    /// @planks("the operator executes {string}")
+    pub fn of_role(role: &str) -> Locator {
+        Locator {
+            role: role.to_string(),
+            name: None,
             scope: None,
             ordinal: None,
         }

@@ -58,7 +58,7 @@ Feature: command surface
     When the operator executes "tinman completions klingon"
     Then the command exits with a non-zero status
 
-  Rule: probing a program's documentation is a mode of inspection rather than a command of its own, so it is a flag on `inspect` and the named set stays at seven. Writing the result reuses the option `record` already carries, because two commands that both write a plan should not spell it two ways. Naming both here is what stops the operator surface being settled in verification support by whoever authors a step first.
+  Rule: probing a program's documentation is a mode of inspection rather than a command of its own, so it is a flag on `inspect`. Writing the result reuses the option `record` already carries, because two commands that both write a plan should not spell it two ways. Naming both here is what stops the operator surface being settled in verification support by whoever authors a step first.
 
   Scenario: inspect accepts the documented-examples flag
     When "inspect --examples printf" is passed to the command parser
@@ -70,18 +70,22 @@ Feature: command surface
 
   Rule: naming the commands is what makes changing the set safe. A count alone would pass a parser that had lost inspect and gained something else, and a set read from nothing at all passes every parser. The assertion is exact rather than a floor, because a floor is silent about the command nobody meant to ship: an addition has to be written here before it reaches an operator, which is the agreement `features/command-dispatch.feature` states and this scenario is the only place that enforces.
 
-  Scenario: the parser accepts exactly the seven named commands
+  Scenario: the parser accepts exactly the commands Tinman names
     Given the commands Tinman names
       | command     |
       | record      |
       | test        |
+      | launch      |
+      | press       |
+      | expect      |
+      | close       |
       | inspect     |
       | driver      |
       | help        |
       | man         |
       | completions |
     When the accepted command set is read
-    Then it is exactly the seven commands named
+    Then it is exactly the commands named
 
   Rule: documentation is where a reader or an agent learns what to run, and a command struck from the parser stays in the prose through the voyage that struck it. One sweep over every shipped markdown file replaces the per-asset check the bundled skill used to carry: the skill, the readme and the onboarding document all ship, and all three tell someone what to type. A fence reader that matches nothing would report a clean bill for every document it never read, which is what the floor below is for.
 
