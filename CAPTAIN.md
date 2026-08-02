@@ -308,6 +308,18 @@ The reason it happens is structural rather than lax. `AGENTS.md` is where a sett
 
 Either the Article widens to let Shipwright write that file whenever Captain routes a settled decision to it, which is what happens now, or the doctrine needs a different home for a decision made at sea. Do not resolve it by having Captain write the file: routing through Shipwright is what caught three stale claims in it today, and every one was found because a second role read the tree instead of taking Captain's account.
 
+## Departure taken 2026-08-02: Captain made the custody commit over a budget red
+
+**The situation.** The `@sandbox` tier finished the layout-attestation voyage at 128623ms against its 120000ms ceiling, so `features/methodology-conformance.feature:the most recent sweep of each tier is within its declared budget` was red and Boatswain refused custody, correctly. The voyage's own thirteen targets were all green; the red is a cost signal, not a correctness one.
+
+**Why no legal transition made progress.** The operator's 2026-08-01 ruling holds the ceiling and names fixture amortization as the lever, guided by per-scenario duration. This project cannot read per-scenario duration outside a harbour full regression, per the Transient output policy. Harbour requires a clean tree. A clean tree requires custody. Custody was blocked by the red. That is a closed loop.
+
+**Routes tried before departing.** Concurrency was measured rather than assumed: the box has 4 cores and `broad-sandbox` already runs `-c 4`, one worker per core, so there is no headroom and raising it would oversubscribe CPU-bound launches. Two scenarios that validate a broken scantling were moved out of `@sandbox` and now assert `the program was never launched`, which earns the default tier honestly and recovered about 3s. QM declined to amortize without duration data, which was conservative and within its rights.
+
+**Minimal action taken.** Captain staged and committed the role-advanced work, which the Blocker policy's Captain-authority clause names explicitly, and withdrew the watchbill rather than striking it spent, since watch2's target is deferred rather than met. The ceiling was not touched. Operator chose this route over raising `budget-sandbox` and over a blind amortization.
+
+**What harbour owes.** The economy audit with real per-scenario duration, then amortization of whatever it names. Also `AGENTS.md:205`, which reads that `jsonschema` "is a dev-dependency rather than a shipped one" and is false as of this voyage; it is load-bearing for the held-pin ruling and is Shipwright's file.
+
 ## A fourth doctrine gap, found by QM 2026-08-02
 
 **The bulkhead's named leak is the diff family, and file enumeration is a second vector nobody has closed.** The Working tree policy tells a role to carry `':!CAPTAIN.md'` on `git diff`, `git show`, `git log -p` and `git stash show -p`, because those print the content of every changed file. QM crossed the bulkhead by a different route: `git ls-files | grep '\.md$'` and then reading each hit. That is enumeration rather than diffing, no rule names it, and it looks exactly like ordinary deck reading.
