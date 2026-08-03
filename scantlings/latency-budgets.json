@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.4.0/scantlings/latency-budgets.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.5.0/scantlings/latency-budgets.json",
   "title": "Latency budgets",
   "description": "The wall-clock ceiling at which each timed seam abandons its wait. A ceiling is a limit Tinman enforces, never a speed a dependency is asked to achieve, so what is attested is that the wait ends rather than that the answer arrived. Discharged by the latency-budget checker in verification support and attested by one scenario rather than one per seam.",
   "budgets": [

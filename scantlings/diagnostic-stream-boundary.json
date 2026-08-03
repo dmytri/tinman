@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.4.0/scantlings/diagnostic-stream-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.5.0/scantlings/diagnostic-stream-boundary.json",
   "title": "Diagnostic stream boundary",
   "description": "A failure is reported on the error stream and never on the data stream. Three of Tinman's commands write output another program reads, the JSON model, the manual page and the completion script, so stdout is a data stream rather than a place to talk to the operator, and a diagnostic written there lands in the middle of whatever the consumer is parsing. Discharged by the reference-boundary checker in verification support, which scans the implementation tree for the forbidden expressions and reports any occurrence. Attested by the @contract scenario in features/command-surface.feature.",
   "forbiddenReferences": [
