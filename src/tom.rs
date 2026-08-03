@@ -362,8 +362,9 @@ const SCREEN_NAME: &str = "terminal";
 
 /// Read `screen` into a terminal object model: the bordered panes it draws with
 /// the lines they list, the sibling regions a vertical rule splits it into, the
-/// tables its sustained columns are, the menu bar its top line carries, the
-/// buttons and textboxes it draws, and the status bar its bottom line carries.
+/// tables its sustained columns are, the menu bar its top line carries or the
+/// status region that line reads as instead, the buttons and textboxes it
+/// draws, and the status bar its bottom line carries.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the terminal object model is serialized")
@@ -382,6 +383,8 @@ pub fn build(screen: &VirtualScreen) -> Model {
     children.extend(tables(grid, cols));
     if let Some(menu) = menu_bar(grid, cols, screen) {
         children.push(menu);
+    } else if let Some(status) = top_status(grid, cols) {
+        children.push(status);
     }
     children.extend(controls(grid));
     if let Some(status) = status_bar(grid, rows, cols) {
@@ -1151,7 +1154,9 @@ fn status_bar(grid: &[Vec<String>], rows: u16, cols: u16) -> Option<Region> {
 /// The top line of `grid` read as a menu bar, each label it carries a menu
 /// item, the reversed label being the selected one. A line drawing a border is
 /// a pane's edge rather than a menu, and a line carrying one label is a
-/// heading rather than a bar of items.
+/// heading rather than a bar of items. A menu is the role that carries a
+/// selection, so a line no reversed label marks is a sentence with gaps in it
+/// rather than a bar of controls to activate.
 ///
 /// @planks("the terminal object model is built")
 /// @planks("the second {string} of that region is named {string}")
@@ -1165,7 +1170,7 @@ fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<R
     if labels.len() < 2 {
         return None;
     }
-    let items = labels
+    let items: Vec<Region> = labels
         .into_iter()
         .map(|(x, width, text)| {
             let item = Rect {
@@ -1187,6 +1192,9 @@ fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<R
             }
         })
         .collect();
+    if !items.iter().any(|item| item.selected) {
+        return None;
+    }
     let rect = Rect {
         x: 0,
         y: 0,
@@ -1200,6 +1208,41 @@ fn menu_bar(grid: &[Vec<String>], cols: u16, screen: &VirtualScreen) -> Option<R
         selected: false,
         rect,
         children: items,
+        style: None,
+        cells: cells_of(grid, rect),
+    })
+}
+
+/// The top line of `grid` read as a status region, when it carries text no
+/// menu reading claimed. What top draws on that line is what an editor draws on
+/// its bottom one, the program's own report on itself, so it takes the role the
+/// model already reads at the other edge of the screen. A line drawing a border
+/// is a pane's edge rather than a report.
+///
+/// @planks("the terminal object model is built")
+/// @planks("that region's text is {string}")
+fn top_status(grid: &[Vec<String>], cols: u16) -> Option<Region> {
+    let row = &grid[0];
+    if draws_a_border(row) {
+        return None;
+    }
+    let text = row.concat().trim_end().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width: cols,
+        height: 1,
+    };
+    Some(Region {
+        role: Role::Status,
+        name: None,
+        text: Some(text),
+        selected: false,
+        rect,
+        children: Vec::new(),
         style: None,
         cells: cells_of(grid, rect),
     })

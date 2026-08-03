@@ -290,8 +290,15 @@ pub struct Fill {
 /// @planks("the plan records the locator's binding as {string}")
 /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
 /// @planks("the verifier checks the plan deserialization strictness contract")
+/// @planks("a harness plan whose step expects the {string} named {string} and states no text")
+/// @planks("that step states no text")
+/// @planks("that expectation carries no text")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(from = "ExpectationForm", deny_unknown_fields)]
+#[serde(
+    from = "ExpectationForm",
+    into = "WrittenExpectation",
+    deny_unknown_fields
+)]
 pub struct Expectation {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -300,13 +307,15 @@ pub struct Expectation {
     pub locator: Option<Locator>,
 }
 
-/// The two written forms of an expectation: a bare string, or a text map
+/// The three written forms of an expectation: a bare string, a text map
 /// carrying the region the expectation is scoped to and the locator a recorded
-/// expectation addresses.
+/// expectation addresses, or a bare locator addressing the region to resolve.
 ///
 /// @planks("the step expects the text {string}")
 /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
 /// @planks("the verifier checks the plan deserialization strictness contract")
+/// @planks("a harness plan whose step expects the {string} named {string} and states no text")
+/// @planks("that step states no text")
 #[derive(serde::Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 enum ExpectationForm {
@@ -318,13 +327,61 @@ enum ExpectationForm {
         #[serde(default)]
         locator: Option<Locator>,
     },
+    Located {
+        role: Option<String>,
+        name: String,
+        #[serde(default)]
+        within: Option<String>,
+        #[serde(default)]
+        binding: Option<String>,
+    },
+}
+
+/// How an expectation is written back out. An expectation that states no text
+/// is written as the bare locator it is, which is the form the plan language
+/// reads and the form the schema accepts, so a plan the probe wrote is a plan
+/// the runner replays.
+///
+/// @planks("that expectation carries no text")
+/// @planks("that step states no text")
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum WrittenExpectation {
+    Located(Locator),
+    Full {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        within: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        locator: Option<Locator>,
+    },
+}
+
+impl From<Expectation> for WrittenExpectation {
+    /// @planks("that expectation carries no text")
+    /// @planks("that step states no text")
+    fn from(expectation: Expectation) -> WrittenExpectation {
+        match expectation.locator {
+            Some(locator) if expectation.text.is_empty() && expectation.within.is_none() => {
+                WrittenExpectation::Located(locator)
+            }
+            locator => WrittenExpectation::Full {
+                text: expectation.text,
+                within: expectation.within,
+                locator,
+            },
+        }
+    }
 }
 
 impl From<ExpectationForm> for Expectation {
-    /// Normalize a written expectation: a bare string is the expected text.
+    /// Normalize a written expectation: a bare string is the expected text, and
+    /// a bare locator is the region to resolve, which states no text.
     ///
     /// @planks("the step expects the text {string}")
     /// @planks("a harness plan whose step expects the status bar to contain {string}, captured at {int} columns")
+    /// @planks("a harness plan whose step expects the {string} named {string} and states no text")
+    /// @planks("that step states no text")
     fn from(form: ExpectationForm) -> Expectation {
         match form {
             ExpectationForm::Text(text) => Expectation {
@@ -340,6 +397,21 @@ impl From<ExpectationForm> for Expectation {
                 text,
                 within,
                 locator,
+            },
+            ExpectationForm::Located {
+                role,
+                name,
+                within,
+                binding,
+            } => Expectation {
+                text: String::new(),
+                within: None,
+                locator: Some(Locator {
+                    role,
+                    name,
+                    within,
+                    binding,
+                }),
             },
         }
     }

@@ -330,6 +330,9 @@ struct TinmanWorld {
     // the text a scenario placed on the screen and where it placed it, so a
     // later step redraws the same screen with the cursor moved or hidden
     placed_text: Option<(String, u16, u16)>,
+    // the text a scenario drew across the top line, so a later step redraws the
+    // same line with one of its labels marked
+    top_line: Option<String>,
     // the regions an accessible-name sweep read, so the following step can
     // assert the sweep read something rather than passing over an empty model
     named_regions_read: Option<usize>,
@@ -2573,12 +2576,43 @@ async fn operator_runs_redirected(world: &mut TinmanWorld, line: String) {
 
 #[when(expr = "the operator executes {string}")]
 async fn operator_executes(world: &mut TinmanWorld, line: String) {
+    execute_command_line(world, &line).await;
+}
+
+/// A plan a probe already wrote, which is the starting state of a round trip:
+/// the command runs for real and has to hold, because a probe that failed
+/// writes no plan and the run that follows would be replaying a file that was
+/// never there.
+#[given(expr = "a plan written by {string}")]
+async fn a_plan_written_by(world: &mut TinmanWorld, line: String) {
+    execute_command_line(world, &line).await;
+    let status = world.run_status.expect("a command was run");
+    assert_eq!(
+        status,
+        0,
+        "the probe {line:?} exited {status}, so it wrote no plan to replay; it wrote to the data \
+         stream:\n{}\nand to the error stream:\n{}",
+        run_output(world),
+        run_errors(world)
+    );
+}
+
+/// Run `line` as the operator's own command line, keeping everything the run
+/// produced, so a step asserting on a run and a step staging one from a run
+/// observe the same thing.
+///
+/// The run is awaited rather than blocked on, because this step body is polled
+/// on the runner's one executor thread and a blocking call here holds every
+/// scenario beside it. The command lines this drives launch real sandboxed
+/// programs, so the wait is the whole cost of the scenario and the worker count
+/// buys nothing while it is spent blocking.
+async fn execute_command_line(world: &mut TinmanWorld, line: &str) {
     let dir = working_dir(world);
-    let args = tinman_args(&line);
-    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let args = tinman_args(line);
     let env = configured_env(world);
     let started = std::time::Instant::now();
-    let outcome = support::run_tinman(&dir, &argv, &env, None)
+    let outcome = support::run_tinman_awaited(dir, args.clone(), env, None)
+        .await
         .unwrap_or_else(|e| panic!("running {line:?} failed: {e}"));
     world.run_elapsed = Some(started.elapsed());
     world.run_stdout = Some(outcome.stdout);
@@ -7394,6 +7428,123 @@ fn parse_failure(world: &TinmanWorld) -> &str {
         .expect("parsing failed and reported why")
 }
 
+#[given(expr = "a harness plan whose step expects the {string} named {string} and states no text")]
+async fn a_plan_whose_step_expects_a_locator(world: &mut TinmanWorld, role: String, name: String) {
+    // The role and the name are written as quoted scalars, because a name like
+    // `%CPU` opens with a YAML indicator and a plain scalar carrying one is not
+    // the document the scenario states.
+    world.plan_sources.push(format!(
+        "tui: top\nsteps:\n  - expect:\n      role: {role:?}\n      name: {name:?}\n"
+    ));
+}
+
+/// The one expectation the parsed plan states. Production's own reading is what
+/// a step about parsing asserts on, so a plan the parser refused is reported as
+/// that rather than as a plan carrying nothing.
+fn only_parsed_expectation(world: &TinmanWorld) -> tinman::plan::Expectation {
+    if let Some(error) = world.parse_error.as_deref() {
+        panic!("the plan did not parse: {error}");
+    }
+    let expectations: Vec<tinman::plan::Expectation> = world
+        .parsed_plans
+        .first()
+        .expect("a harness plan was parsed")
+        .flow
+        .iter()
+        .flat_map(|step| match step {
+            tinman::plan::FlowStep::Tui(tui) => tui.steps.clone(),
+            tinman::plan::FlowStep::Run(_) => Vec::new(),
+        })
+        .filter_map(|action| match action {
+            tinman::plan::Action::Expect(expectation) => Some(expectation),
+            _ => None,
+        })
+        .collect();
+    match expectations.as_slice() {
+        [only] => only.clone(),
+        _ => panic!(
+            "the parsed plan states {} expectations rather than the one the scenario wrote: \
+             {expectations:?}",
+            expectations.len()
+        ),
+    }
+}
+
+#[then(expr = "the plan's step expects the {string} named {string}")]
+async fn the_plans_step_expects_the_role_named(
+    world: &mut TinmanWorld,
+    role: String,
+    name: String,
+) {
+    let expectation = only_parsed_expectation(world);
+    let locator = expectation
+        .locator
+        .as_ref()
+        .unwrap_or_else(|| panic!("the parsed step states no locator; it reads {expectation:?}"));
+    assert_eq!(
+        locator.role.as_deref(),
+        Some(role.as_str()),
+        "the role the parsed step's locator addresses"
+    );
+    assert_eq!(
+        locator.name, name,
+        "the name the parsed step's locator addresses"
+    );
+}
+
+/// Every expectation a plan document states, wherever it sits in the flow. The
+/// document is read rather than the parsed structure, because whether an
+/// expectation carries text is a property of what is written and read back, and
+/// a structure normalizing an absent text to an empty one would answer a
+/// different question.
+fn stated_expectations(document: &serde_json::Value) -> Vec<serde_json::Value> {
+    match document {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .flat_map(|(key, nested)| {
+                let mut found = stated_expectations(nested);
+                if key == "expect" {
+                    found.push(nested.clone());
+                }
+                found
+            })
+            .collect(),
+        serde_json::Value::Array(items) => items.iter().flat_map(stated_expectations).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Assert every expectation `document` states carries no text. A bare string is
+/// the plan's text form, so an expectation written as one carries text by being
+/// that form at all.
+fn assert_states_no_text(document: &serde_json::Value, source: &str) {
+    let expectations = stated_expectations(document);
+    assert!(
+        !expectations.is_empty(),
+        "the plan states no expectation at all, so there is none to read; it reads:\n{source}"
+    );
+    for expectation in &expectations {
+        assert!(
+            !expectation.is_string() && expectation.get("text").is_none(),
+            "the expectation carries text, reading {expectation}; the plan reads:\n{source}"
+        );
+    }
+}
+
+#[then("that step states no text")]
+async fn that_step_states_no_text(world: &mut TinmanWorld) {
+    let source = world
+        .plan_sources
+        .first()
+        .expect("a harness plan was given")
+        .clone();
+    let document = world
+        .serialized
+        .clone()
+        .expect("the plan was parsed and read back");
+    assert_states_no_text(&document, &source);
+}
+
 #[then(expr = "parsing fails and reports the unknown step keyword {string}")]
 async fn parsing_reports_unknown_keyword(world: &mut TinmanWorld, keyword: String) {
     let message = parse_failure(world);
@@ -9634,7 +9785,17 @@ async fn the_program_has_hidden_the_cursor(world: &mut TinmanWorld) {
 
 #[given(expr = "a virtual screen whose top line reads {string}")]
 async fn a_screen_whose_top_line_reads(world: &mut TinmanWorld, text: String) {
+    world.top_line = Some(text.clone());
     world.screen = Some(support::top_line_screen(&text));
+}
+
+#[given(expr = "the label {string} is rendered with reversed video")]
+async fn the_label_is_reversed(world: &mut TinmanWorld, label: String) {
+    let text = world
+        .top_line
+        .clone()
+        .expect("a virtual screen whose top line was drawn");
+    world.screen = Some(support::top_line_screen_with_reversed(&text, &label));
 }
 
 #[given(expr = "a virtual screen showing {string} at row {int} column {int}")]
@@ -9876,6 +10037,15 @@ async fn that_region_keeps_its_deterministic_name(world: &mut TinmanWorld) {
     assert_eq!(
         actual.name, expected.name,
         "the name the region carries after inference, against the name the deterministic reading gave it"
+    );
+}
+
+#[then(expr = "the model contains no region with the role {string}")]
+async fn the_model_contains_no_region_with_role(world: &mut TinmanWorld, role: String) {
+    let found = model(world).find_role(&role).cloned();
+    assert!(
+        found.is_none(),
+        "the model contains a region with the role {role:?}, and it reads {found:?}"
     );
 }
 
@@ -13962,6 +14132,29 @@ async fn the_failure_carries_the_screen(world: &mut TinmanWorld) {
     );
 }
 
+/// The keys the serialized terminal object model is written with. A region
+/// carries its place as `rect` and its parts as `children`, and neither name
+/// reaches a screen a program drew, so a failure carrying one is carrying the
+/// document rather than the screen. This is the whole of what a run can decide
+/// here: a failure quoting some other part of the model is not findable this
+/// way and no check here will catch one.
+const SERIALIZED_MODEL_KEYS: [&str; 2] = ["\"rect\"", "\"children\""];
+
+#[then("the failure carries no serialized model")]
+async fn the_failure_carries_no_serialized_model(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    let carried: Vec<&str> = SERIALIZED_MODEL_KEYS
+        .iter()
+        .copied()
+        .filter(|key| errors.contains(key))
+        .collect();
+    assert!(
+        carried.is_empty(),
+        "the failure carries the serialized model, naming {carried:?}; the error stream \
+         reads:\n{errors}"
+    );
+}
+
 #[then(expr = "the failure names {string} as the region it looked for")]
 async fn the_failure_names_the_region_it_looked_for(world: &mut TinmanWorld, region: String) {
     let errors = run_errors(world);
@@ -14062,6 +14255,10 @@ async fn the_plan_expectation_names_role_and_name(
     role: String,
     name: String,
 ) {
+    // The written text is kept as well as the parsed plan, so a following step
+    // reading what that expectation carries reads the file the operator commits.
+    let text = written_plan_text(world, &file);
+    world.written_plan_source = Some(text);
     let plan = written_plan(world, &file);
     let locators: Vec<tinman::plan::Locator> = plan
         .flow
@@ -14082,6 +14279,14 @@ async fn the_plan_expectation_names_role_and_name(
         "the plan carries no expectation naming the {role} {name:?}; its expectation locators \
          are {locators:?}"
     );
+}
+
+#[then("that expectation carries no text")]
+async fn that_expectation_carries_no_text(world: &mut TinmanWorld) {
+    let source = written_plan_source(world).to_string();
+    let document: serde_json::Value = serde_yaml::from_str(&source)
+        .unwrap_or_else(|e| panic!("the written plan is not YAML: {e}\nit reads:\n{source}"));
+    assert_states_no_text(&document, &source);
 }
 
 // ---------------------------------------------------------------------------
@@ -14893,6 +15098,28 @@ async fn a_plan_whose_steps_expect(
         world,
         &file,
         &format!("tui: {program}\nsteps:\n  - expect: {text}\n"),
+    );
+}
+
+/// The plan carries the bare locator form a probe writes, an expectation
+/// stating no text and naming a region the program never draws. The plan is
+/// staged rather than probed because a probe that failed writes no plan, so the
+/// failing round trip has no other route to a committed plan whose locator
+/// resolves to nothing. The program is the one the passing round trip replays,
+/// so the role is a role the model really produces and only the name is absent:
+/// a program that drew neither would report a failure the scenario could not
+/// tell from a locator that matched.
+#[given(expr = "a plan at {string} whose expectation names the {string} named {string}")]
+async fn a_plan_whose_expectation_names(
+    world: &mut TinmanWorld,
+    file: String,
+    role: String,
+    name: String,
+) {
+    stage_working_file(
+        world,
+        &file,
+        &format!("tui: top\nsteps:\n  - expect: {{role: {role}, name: {name}}}\n"),
     );
 }
 

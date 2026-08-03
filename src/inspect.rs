@@ -92,7 +92,10 @@ pub fn run_program(
     })
 }
 
-/// The model of what `command` shows, read through the default sandbox.
+/// The launch `command` made, read through the default sandbox: the model of
+/// what it drew and the screen that model was read off. A caller reporting that
+/// the model departed from what was asked of it has the screen to show instead
+/// of the document, which is the form the operator can act on.
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects the fixture terminal program as JSON")
@@ -107,8 +110,8 @@ pub fn run_program(
 /// @planks("the operator inspects a command that prints the contents of {string}")
 /// @planks("the operator inspects {string}")
 /// @planks("the inspect output names the root region {string}")
-pub fn model(command: &str, workspace: &Path) -> Result<Model, String> {
-    let launched = run(&SandboxSpec::default(), command, workspace)?;
+pub fn launched(command: &str, workspace: &Path) -> Result<Run, String> {
+    let mut launched = run(&SandboxSpec::default(), command, workspace)?;
     // A program that exited unsuccessfully before drawing anything never
     // started, which is a different finding from one that ran and drew an
     // empty screen. Reporting both as "no regions on screen" would send an
@@ -116,7 +119,8 @@ pub fn model(command: &str, workspace: &Path) -> Result<Model, String> {
     if !launched.honoured {
         return Err(format!("the program {command:?} did not start"));
     }
-    Ok(named(launched.model, command))
+    launched.model = named(launched.model, command);
+    Ok(launched)
 }
 
 /// Name the root region for the program the operator asked about. The root

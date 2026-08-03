@@ -67,6 +67,7 @@ Feature: command-line expectation
     When the operator executes "tinman expect --role columnheader --name PID top --output probe.yaml"
     Then the command exits with a zero status
     And "probe.yaml" is a plan whose expectation names the role "columnheader" and the name "PID"
+    And that expectation carries no text
 
   @sandbox
   Scenario: a failed expectation writes no plan
@@ -109,3 +110,28 @@ Feature: command-line expectation
     Given the plan fixture carrying an expectation naming a role and a name
     When the plan is validated
     Then it conforms to the "harness-plan" schema in "scantlings/harness-plan.schema.json"
+
+  Rule: the schema and the parser are two readings of one plan language, and a form only one of them accepts reaches the operator as a plan that validates and will not run. This project has shipped that divergence in the other direction, as a schema promising a cwd the parser silently dropped, and the lesson is the same from either side: the two readings are joined by a scenario or they are joined by nobody. The locator form is the case in hand, since the probe writes it and the operator commits what the probe wrote.
+
+  Scenario: a plan stating an expectation as a bare locator parses
+    Given a harness plan whose step expects the "columnheader" named "%CPU" and states no text
+    When the plan is parsed
+    Then the plan's step expects the "columnheader" named "%CPU"
+    And that step states no text
+
+  Rule: a plan the command wrote is a plan the command can replay, and the round trip is where a serialization change is actually proved. A written form that parses in isolation still fails the operator if the runner it was written for refuses it, and the probe's whole promise is that what it hands over is evidence they can commit and re-run.
+
+  @sandbox
+  Scenario: the plan a locator expectation wrote replays
+    Given a plan written by "tinman expect --role columnheader --name PID top --output probe.yaml"
+    When the operator executes "tinman test probe.yaml"
+    Then the command exits with a zero status
+
+  Rule: dropping the duplicated text from the written plan removed the only thing replay had to fail on, so the round trip above went green while asserting nothing, and the plan the probe handed the operator to commit would have passed against a program it had never seen. An expectation awaiting an empty text is satisfied by every screen ever drawn. The rule for the command-line path is already stated above, that a locator matching no region has asserted nothing and so fails, and replay owes the same answer because it is the same expectation read by a different reader. The passing direction cannot show this; only the failing one can, which is why the two are specified together.
+
+  @sandbox
+  Scenario: a replayed locator expectation matching no region fails
+    Given a plan at "probe.yaml" whose expectation names the "columnheader" named "NOSUCHREGION"
+    When the operator executes "tinman test probe.yaml"
+    Then the command exits with a non-zero status
+    And the failure names "NOSUCHREGION" as the region it looked for

@@ -168,16 +168,16 @@ fn main() {
                 }
                 return;
             }
-            match tinman::inspect::model(&command, &workspace) {
-                Ok(model) => {
+            match tinman::inspect::launched(&command, &workspace) {
+                Ok(launched) => {
                     if json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&model)
+                            serde_json::to_string_pretty(&launched.model)
                                 .expect("the model is written as JSON")
                         );
                     } else {
-                        println!("{}", tinman::inspect::render(&model));
+                        println!("{}", tinman::inspect::render(&launched.model));
                     }
                 }
                 Err(failure) => {

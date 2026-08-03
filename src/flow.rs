@@ -116,6 +116,7 @@ pub fn reach_over_tree(plan: &Plan, tree: &Path) -> Result<Option<InteractiveCap
 /// @planks("the capture carries a {string} named {string}")
 /// @planks("the verifier checks the backend construction boundary")
 /// @planks("the operator expects {string} after {string} against the fixture terminal program")
+/// @planks("the operator executes {string}")
 fn run_flow(
     plan: &Plan,
     workspace: &Path,
@@ -189,9 +190,12 @@ fn run_flow(
                 let mut session = capture_interactive_at(&prepared, columns)?;
                 for action in &tui.steps {
                     match action {
-                        Action::Expect(expectation) => {
-                            await_text(&session, &expectation.text)?;
-                        }
+                        Action::Expect(expectation) => match &expectation.locator {
+                            Some(locator) if expectation.text.is_empty() => {
+                                await_region(&session, locator)?;
+                            }
+                            _ => await_text(&session, &expectation.text)?,
+                        },
                         Action::Press(key) => {
                             // A press submits the key, the way the driver's own
                             // press submits it, because a program reading its
@@ -342,6 +346,35 @@ fn activate(session: &mut InteractiveCapture, locator: &Locator) -> Result<Locat
 /// @planks("the plan is replayed")
 fn answered(before: &str, now: &str) -> bool {
     !now.is_empty() && !now.starts_with(before)
+}
+
+/// Wait for a driven program to draw the region a bare locator addresses,
+/// reading the live screen in short intervals until the deadline. An
+/// expectation stating no text asserts nothing against a screen, so what it
+/// states is the region, and a locator that resolves to nothing is the failure
+/// the reader is told about by the region it looked for.
+///
+/// @planks("the operator executes {string}")
+fn await_region(session: &InteractiveCapture, locator: &Locator) -> Result<(), String> {
+    let name = &locator.name;
+    let role = locator
+        .role
+        .as_deref()
+        .expect("a bare locator names the role of the region it addresses");
+    let deadline = Instant::now() + EXPECT_DEADLINE;
+    loop {
+        let screen = session.screen();
+        if let Resolution::One(_) = crate::tom::Locator::new(role, name).resolve(&build(&screen)) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "the expectation of the {role} named {name:?} found this screen instead:\n{}",
+                screen.contents()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Wait for a driven program to draw the expected text, reading the live screen

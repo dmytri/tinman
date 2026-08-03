@@ -2153,6 +2153,22 @@ pub fn top_line_screen(text: &str) -> tinman::screen::VirtualScreen {
     tinman::screen::VirtualScreen::from_text(&format!("\x1b[1;1H{text}"))
 }
 
+/// Draw the same top row with `label` in reverse video, emitted as the real SGR
+/// sequence a program marks its current item with and cleared after it, so the
+/// grid carries the presentation and the production reading decides what it
+/// means. The label is drawn where it already sits in `text`, so the line reads
+/// the same whether an item is marked or not and only the presentation differs.
+pub fn top_line_screen_with_reversed(text: &str, label: &str) -> tinman::screen::VirtualScreen {
+    let at = text
+        .find(label)
+        .unwrap_or_else(|| panic!("the top line {text:?} carries no label {label:?} to reverse"));
+    let (before, rest) = text.split_at(at);
+    let after = &rest[label.len()..];
+    tinman::screen::VirtualScreen::from_text(&format!(
+        "\x1b[1;1H{before}\x1b[7m{label}\x1b[0m{after}"
+    ))
+}
+
 /// Draw a screen carrying `text` at the 1-based `row` and `col`, addressed with
 /// real ANSI cursor positioning so the text lands where the scenario places it
 /// and the rest of the grid stays blank.

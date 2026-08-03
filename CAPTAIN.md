@@ -6,9 +6,29 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**The deck is at rest. 0.5.0 is shipped and verified on all three targets. There is no work in flight.**
+**A voyage is in flight, opened 2026-08-03 from `3eee790` on three friction items the operator confirmed with "all of them".** Four watches, eight targets. Run the Opening retrieval and believe it over this.
 
-Run the Opening retrieval and believe it over this. State at close, 2026-08-03: the release is tagged `v0.5.0`, tree clean, level with `origin/main`, no `watchbill.json`, no `@captain` or `@shipwright` scenario, no perturbation standing, all three tiers green inside their budgets at `@logic` 282, `@sandbox` 139, `@inference` 2.
+**The three, and each was found by driving real `top` rather than by reading.** The `--conforms` failure prints the entire serialized model on one unwrapped line, where the locator failure on the same command correctly prints the screen. A plan `expect` the schema accepts as a bare locator is refused by the parser, so the two readings of one plan language disagree and the operator meets it as a plan that validates and will not run. And `top`'s summary line still reads as a `menu` of `menuitem "days,"` and `menuitem "average:"`.
+
+**The menu ruling, and it is the one to revisit if a fixture disagrees.** A menu is the role that carries a selection, so a top line no reverse-video item distinguishes is not a menu and reads as `status` instead. The corpus was checked before the rule was written, which is the corrective this file already records for a check derived from a wrong belief: every menu fixture in `tests/cucumber/support.rs` draws its selected item, and the one exception was `terminal-object-model.feature:a menu bar becomes a menu of named menu items`, whose given drew none. Strengthened in the same pass rather than left to redden. **The known cost, accepted knowingly: a real TUI whose menu bar highlights nothing until entered will now read as status.** No such program is in the corpus; if one arrives, the discriminator is what gives.
+
+**The status half is not optional and the notes say why.** A line that stops being a menu must still be something, or the correction trades a wrong role for a missing one and the screen's first line leaves the model entirely.
+
+**Captain built a false green this voyage, and QM caught it by command.** Dropping the duplicated `text` from the written plan removed the only thing replay had to fail on, so `the plan a locator expectation wrote replays` went green while asserting nothing, and a plan whose locator named a region `top` never draws replayed clean at exit 0. **The failing direction was specified in the same file that already stated the rule for the command-line path four scenarios above**, that a locator matching no region has asserted nothing and so fails. Reading that rule while writing the change did not prevent writing its opposite. The corrective that generalises is the one this file already carries: ask what would make it red, and where the answer is nothing, the scenario is the defect. **A serialization change that removes a field removes an assertion, and the two are the same act seen from either end.**
+
+**QM's duplicate finding, ruled rather than argued.** The `@contract` scenario Captain added was the same fixture, When and Then as the one already there, because the schema's locator form is exactly `{role, name}` and both sentences name one document. Deleted the newer. Two checkers holding one rule is a standing preference in this file and it was broken by the author who wrote it down.
+
+**The `focused` rigging finding now has a sharp edge and belongs to the next harbour.** Two QMs and a Boatswain each re-derived it independently: cucumber-rs refuses `--name` beside `--tags`, so `focused` runs verbatim without the exclusions the Rigging read contract requires. Harmless today because exact-name selection excludes a tagged scenario by construction. **It becomes a false-green route the day a `@captain` skeleton is named as a focused target**, which is the sentence that turns a settled workaround into a harbour item. Route to Shipwright; it is Shipwright's file.
+
+**A run-record entry overstated itself, 2026-08-03.** An entry at deck hash `68908475` listed two targets while its `command` ran one. Nothing was trusted wrongly, both being independently green in the sweep, but an entry whose `targets` exceed its `command` offers inherited evidence for a scenario nothing ran. That is the run record's own version of a check that cannot fail, and the record has no shape check over it.
+
+**Boatswain labelled what no command reaches, which is the discipline working rather than a gap to close by asking.** That Crew's touched files carry behaviour only within their planked steps is judged by reading the diff; the plank join answers form and presence only. Named as a harbour candidate rather than passed silently.
+
+**The dispatch-surplus check QM asked for is declined, with a fact.** A dispatch is ephemeral and reaches no durable artifact, so no check in this tree can redden on one; `conformance` reads the repository and a dispatch is never in it. It stays the doctrine gap already recorded above, now three occurrences, and it is raised upstream rather than mechanised here.
+
+**Still unmodelled and deliberately left so: `top`'s rows 1 through 4**, the `Tasks:`, `%Cpu(s):`, `MiB Mem:` and `MiB Swap:` lines, which reach the model nowhere today. Only row 0 is in scope this voyage. Its pivot is whether the status reading generalises to a leading block; do not open it before watch1 is green, because watch1 decides the shape.
+
+**State at the previous close, 2026-08-03: the release is tagged `v0.5.0`, all three tiers green inside their budgets at `@logic` 282, `@sandbox` 139, `@inference` 2.**
 
 **Verified, not merely reported.** crates.io and npm each installed from the registry and the shipped binary ran and answered `tinman 0.5.0`; jsdelivr answers 200 at `@v0.5.0`, so all 24 published schema URIs resolve. **The tag shipped first**, which is the lesson `@v0.2.0` paid for by answering 404 from the day it shipped.
 
@@ -20,7 +40,13 @@ Run the Opening retrieval and believe it over this. State at close, 2026-08-03: 
 
 **Discoverability is a requirement, not a courtesy, because an agent is one of the three consumers and cannot ask a person.** The command names were already joined to the parser from the bundled help and the bundled skill, both directions. What no join reached was a command's own options, which is what an agent needs in order to call it. Now joined, and QM built it well: the option set is read from `tinman man <command>`, which clap builds from the same definition as the help text, so no second list is kept.
 
-**Standing verification debt, named by QM and worth the next budget breach's attention.** Only the `run_tinman` path yields to the executor; the PTY and driver waits still block it, so `@sandbox` remains largely serial and sits at 108s against a 120s ceiling. The remaining speedup is real and unclaimed.
+**That standing debt was claimed on 2026-08-03, and the budget check is what collected it.** The breach routed to QM as failing verification, QM measured rather than amortized, and the cause was one hunk: `execute_command_line` called blocking `run_tinman` directly and held the runner's single executor thread through every real sandboxed launch. Routed through the awaited helper, **`@sandbox` went 121822ms to 86071ms**, from 1.5% over the ceiling to 28% under it. The control that made the diagnosis honest was already in the tree: `inspect-command` routed through the awaited helper and showed 3.05x from `-c 1` to `-c 4` where the blocking features showed 1.00x and 1.07x.
+
+**The ceiling holding is what produced this.** A budget raised to fit the suite would have bought a slower suite and no diagnosis; the red is what sent a role to measure. Do not read the 28% headroom as room to spend.
+
+**The same serialization survives in two clusters, and this is where the next creep comes from.** `driver-protocol` and `driver-session`, 27 scenarios blocking on `DriverProcess::request`, `send_line` and `wait_for_exit` across 30 call sites; and the `run_tinman_on_a_terminal*` step bodies. Left under simplest-sufficient-change, correctly, since the tier is no longer red. Harbour economy work with a known address.
+
+**The `result: 101` weather lines on `@logic` are explained rather than open.** They were the budget check failing inside the sweep; QM's post-fix sweep exits 0 at 285/285. QM observed both facts and declined to assert the link, which was right of it, and the link is now established.
 
 **These notes name no HEAD hash, and that is deliberate rather than an omission.** Every earlier close recorded one, and every one was false within the minute, because the commit carrying the notes moves HEAD past whatever the notes just claimed. A hash here is wrong by construction. The tag is stable and the retrieval answers the rest.
 

@@ -31,6 +31,16 @@ Feature: layout attestation
     Then the command exits with a non-zero status
     And the failure reports the position the region was drawn at
 
+  Rule: a failure is read by a person and by an agent, and the serialized model is the wrong thing to hand either. The model of a plain 80 by 24 screen runs to tens of thousands of characters on one unwrapped line, so printing it whole buries the constraint that failed inside the document that failed it, and the reader scrolls past every region that was fine to find the one that was not. The locator failure on this same command already answers this correctly by showing the screen the program drew, which is the form the operator can act on, and an attestation failing on that screen owes the same courtesy. What it adds is the layout's own location, because the whole point of a layout is that it names more constraints than a reader can hold at once.
+
+  @sandbox
+  Scenario: a layout failure reports the screen rather than the serialized model
+    Given a layout scantling at "top-layout.json" requiring a region named "Footer"
+    When the operator executes "tinman expect --conforms top-layout.json top"
+    Then the command exits with a non-zero status
+    And the failure carries the screen the program drew
+    And the failure carries no serialized model
+
   Rule: a scantling that constrains nothing passes every model, which is an attestation that cannot fail. This project has shipped that shape before, as a scantling that was valid JSON and an invalid schema, and as an optional property read as though it were required. What a run can decide is that the document is a schema and that it carries a constraint at all; whether its constraints are the right ones stays a reader's judgment, and saying so is better than a check that implies otherwise.
 
   Rule: a scantling is read before the program is launched, so a broken one is refused without spending a sandbox on it. Launching first would make the operator wait on a real process to be told their schema has a typo, and it would put a check that needs no external tool into the tier that needs one. That the program is never launched is asserted rather than assumed, because it is the whole reason these two sit in the default tier.

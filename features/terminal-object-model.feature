@@ -41,12 +41,28 @@ Feature: terminal object model
 
   Rule: the deterministic reading produces every role a written plan can address, because replay rebuilds the model with no model invocation. Inference enriches this model at capture time and is never a precondition for binding a locator a plan already carries.
 
+  Rule: a menu is the role that carries a selection. Activating an item is moving that selection and confirming it, and a listener needs a menu announced as something they can act on, so the selection is what the role is for rather than an ornament on it. A line of words no selection distinguishes offers nothing to activate, and reading it as a menu names a control the screen does not carry: top draws its own summary across the top line and the model answered with menu items called "days," and "average:". Rendering one item in reverse video is what a terminal has to say a menu item is current, and it is available to the deterministic pass, so nothing needs inferring to tell a bar of controls from a sentence with gaps in it.
+
   Scenario: a menu bar becomes a menu of named menu items
     Given a virtual screen whose top line reads "  Files   Settings   Quit  "
+    And the label "Files" is rendered with reversed video
     When the terminal object model is built
     Then the model contains a region with the role "menu"
     And that region has 3 child regions with the role "menuitem"
     And the second "menuitem" of that region is named "Settings"
+
+  Scenario: a top line carrying no selection is not read as a menu
+    Given a virtual screen whose top line reads "top - 18:52:59 up 9 days,  5:57,  0 user"
+    When the terminal object model is built
+    Then the model contains no region with the role "menu"
+
+  Rule: a line that stops being a menu must still be something, or the correction trades a wrong role for a missing one and the screen's first line leaves the model entirely. A region nothing reads is worse than a region read wrongly, because a locator that binds the wrong role fails where a locator that binds nothing reports the screen is empty there. What top draws on that line is what an editor draws on its bottom one, the program's own report on itself, which is the status role the model already carries and already reads at the other edge of the screen.
+
+  Scenario: a top line carrying no selection reads as a status region
+    Given a virtual screen whose top line reads "top - 18:52:59 up 9 days,  5:57,  0 user"
+    When the terminal object model is built
+    Then the model contains a region with the role "status"
+    And that region's text is "top - 18:52:59 up 9 days,  5:57,  0 user"
 
   Scenario: a bracketed label becomes a button
     Given a virtual screen showing "[ Save ]" at row 5 column 3

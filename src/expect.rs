@@ -97,9 +97,17 @@ fn attested(
             settled(&validator, &scantling, &session, command, conforms)?;
         }
         None => {
-            let drawn = serde_json::to_value(inspect::model(command, workspace)?)
-                .expect("the model is written as JSON");
-            conformed(&validator, &scantling, &drawn, command, conforms)?;
+            let launched = inspect::launched(command, workspace)?;
+            let drawn =
+                serde_json::to_value(&launched.model).expect("the model is written as JSON");
+            conformed(
+                &validator,
+                &scantling,
+                &drawn,
+                command,
+                conforms,
+                &launched.screen.contents(),
+            )?;
         }
     }
     let Some(output) = output else {
@@ -149,9 +157,16 @@ fn settled(
 ) -> Result<(), String> {
     let deadline = Instant::now() + EXPECT_DEADLINE;
     loop {
-        let drawn =
-            serde_json::to_value(build(&session.screen())).expect("the model is written as JSON");
-        match conformed(validator, scantling, &drawn, command, conforms) {
+        let screen = session.screen();
+        let drawn = serde_json::to_value(build(&screen)).expect("the model is written as JSON");
+        match conformed(
+            validator,
+            scantling,
+            &drawn,
+            command,
+            conforms,
+            &screen.contents(),
+        ) {
             Ok(()) => return Ok(()),
             Err(report) if Instant::now() >= deadline => return Err(report),
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
@@ -207,7 +222,11 @@ fn compiled(
 /// The attestation of one model against the compiled layout. A model that
 /// departs from the layout carries every departure, since the operator's next
 /// act is to correct the program or the layout and one departure at a time
-/// tells them only where to start.
+/// tells them only where to start. The evidence a failure carries is `screen`,
+/// the screen the program drew, which is the form the operator reads and acts
+/// on; the model itself stays out of the report, because a screen's model runs
+/// to tens of thousands of characters on one line and buries the departure
+/// inside the document that carries it.
 ///
 /// @planks("the operator executes {string}")
 fn conformed(
@@ -216,6 +235,7 @@ fn conformed(
     drawn: &serde_json::Value,
     command: &str,
     conforms: &str,
+    screen: &str,
 ) -> Result<(), String> {
     let departures: Vec<String> = validator
         .iter_errors(drawn)
@@ -225,7 +245,8 @@ fn conformed(
         return Ok(());
     }
     Err(format!(
-        "the model {command:?} drew does not conform to the layout {conforms:?}:\n{}",
+        "the model {command:?} drew does not conform to the layout {conforms:?}:\n{}\n  on this \
+         screen:\n{screen}",
         departures.join("\n")
     ))
 }
@@ -243,9 +264,28 @@ fn departure(failure: &jsonschema::ValidationError<'_>, scantling: &serde_json::
         .pointer(location)
         .map_or_else(String::new, |demand| format!(", which demands {demand}"));
     format!(
-        "  {failure}\n    at {} of the model, against the layout at {location}{demand}",
+        "  {}\n    at {} of the model, against the layout at {location}{demand}",
+        told(failure),
         failure.instance_path()
     )
+}
+
+/// What the validator found, told without the document it found it in. The
+/// validator writes the value that failed into its own account of a departure,
+/// which is what an operator wants where that value is a number or a text, and
+/// is the whole serialized model where it is a region or the list of them. The
+/// screen the program drew is carried with the failure, so restating the
+/// document adds nothing the reader can act on; the location and the demand
+/// already say which constraint went.
+///
+/// @planks("the operator executes {string}")
+fn told(failure: &jsonschema::ValidationError<'_>) -> String {
+    match failure.instance().as_ref() {
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            "the model departs from the layout here".to_string()
+        }
+        _ => failure.to_string(),
+    }
 }
 
 /// Run the plan at `after` over the operator's own tree, so its steps reach the
@@ -348,6 +388,7 @@ fn held(launched: &inspect::Run, text: &str) -> Result<Expectation, String> {
 /// ambiguity rather than a choice among them.
 ///
 /// @planks("the operator executes {string}")
+/// @planks("that expectation carries no text")
 fn resolved(
     launched: &inspect::Run,
     role: &str,
@@ -375,20 +416,19 @@ fn resolved(
             "the locator for the {role}{named} found this screen instead:\n{}",
             launched.screen.contents()
         )),
-        Resolution::One(_) => {
-            let name = name.unwrap_or_default().to_string();
-            Ok(Expectation {
-                // A region's name is its content in this model, so the name the
-                // locator resolved is the value the expectation states.
-                text: name.clone(),
+        Resolution::One(_) => Ok(Expectation {
+            // A region's name is its content in this model, so the locator
+            // states the whole of what was proved and no text is stated beside
+            // it. A text repeating the name would be a second copy of one fact
+            // in the plan the operator commits.
+            text: String::new(),
+            within: None,
+            locator: Some(Locator {
+                role: Some(role.to_string()),
+                name: name.unwrap_or_default().to_string(),
                 within: None,
-                locator: Some(Locator {
-                    role: Some(role.to_string()),
-                    name,
-                    within: None,
-                    binding: None,
-                }),
-            })
-        }
+                binding: None,
+            }),
+        }),
     }
 }
