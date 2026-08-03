@@ -196,6 +196,12 @@ struct TinmanWorld {
     // the commands a scenario names in its own table, held apart from the set
     // read off the parser so the two can be compared against each other
     named_command_set: Option<Vec<String>>,
+    // whether that set came from the scenario's own table. A step comparing the
+    // parser against the named set asserts nothing where the set was read off
+    // the parser, so the two sources are told apart rather than trusted alike
+    named_command_set_from_table: bool,
+    // what each command answered when asked for help
+    command_help: Option<Vec<CommandHelp>>,
     listed_commands: Option<Vec<String>>,
     advertised_options: Option<Vec<String>>,
     option_rejections: Option<Vec<String>>,
@@ -485,12 +491,51 @@ fn asset_body(path: &str) -> String {
 }
 
 /// Split an operator command line such as `tinman --help` into the arguments
-/// the binary receives, dropping the program name itself.
+/// the binary receives, dropping the program name itself. The line is one an
+/// operator types, so it is split the way their shell splits it rather than on
+/// whitespace alone: splitting `tinman expect total 'ls -la'` on whitespace
+/// hands the binary `'ls` and `-la'`, which is a command line no operator can
+/// produce, and the flag the quotes were protecting is read as Tinman's own.
 fn tinman_args(line: &str) -> Vec<String> {
-    line.split_whitespace()
-        .skip(1)
-        .map(str::to_string)
-        .collect()
+    shell_split(line).into_iter().skip(1).collect()
+}
+
+/// Split `line` into words the way a shell does: whitespace separates words,
+/// and a single- or double-quoted run is one word whose quotes are removed.
+fn shell_split(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    for character in line.chars() {
+        match quote {
+            Some(open) if character == open => quote = None,
+            Some(_) => word.push(character),
+            None if character == '\'' || character == '"' => {
+                quote = Some(character);
+                started = true;
+            }
+            None if character.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            None => {
+                word.push(character);
+                started = true;
+            }
+        }
+    }
+    assert!(
+        quote.is_none(),
+        "the command line {line:?} opens a quote it never closes, so it is not a line an operator \
+         could have typed"
+    );
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// A prepared process that runs a shell command line locally, with no sandbox
@@ -1861,9 +1906,182 @@ async fn the_command_lines_in_these_documents(
     world.named_command_lines = Some(lines);
 }
 
+/// What one command answered when it was asked for help.
+#[derive(Debug)]
+struct CommandHelp {
+    command: String,
+    stdout: String,
+    stderr: String,
+}
+
+impl CommandHelp {
+    /// Everything the command wrote, so a step asking what it reported reads
+    /// the answer wherever the command chose to put it.
+    fn reported(&self) -> String {
+        format!("{}{}", self.stdout, self.stderr)
+    }
+}
+
+/// The commands a scenario names. A scenario naming them in a table pins the
+/// set exactly; a scenario naming none means every command the parser accepts,
+/// which is the set an operator meets. The two sources are recorded apart, so a
+/// step comparing the parser against the named set can refuse the second form
+/// rather than compare the parser to itself and pass.
 #[given("the commands Tinman names")]
 async fn the_commands_tinman_names(world: &mut TinmanWorld, step: &cucumber::gherkin::Step) {
-    world.named_command_set = Some(table_column(step));
+    match step.table.is_some() {
+        true => {
+            world.named_command_set = Some(table_column(step));
+            world.named_command_set_from_table = true;
+        }
+        false => {
+            world.named_command_set = Some(tinman::cli::accepted_commands());
+            world.named_command_set_from_table = false;
+        }
+    }
+}
+
+/// The long options the parser accepts for a command, read out of the OPTIONS
+/// section of the manual page the parser itself emits. clap builds the page and
+/// the help text from one command definition, so the page is the parser's own
+/// answer to what a command accepts and no second list is kept to drift from it.
+fn documented_options(page: &str) -> Vec<String> {
+    let mut options = Vec::new();
+    let mut in_options = false;
+    for line in page.lines() {
+        if let Some(section) = line.strip_prefix(".SH ") {
+            in_options = section.trim() == "OPTIONS";
+            continue;
+        }
+        if !in_options {
+            continue;
+        }
+        for chunk in line.split(r"\fB\-\-").skip(1) {
+            let Some(name) = chunk.split(r"\fR").next() else {
+                continue;
+            };
+            options.push(format!("--{}", name.replace(r"\-", "-")));
+        }
+    }
+    options
+}
+
+/// Ask each named command for help, keeping what it wrote and where it put it.
+#[when("each is asked for help")]
+async fn each_is_asked_for_help(world: &mut TinmanWorld) {
+    let commands = world
+        .named_command_set
+        .clone()
+        .expect("the scenario named its commands");
+    let dir = working_dir(world);
+    let env = configured_env(world);
+    let mut answers = Vec::new();
+    for command in commands {
+        let outcome = support::run_tinman_awaited(
+            dir.clone(),
+            vec![command.clone(), "--help".to_string()],
+            env.clone(),
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the tinman binary did not run: {e}"));
+        answers.push(CommandHelp {
+            command,
+            stdout: outcome.stdout,
+            stderr: outcome.stderr,
+        });
+    }
+    world.command_help = Some(answers);
+}
+
+/// What the commands answered when they were asked for help, refusing an empty
+/// set: a step reading no answer at all would assert nothing.
+fn asked_for_help(world: &TinmanWorld) -> &[CommandHelp] {
+    let answers = world
+        .command_help
+        .as_deref()
+        .expect("the commands were asked for help");
+    assert!(
+        !answers.is_empty(),
+        "no command was asked for help, so this scenario would assert nothing"
+    );
+    answers
+}
+
+#[then("every one reports its own usage")]
+async fn every_one_reports_its_own_usage(world: &mut TinmanWorld) {
+    for answer in asked_for_help(world) {
+        let usage = format!("Usage: tinman {}", answer.command);
+        assert!(
+            answer.reported().contains(&usage),
+            "asked for help, {:?} reported no {usage:?} line, so it does not report its own \
+             usage; it wrote to the data stream:\n{}\nand to the error stream:\n{}",
+            answer.command,
+            answer.stdout,
+            answer.stderr
+        );
+    }
+}
+
+#[then("none reports an unexpected argument")]
+async fn none_reports_an_unexpected_argument(world: &mut TinmanWorld) {
+    for answer in asked_for_help(world) {
+        assert!(
+            !answer.reported().contains("unexpected argument"),
+            "asked for help, {:?} reported an unexpected argument; it wrote to the data \
+             stream:\n{}\nand to the error stream:\n{}",
+            answer.command,
+            answer.stdout,
+            answer.stderr
+        );
+    }
+}
+
+#[then("every option a command accepts appears in that command's help")]
+async fn every_option_appears_in_help(world: &mut TinmanWorld) {
+    let commands: Vec<String> = asked_for_help(world)
+        .iter()
+        .map(|answer| answer.command.clone())
+        .collect();
+    let dir = working_dir(world);
+    let env = configured_env(world);
+    let mut pages = Vec::new();
+    for command in &commands {
+        let outcome = support::run_tinman_awaited(
+            dir.clone(),
+            vec!["man".to_string(), command.clone()],
+            env.clone(),
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the tinman binary did not run: {e}"));
+        assert_eq!(
+            outcome.status, 0,
+            "the page for {command:?} was not emitted, so what that command accepts could not be \
+             read; the error stream reads:\n{}",
+            outcome.stderr
+        );
+        pages.push(documented_options(&outcome.stdout));
+    }
+    assert!(
+        pages.iter().any(|options| !options.is_empty()),
+        "no command was found to accept an option, so this step would assert nothing"
+    );
+    for (answer, options) in asked_for_help(world).iter().zip(pages) {
+        let reported = answer.reported();
+        let missing: Vec<String> = options
+            .into_iter()
+            .filter(|option| !reported.contains(option.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the help for {:?} names none of {missing:?}, which that command accepts; it wrote to \
+             the data stream:\n{}\nand to the error stream:\n{}",
+            answer.command,
+            answer.stdout,
+            answer.stderr
+        );
+    }
 }
 
 #[then("the parser accepts every command line")]
@@ -2903,6 +3121,11 @@ async fn the_command_set_is_exactly_the_commands_named(world: &mut TinmanWorld) 
         .named_command_set
         .clone()
         .expect("the scenario named its commands");
+    assert!(
+        world.named_command_set_from_table,
+        "the scenario named its commands by reading them off the parser, so comparing the two \
+         would assert nothing; this step needs a scenario that names them in its own table"
+    );
     assert!(
         !named.is_empty(),
         "the scenario named no command, so this step would assert nothing"
@@ -13739,6 +13962,38 @@ async fn the_failure_carries_the_screen(world: &mut TinmanWorld) {
     );
 }
 
+#[then(expr = "the failure names {string} as the region it looked for")]
+async fn the_failure_names_the_region_it_looked_for(world: &mut TinmanWorld, region: String) {
+    let errors = run_errors(world);
+    assert!(
+        errors.contains(&region),
+        "the failure does not name {region:?} as the region it looked for; the error stream \
+         reads:\n{errors}"
+    );
+}
+
+/// The wrapper syntax Rust's own debug rendering of an optional or a result
+/// puts around a value. A message carrying one is the language leaking through
+/// prose written for an operator, and it is mechanically findable, which is the
+/// whole of what this step can decide: a message that is merely unclear is not
+/// findable and no check here will catch one.
+const RUST_WRAPPER_SYNTAX: [&str; 4] = ["Some(", "None", "Ok(", "Err("];
+
+#[then("the failure carries no optional or result wrapper syntax")]
+async fn the_failure_carries_no_wrapper_syntax(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    let carried: Vec<&str> = RUST_WRAPPER_SYNTAX
+        .iter()
+        .copied()
+        .filter(|wrapper| errors.contains(wrapper))
+        .collect();
+    assert!(
+        carried.is_empty(),
+        "the failure carries the wrapper syntax {carried:?}, which is Rust's own rendering of an \
+         optional or a result reaching an operator; the error stream reads:\n{errors}"
+    );
+}
+
 #[then(expr = "the failure reports that {string} is not a role the model produces")]
 async fn the_failure_reports_an_unproduced_role(world: &mut TinmanWorld, role: String) {
     let errors = run_errors(world);
@@ -13769,6 +14024,23 @@ async fn the_failure_reports_the_ambiguity(world: &mut TinmanWorld) {
         count > 1,
         "the failure reports {count} matches, so it does not report an ambiguity; the error \
          stream reads:\n{errors}"
+    );
+}
+
+/// A locator carrying no name has no name to report, so a message naming one
+/// describes a locator the operator never wrote. The name clause is the
+/// findable half of that fault: a failure for a nameless locator carries no
+/// `named` clause at all. This is distinct from the wrapper-syntax step, which
+/// catches the rendering of the absent value rather than the wrong sentence,
+/// and a message reading `named ""` would satisfy that step while still
+/// reporting a name.
+#[then("the failure reports no name for a locator that carries none")]
+async fn the_failure_reports_no_name_for_a_nameless_locator(world: &mut TinmanWorld) {
+    let errors = run_errors(world);
+    assert!(
+        !errors.contains("named"),
+        "the failure reports a name for a locator that carries none; the error stream \
+         reads:\n{errors}"
     );
 }
 
@@ -13925,6 +14197,10 @@ async fn the_plan_is_validated(world: &mut TinmanWorld) {
 struct LaunchedSessions {
     dir: Option<std::path::PathBuf>,
     names: Vec<String>,
+    /// The program each launched session drives, in the order the names are
+    /// held, so a step reading a listing asserts against what the scenario
+    /// launched rather than against a program name written into the step.
+    programs: Vec<String>,
     /// The temporary directory the runs that created these sessions were given,
     /// so teardown addresses the same sessions the scenario launched.
     tmp: Option<std::path::PathBuf>,
@@ -13944,12 +14220,19 @@ fn temp_entries(dir: &std::path::Path) -> std::collections::BTreeSet<std::path::
 }
 
 impl LaunchedSessions {
-    /// Register `name` before the launch that creates it.
-    fn register(&mut self, dir: &std::path::Path, tmp: &std::path::Path, name: &str) {
+    /// Register `name`, driving `program`, before the launch that creates it.
+    fn register(
+        &mut self,
+        dir: &std::path::Path,
+        tmp: &std::path::Path,
+        name: &str,
+        program: &str,
+    ) {
         self.before.get_or_insert_with(|| temp_entries(tmp));
         self.tmp = Some(tmp.to_path_buf());
         self.dir = Some(dir.to_path_buf());
         self.names.push(name.to_string());
+        self.programs.push(program.to_string());
     }
 
     /// What appeared in the temporary directory since the first launch and
@@ -14010,7 +14293,7 @@ const TOP_SCREEN_TEXT: &str = "PID";
 async fn launch_session(world: &mut TinmanWorld, name: &str, program: &str) {
     let dir = working_dir(world);
     let tmp = scenario_temp_dir(world);
-    world.launched_sessions.register(&dir, &tmp, name);
+    world.launched_sessions.register(&dir, &tmp, name, program);
     run_tinman_command(world, &["launch", program, "--session", name]).await;
 }
 
@@ -14140,6 +14423,105 @@ async fn no_sandbox_resource_created_for_remains(world: &mut TinmanWorld, name: 
         standing.is_empty(),
         "closing the session {name:?} left {standing:?} standing"
     );
+}
+
+#[then("no sandbox resource created for either remains")]
+async fn no_sandbox_resource_created_for_either_remains(world: &mut TinmanWorld) {
+    let names = world.launched_sessions.names.clone();
+    assert!(
+        !names.is_empty(),
+        "the scenario launched no session, so this step would assert nothing"
+    );
+    for name in names {
+        let standing = world.launched_sessions.created_for(&name);
+        assert!(
+            standing.is_empty(),
+            "purging left {standing:?} standing for the session {name:?}"
+        );
+    }
+}
+
+/// What every session directory is named for, which is how a scenario reads off
+/// its own temporary directory whether a session stands in it.
+const SESSION_DIRECTORY_PREFIX: &str = "tinman-session-";
+
+/// The session directories standing in this scenario's own temporary directory.
+/// Read against that directory rather than the system's, since a session
+/// another worker is legally holding is not this scenario's state.
+fn standing_sessions(world: &mut TinmanWorld) -> Vec<std::path::PathBuf> {
+    let tmp = scenario_temp_dir(world);
+    temp_entries(&tmp)
+        .into_iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|entry| entry.to_str())
+                .is_some_and(|entry| entry.starts_with(SESSION_DIRECTORY_PREFIX))
+        })
+        .collect()
+}
+
+#[given("no session is running")]
+async fn no_session_is_running(world: &mut TinmanWorld) {
+    let standing = standing_sessions(world);
+    assert!(
+        standing.is_empty(),
+        "the scenario starts with {standing:?} standing, so it does not start from no session \
+         running"
+    );
+}
+
+#[then("the listing reports no session is running")]
+async fn the_listing_reports_no_session_is_running(world: &mut TinmanWorld) {
+    let listing = run_output(world);
+    assert!(
+        !listing.trim().is_empty(),
+        "the listing is empty, so it reports nothing rather than reporting that no session is \
+         running"
+    );
+    assert!(
+        listing.to_lowercase().contains("no session"),
+        "the listing does not report that no session is running; it reads:\n{listing}"
+    );
+}
+
+#[then(expr = "the listing names {string} and {string}")]
+async fn the_listing_names_both(world: &mut TinmanWorld, first: String, second: String) {
+    let listing = run_output(world);
+    for name in [&first, &second] {
+        assert!(
+            listing.contains(name.as_str()),
+            "the listing does not name the session {name:?}; it reads:\n{listing}"
+        );
+    }
+}
+
+#[then("each is listed against the program it drives")]
+async fn each_is_listed_against_its_program(world: &mut TinmanWorld) {
+    let listing = run_output(world).to_string();
+    let sessions: Vec<(String, String)> = world
+        .launched_sessions
+        .names
+        .iter()
+        .cloned()
+        .zip(world.launched_sessions.programs.iter().cloned())
+        .collect();
+    assert!(
+        !sessions.is_empty(),
+        "the scenario launched no session, so this step would assert nothing"
+    );
+    for (name, program) in sessions {
+        let line = listing
+            .lines()
+            .find(|line| line.contains(&name))
+            .unwrap_or_else(|| {
+                panic!("the listing names no session {name:?}; it reads:\n{listing}")
+            });
+        assert!(
+            line.contains(&program),
+            "the session {name:?} is listed as {line:?}, which does not name the program \
+             {program:?} it drives"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

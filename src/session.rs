@@ -381,6 +381,72 @@ fn performed_plan(dir: &Path) -> Result<Plan, String> {
     })
 }
 
+/// The sessions standing now, each with the program it drives. A session's
+/// directory is named for the session and records the program at launch, so what
+/// is running is read off the same files launching a session created.
+///
+/// @planks("the operator executes {string}")
+fn standing() -> Result<Vec<(String, String)>, String> {
+    let temp = std::env::temp_dir();
+    let entries = std::fs::read_dir(&temp).map_err(|e| {
+        format!(
+            "the sessions standing in {} were not read: {e}",
+            temp.display()
+        )
+    })?;
+    let mut sessions = Vec::new();
+    for entry in entries {
+        let session = entry
+            .map_err(|e| format!("a session standing in {} was not read: {e}", temp.display()))?
+            .path();
+        let named = session
+            .file_name()
+            .and_then(|entry| entry.to_str())
+            .and_then(|entry| entry.strip_prefix(SESSION_PREFIX))
+            .map(str::to_string);
+        let Some(name) = named else {
+            continue;
+        };
+        let command = std::fs::read_to_string(session.join(COMMAND_FILE))
+            .map_err(|e| format!("the program the session {name:?} drives was not read: {e}"))?;
+        sessions.push((name, command));
+    }
+    Ok(sessions)
+}
+
+/// What is running, one session per line against the program it drives. A
+/// session outlives the command that launched it, so an operator who has been
+/// exploring has no other way to see what they are still holding, and an empty
+/// listing says so rather than saying nothing.
+///
+/// @planks("the operator executes {string}")
+/// @planks("the listing names {string} and {string}")
+/// @planks("each is listed against the program it drives")
+/// @planks("the listing reports no session is running")
+pub fn listing() -> Result<String, String> {
+    let sessions = standing()?;
+    if sessions.is_empty() {
+        return Ok("no session is running".to_string());
+    }
+    Ok(sessions
+        .into_iter()
+        .map(|(name, command)| format!("{name}\t{command}"))
+        .collect::<Vec<String>>()
+        .join("\n"))
+}
+
+/// End every session standing, reclaiming what each of them created. Listing is
+/// what makes purging a decision rather than a guess, so the two read the same
+/// sessions.
+///
+/// @planks("the operator executes {string}")
+pub fn close_all() -> Result<(), String> {
+    for (name, _) in standing()? {
+        reclaim(&name)?;
+    }
+    Ok(())
+}
+
 /// Reclaim what launching the session `name` created. Removing the directory is
 /// the reclaim and the signal together: the process holding the session ends
 /// when its screen no longer lands, and the sandbox dies with that process, so

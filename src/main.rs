@@ -57,7 +57,13 @@ use tinman::cli::{Cli, Command};
 /// @planks("the Tinman driver is running")
 /// @planks("the operator starts the driver")
 /// @planks("the error stream reports Tinman has no {string} command")
+/// @planks("each is asked for help")
 fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(page) = tinman::cli::command_help(&arguments) {
+        print!("{page}");
+        return;
+    }
     let cli = Cli::parse();
     if cli.help || matches!(cli.command, Some(Command::Help)) {
         if std::io::stdout().is_terminal() {
@@ -217,9 +223,26 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Command::Close { session, output }) => {
+        Some(Command::Sessions) => match tinman::session::listing() {
+            Ok(listing) => println!("{listing}"),
+            Err(failure) => {
+                eprintln!("{failure}");
+                std::process::exit(1);
+            }
+        },
+        Some(Command::Close {
+            session,
+            all: _,
+            output,
+        }) => {
             let workspace = std::env::current_dir().expect("the working directory is read");
-            if let Err(failure) = tinman::session::close(&session, output.as_deref(), &workspace) {
+            // The parser takes a named session or every session and refuses
+            // both, so a close naming no session is the purge.
+            let closed = match session {
+                Some(session) => tinman::session::close(&session, output.as_deref(), &workspace),
+                None => tinman::session::close_all(),
+            };
+            if let Err(failure) = closed {
                 eprintln!("{failure}");
                 std::process::exit(1);
             }

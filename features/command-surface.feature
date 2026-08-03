@@ -87,6 +87,7 @@ Feature: command surface
       | press       |
       | expect      |
       | close       |
+      | sessions    |
       | inspect     |
       | driver      |
       | help        |

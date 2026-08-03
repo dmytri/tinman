@@ -13,6 +13,7 @@ Commands:
   launch         Start a named session against a program
   press          Send one key to the program
   expect         State one expectation against the screen
+  sessions       List the sessions that are running
   close          End a named session
   inspect        Print the terminal object model of a running program
   driver         Speak the JSON driver protocol on stdin and stdout

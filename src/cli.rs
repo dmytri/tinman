@@ -95,11 +95,16 @@ pub enum Command {
         #[arg(required = true)]
         expectation: Vec<String>,
     },
+    /// List the sessions that are running
+    Sessions,
     /// End a named session
     Close {
         /// The name of the session to end
-        #[arg(long)]
-        session: String,
+        #[arg(long, required_unless_present = "all")]
+        session: Option<String>,
+        /// End every session that is running
+        #[arg(long, conflicts_with = "session")]
+        all: bool,
         /// Where the plan the session performed is written
         #[arg(long)]
         output: Option<String>,
@@ -158,6 +163,29 @@ pub fn parse_command_line(line: &str) -> Result<Vec<String>, String> {
         return Err(format!("tinman has no {command:?} command"));
     }
     Ok(arguments)
+}
+
+/// The help a named command reports for itself, rendered from the same
+/// definition its manual page is built from, so what a command accepts is
+/// reachable without reading the source. Tinman renders the bundled help asset
+/// for its own help flag, which disables the parser's help flag for the whole
+/// tree, so a command asked for help is answered here rather than by the
+/// parser. A flag outside the quoted target is Tinman's, so a bare help token
+/// among a command's arguments is the request; a target carrying that spelling
+/// holds it inside its own quoted argument and is untouched.
+///
+/// @planks("each is asked for help")
+pub fn command_help(arguments: &[String]) -> Option<String> {
+    let (name, rest) = arguments.split_first()?;
+    if !rest
+        .iter()
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
+        return None;
+    }
+    let mut command = Cli::command();
+    command.build();
+    Some(command.find_subcommand_mut(name)?.render_help().to_string())
 }
 
 /// The commands the parser accepts, named as the operator types them.

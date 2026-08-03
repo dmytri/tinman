@@ -51,7 +51,7 @@ tinman inspect opencode
 
 - `tinman record <command...>` captures a live session into an editable plan.
 - `tinman test <plan>` runs a plan and reports whether it passed, replaying it exactly with no model invocation and no network.
-- `tinman launch <command...> --session <name>` starts a named session, and `tinman close --session <name>` ends it.
+- `tinman launch <command...> --session <name>` starts a named session, `tinman sessions` lists what is running, and `tinman close --session <name>` ends one. `tinman close --all` purges every session at once.
 - `tinman expect` states one expectation against the screen. It takes `--session <name>` to address a running session, and with no session it launches the program, asserts and closes. Driving is a plan's job: `--after <plan>` runs a plan's steps first, so an expectation can be made against a state only interaction reaches.
 - `tinman inspect <command...>` prints the terminal object model of a running program.
 - `tinman driver` speaks the JSON driver protocol on stdin and stdout.

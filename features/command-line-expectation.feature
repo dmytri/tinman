@@ -21,6 +21,17 @@ Feature: command-line expectation
 
   Rule: a failed expectation has to show the screen it read, because the operator's next act is to correct it and the only thing that tells them how is what the program actually drew. A bare non-zero status sends them back to inspect to ask a question the failing command already knew the answer to.
 
+  Rule: a failure reaches a person and an agent, and neither reads Rust. A locator that found nothing reported the region it wanted as `Some("NOSUCH")`, which is the language's own debug rendering of an optional value leaking through a message written for an operator. It names the thing the reader asked for wrapped in a type they have no reason to know exists.
+
+  Rule: what a run can decide here is narrower than the fault, and saying so is better than implying otherwise. A message carrying the wrapper syntax of an optional or a result is mechanically findable and is checked; a message that is merely unclear is not, and no check will catch one.
+
+  @sandbox
+  Scenario: a failed locator names the region without Rust wrapper syntax
+    When the operator executes "tinman expect --role columnheader --name NOSUCH top"
+    Then the command exits with a non-zero status
+    And the failure names "NOSUCH" as the region it looked for
+    And the failure carries no optional or result wrapper syntax
+
   @sandbox
   Scenario: a failed expectation reports the screen it found
     When the operator executes "tinman expect NOSUCH top"
@@ -37,11 +48,17 @@ Feature: command-line expectation
 
   Rule: resolution answers what a locator matches and reports ambiguity as ambiguity, which is the standing rule for every locator this project resolves. Picking the first of several matches would answer a question the operator did not ask, and the answer would be stable enough to trust and wrong the moment a row moved.
 
+  Rule: the same message is built on two paths and only one was corrected, so the wrapper leak survived where no assertion reached it. This scenario exercised the ambiguity arm while asserting only the count, which is why it stayed green through the fix beside it. A message assembled twice needs the assertion on both halves, or the half nobody asserts is the half that rots.
+
+  Rule: a locator carrying no name has no name to report, so a message naming one describes a locator the operator did not write. Rendering the absent name as the language's word for absence is the wrapper leak and the wrong sentence at once.
+
   @sandbox
   Scenario: a locator matching several regions reports the ambiguity
     When the operator executes "tinman expect --role cell top"
     Then the command exits with a non-zero status
     And the failure reports the locator matched more than one region
+    And the failure carries no optional or result wrapper syntax
+    And the failure reports no name for a locator that carries none
 
   Rule: only an honoured probe earns an expectation. A plan written from a probe that failed hands the operator a permanently red test describing a screen that never held. This is the documented-examples rule reaching a second surface, and it is the whole reason the command writes a file at all. The option is spelled the way `record` and `inspect` already spell it, because commands that write a plan should not spell it three ways.
 

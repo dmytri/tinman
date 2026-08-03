@@ -360,12 +360,19 @@ fn resolved(
         Some(name) => crate::tom::Locator::new(role, name),
         None => crate::tom::Locator::of_role(role),
     };
+    // The reader of this failure is an operator or an agent, so a carried name
+    // is told as the name rather than as the optional the command line parsed
+    // it into, and a locator that carries none reports no name at all.
+    let named = match name {
+        Some(name) => format!(" named {name:?}"),
+        None => String::new(),
+    };
     match target.resolve(&launched.model) {
         Resolution::Ambiguous(count) => Err(format!(
-            "the locator for the {role} named {name:?} matches {count} regions"
+            "the locator for the {role}{named} matches {count} regions"
         )),
         Resolution::NoMatch => Err(format!(
-            "the locator for the {role} named {name:?} found this screen instead:\n{}",
+            "the locator for the {role}{named} found this screen instead:\n{}",
             launched.screen.contents()
         )),
         Resolution::One(_) => {

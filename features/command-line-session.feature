@@ -59,6 +59,31 @@ Feature: command-line session
     When the operator executes "tinman close --session work"
     Then no sandbox resource created for "work" remains
 
+  Rule: a session outlives the command that made it, so an operator exploring for an afternoon accumulates them and has no way to see what is running. Reclaim at launch takes the dead ones, which leaves exactly the case it cannot: a session still alive that the operator has finished with. Listing is what makes purging a decision rather than a guess, so the two land together.
+
+  @sandbox
+  Scenario: the running sessions are listed with the program each drives
+    Given a session named "work" running "top"
+    And a session named "spare" running "top"
+    When the operator executes "tinman sessions"
+    Then the listing names "work" and "spare"
+    And each is listed against the program it drives
+
+  Scenario: listing sessions where none is running reports none rather than failing
+    Given no session is running
+    When the operator executes "tinman sessions"
+    Then the command exits with a zero status
+    And the listing reports no session is running
+
+  @sandbox
+  Scenario: closing every session at once purges them all
+    Given a session named "work" running "top"
+    And a session named "spare" running "top"
+    When the operator executes "tinman close --all"
+    Then the command exits with a zero status
+    And no session is left running
+    And no sandbox resource created for either remains
+
   Rule: an operator who walks away is the normal case rather than the exceptional one, and a session whose program has gone is holding a sandbox nobody is watching. This project has already accumulated ninety-nine staging directories and a sandbox three days old holding a bind mount against a tree the operator was editing, so closing on the happy path is not the safety net. Reclaiming at launch is, on the same reasoning that reclaims leftover resources at suite start rather than trusting a killed run to tidy up after itself.
 
   @sandbox
