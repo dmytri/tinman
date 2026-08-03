@@ -6,7 +6,11 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**A voyage is in flight, opened 2026-08-03 from `3eee790` on three friction items the operator confirmed with "all of them".** Four watches, eight targets. Run the Opening retrieval and believe it over this.
+**The voyage is closed and committed at `595d3027`, tree clean, one commit ahead of `origin/main`. Outbound is unasked and undecided; the operator has not ruled.** Run the Opening retrieval and believe it over this.
+
+**A version bump is owed before any outbound.** `Cargo.toml` reads 0.5.0, which is already released and verified on all three targets, so shipping this work needs a new number. No published schema moved this voyage, `harness-plan.schema.json` included, so the schema URIs are truthful as they stand and the bump is the manifest pair alone, `Cargo.toml` and `npm/package.json`. The menu reading is a behaviour change to the model that a TOM consumer can see, which argues 0.6.0 over 0.5.1 under the breaking-changes-are-fine-at-0.x rule.
+
+**Boatswain asked why the watchbill named one scenario while ten targets advanced, and the answer is that the voyage spent four watchbills, not one.** Each target reached QM through a watchbill live at the time; custody sees only the last, because striking rides the commit. **The sharp edge is real and it is Captain's: three of those four were rewritten rather than appended to**, which is the fault this file already records from 2026-07-31. It was safe here only because each rewrite followed a QM report of spent-and-green and two full sweeps covered everything. **A voyage spending several watchbills leaves custody unable to audit scope against work at all**, since the artifact carrying the order is destroyed by the act that records the work. Raise upstream: the audit Boatswain reached for is impossible by construction, and it did the right thing by naming the disagreement rather than assuming it away.
 
 **The three, and each was found by driving real `top` rather than by reading.** The `--conforms` failure prints the entire serialized model on one unwrapped line, where the locator failure on the same command correctly prints the screen. A plan `expect` the schema accepts as a bare locator is refused by the parser, so the two readings of one plan language disagree and the operator meets it as a plan that validates and will not run. And `top`'s summary line still reads as a `menu` of `menuitem "days,"` and `menuitem "average:"`.
 
