@@ -40,3 +40,12 @@ Feature: command-line arguments
   Scenario: a target of one word needs no quotes
     When the operator executes "tinman expect PID top"
     Then the command exits with a zero status
+
+  Rule: this feature's help scenario runs 72760ms and is the binding constraint on its tier at any worker count, since a tier's wall clock cannot fall below its longest scenario. Its first two assertions need real execution and stay at one process per command. The third, that every option appears in each command's help, is a structural fact clap answers from the same definition that builds the help text, so it needs no process per command. This supersedes that third assertion rather than adding beside it.
+
+  @captain
+  Scenario: every command names its options in the manual it emits
+    Given the command definitions the parser carries
+    When the manual page for each command is read
+    Then every command definition was read
+    And each one names every option it declares

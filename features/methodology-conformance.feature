@@ -261,3 +261,21 @@ Feature: methodology conformance
     When each is matched against the specs and the step definitions that read it
     Then every scantling path is reached by at least one of them
     And the scantling paths read are not empty
+
+  Rule: nothing in this tree reddens when an advisory lands. Both advisories found so far were found because a role went looking, one by a harbour audit and one by a role reading a 200 as publication for a package abandoned since 2024. A fact discovered only when somebody remembers to look is a fact the suite is not carrying. The shipped graph is the one that matters, because what ships is a Rust binary and the npm graph is dev rigging no released artifact carries. An advisory is queried by name and version together, since a name-only lookup returns a hit that reads as live against a pinned version that is unaffected, and a false alarm reopens a settled pin.
+
+  @captain
+  Scenario: no advisory reaches a crate in the shipped graph
+    Given the crates the release graph carries
+    When each is queried against the advisory database by name and version
+    Then every crate in that graph was queried
+    And no advisory reaches any of them
+
+  Rule: the duplication gate reads implementation and stops there, so verification support carries duplication that nothing reads. Support is where a copied helper does the most damage, because its blast radius is every scenario routing through it rather than one seam. Captain's first decline of this gate was wrong and the correction is the durable part: arguing that a gate would redden byte-identical floor assertions argues for an allowance, which the duplication scantling already provides for implementation. What stands is that the support tree can only carry a ratchet, permitting what was present at adoption and catching what is added, and a ratchet is honest only where it says so.
+
+  @captain
+  Scenario: verification support adds no duplication beyond its recorded allowance
+    Given the duplication report for the verification support tree
+    When each duplicated group is matched against the allowance
+    Then every group the report found was matched
+    And no group falls outside the allowance

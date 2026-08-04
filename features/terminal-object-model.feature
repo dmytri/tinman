@@ -167,3 +167,21 @@ Feature: terminal object model
     Given a virtual screen showing a bordered pane titled "Files" listing "src" and "tests"
     When the terminal object model is serialized
     Then it conforms to the "tom" schema in "scantlings/tom.schema.json"
+
+  Rule: a leading summary line collapses the table beneath it into a list. Column detection requires every line of a block to sustain the columns, so one short line at the top yields an empty cell and the whole block is declined. Every real ls -l output opens with a total line, and df, ps and git log are the neighbouring cases to check before this is promoted. The line is not part of the table and reading it as one is what breaks the table.
+
+  @captain
+  Scenario: a leading summary line leaves the columns beneath it a table
+    Given a virtual screen showing a total line above three columnar lines
+    When the terminal object model is built
+    Then the model contains a region with the role "table"
+    And the total line is not a row of that table
+
+  Rule: only the first line of a summary block reaches the model. Row zero became a status region when the menu reading was corrected, and the lines under it, which carry the task counts, the processor shares and the memory figures, reach the model nowhere. A block of lines above a table is the program reporting on itself, which is what the status role already means at the other edge of the screen, and reading one line of it while dropping four is arbitrary.
+
+  @captain
+  Scenario: every summary line above a table reads as a status region
+    Given a virtual screen showing four summary lines above a table
+    When the terminal object model is built
+    Then the model contains 4 regions with the role "status"
+    And each one carries the text of the line it was read from

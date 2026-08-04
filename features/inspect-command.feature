@@ -226,3 +226,19 @@ Feature: inspect command
     When the operator inspects a command that prints "disk full" in red
     Then the inspect output lists a region named "disk full"
     And the inspect output reports that region is drawn in red
+
+  Rule: inference has no production caller. The engine at src/inference.rs is built, specified and green, and rg over src reports the model-building entry points called from nowhere but verification, so no command a person can run invokes it. The README and the bundled skill both promise capture-time inference, which makes the shipped binary contradict its own documentation. This is the shape a wildcard match arm produced once already, a declared command that did nothing: green scenarios over a seam the product cannot reach.
+
+  @captain @inference
+  Scenario: inspect enriches the deterministic model when a credential is configured
+    Given an inference credential is configured
+    When the operator inspects the fixture terminal program
+    Then the inspect output names a region the deterministic pass leaves unnamed
+
+  Rule: a status region carries its content as text and no name, and the listing prints a region's name, so a status region prints as a bare role with nothing beside it. An operator reading that learns a region exists and nothing about what it says, which is barely better than the region being absent. This is what top's summary line looks like today.
+
+  @captain
+  Scenario: the listing shows the text a status region carries
+    Given a virtual screen whose bottom line reads "NORMAL  main  3 files"
+    When the operator inspects that screen
+    Then the inspect output shows the status region carries "NORMAL  main  3 files"
