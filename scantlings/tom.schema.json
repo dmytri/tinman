@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.5.0/scantlings/tom.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/tom.schema.json",
   "title": "Tinman terminal object model",
   "description": "The semantic reading of a rendered virtual screen: nested rectangles carrying roles, names, text and the presentation they were drawn with. This is the terminal's equivalent of the browser document object model, and it is what locators bind against. Structure and presentation are both carried, for the same reason a browser exposes a computed style beside the element tree: a test author asserting that a warning line is drawn in red is asking about the screen, not about the program's internals, and a model that drops the cell attributes cannot answer them. Tinman reads an attributed cell grid and derives roles from those attributes, so the attributes are already in hand; carrying them costs nothing and withholding them pushes every presentation assertion into a bespoke check against the raw grid. Referenced by features/terminal-object-model.feature, features/tom-inference.feature and features/inspect-command.feature.",
   "type": "object",

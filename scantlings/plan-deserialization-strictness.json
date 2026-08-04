@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.5.0/scantlings/plan-deserialization-strictness.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/plan-deserialization-strictness.json",
   "title": "Plan deserialization strictness",
   "description": "Every deserializable struct that parses an operator's plan refuses a field the model does not define. The paths named here are the operator-authored surface: src/plan.rs carries the flow, its steps and their locators and expectations, and src/sandbox.rs carries the sandbox block. One module deserializes outside that surface and is outside the bound rather than exempt by name: src/inference.rs reads provider responses, where leniency is correct because a vendor adding a field must not break Tinman. src/skill.rs is inside the bound: it reads the skill Tinman itself ships, compiled in from assets, which is a document this project authors and so is held to the same strictness as a plan. Discharged by the deserialization-strictness checker in verification support, which reads the derive attributes on each deserializable type under the named paths. Attested by the @contract scenario in features/harness-plan.feature.",
   "requiredDeriveAttribute": "deny_unknown_fields",
