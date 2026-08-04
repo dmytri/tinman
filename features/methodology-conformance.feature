@@ -280,7 +280,6 @@ Feature: methodology conformance
     Then every group the report found was matched
     And no group falls outside the allowance
 
-  @captain
   Rule: durable prose that cites machinery rots every time the machinery improves, and the better the check gets the faster it rots. Only part of that rule has a findable subject. A sentence hardcoding a live count was declined on a measurement, because most bare integers in this corpus are status codes, byte counts and versions, and separating a live count from a dated one means reading which date governs a sentence. A sentence recording that a past decision was wrong is discourse and no query reaches it. What a query does reach is a citation of the implementation tree itself, which is the fault this rule exists for: prose naming a source path outlives the seam it names.
 
   @captain
@@ -289,3 +288,12 @@ Feature: methodology conformance
     When each is read for a path under the implementation directory
     Then every rule body was read
     And no rule body cites such a path
+
+  Rule: a tag on a rule line is inherited by every scenario inside that rule, which is useful for a tier tag and a trap for a lifecycle tag. A tier tag has no promotion path, so inheriting it is how a whole rule declares its cost once, and this corpus uses it deliberately. A lifecycle tag is workflow state that ends by being deleted, and deleting the one on the scenario leaves the one on the rule still excluding it from every derived command. Nothing announces that: the scenario count does not move, no run reddens, and the promotion silently does nothing. Captain wrote this fault twice in one session, the second time into the skeleton arguing against prose faults, so the placement wants a check rather than more care.
+
+  @captain
+  Scenario: no lifecycle tag sits on a rule line
+    Given the lifecycle tag lines the specs carry
+    When each is read for what it precedes
+    Then every lifecycle tag line was read
+    And none of them precedes a rule
