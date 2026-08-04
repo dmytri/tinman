@@ -8,7 +8,7 @@ Feature: inference provider
   Scenario: an unconfigured provider is OpenRouter
     Given neither the environment nor a dotenv file sets "TINMAN_BASE_URL" or "TINMAN_MODEL"
     When an inference request is built
-    Then the request addresses "https://openrouter.ai/api/v1" with the model "deepseek/deepseek-v4-flash"
+    Then the request addresses "https://openrouter.ai/api/v1" with the model "deepseek/deepseek-v4-flash-0731"
 
   Scenario: a configured provider replaces the default
     Given the environment sets "TINMAN_BASE_URL" to "https://api.example-llm.test/v1" and "TINMAN_MODEL" to "meta-llama/llama-4-70b"

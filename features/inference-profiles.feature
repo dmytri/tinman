@@ -14,6 +14,6 @@ Feature: inference profiles
     Then the request temperature is 0.1
 
   Scenario: both profiles address the same configured model
-    Given the configured model is "deepseek/deepseek-v4-flash"
+    Given the configured model is "deepseek/deepseek-v4-flash-0731"
     When the acronym request and the assistant request are built
-    Then both requests name the model "deepseek/deepseek-v4-flash"
+    Then both requests name the model "deepseek/deepseek-v4-flash-0731"

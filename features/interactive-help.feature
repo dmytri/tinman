@@ -99,7 +99,7 @@ Feature: interactive help
     Given no inference credential is configured
     When the operator runs "tinman" in an interactive terminal
     Then the form offers "https://openrouter.ai/api/v1" as the endpoint
-    And the form offers "deepseek/deepseek-v4-flash" as the model
+    And the form offers "deepseek/deepseek-v4-flash-0731" as the model
 
   @sandbox
   Scenario: the key is masked as it is typed

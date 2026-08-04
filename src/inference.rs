@@ -15,7 +15,7 @@ use std::path::Path;
 const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
 /// The model Tinman addresses when none is configured.
-const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
+const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
 
 /// The source tldr pages are read from when none is configured: the
 /// tldr-pages project's own raw markdown.

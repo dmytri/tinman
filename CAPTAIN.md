@@ -94,6 +94,26 @@ Durable artifacts authored this pass: `scantlings/verification-conformance/unsha
 
 **Captain's own faults this session, kept because they recurred.** A dispatch to Boatswain carried diff narration and a pre-stated expected value; it was refused as contaminated, correctly, and that is a rule I had followed all day until I did not. Durable prose was written naming machinery rather than what a check decides, and rotted three times in one file in one day. A watchbill was rewritten rather than appended to, dropping an edited scenario off it. A dependency survey stopped one link short of the live option. **The pattern in all four is a long context reasoning from memory where a fresh role would have run a command.**
 
+## 0.6.0 shipped and verified on all three targets, 2026-08-04
+
+Tag first, then crates.io, then npm, each read from its own `verify` output. jsdelivr answers at `@v0.6.0`, so all 21 published schema URIs resolve; crates.io and npm each installed from the registry and the binary answered `tinman 0.6.0`. The bump moved 28 files together, the two manifests and 24 schema URIs across 22 scantlings and both example plans, committed at `1960253`.
+
+## Three product faults the operator found by driving the shipped binary, 2026-08-04
+
+**Inference is unreachable from any command, and this is the serious one.** `tom::infer` and `tom::infer_for` have no production caller; `rg` over `src/` returns only their definitions, and the only callers are three sites in `tests/cucumber.rs`. So `inspect` runs the deterministic pass alone and no CLI path invokes inference at all. **The README and the bundled skill both claim capture-time inference, so the shipped binary contradicts its own documentation.** This is the `tinman replay` shape at product scale: declared, specified, green, and reachable by nobody. Every inference scenario passes because verification calls the seam directly.
+
+**A leading summary line collapses a whole table into a list.** `inspect 'ls -l'` reads 20 `listitem`s where the output is plainly columnar, because `total 384` is one short line that does not sustain the columns, so `columns_of` finds an empty cell and `table_of` declines the entire block. Every real `ls -l` starts with that line, and `df`, `ps` and `git log --oneline` are the neighbouring cases to check before specifying.
+
+**`top`'s summary block is still four fifths missing, and the fifth shows nothing.** 0.6.0 made row 0 a `status` region, and rows 1 through 4, `Tasks:`, `%Cpu(s):`, `MiB Mem:` and `MiB Swap:`, reach the model nowhere. Worse, `inspect` prints a bare `status` with no text, because the renderer prints a region's name and `status_bar` sets name to none while carrying the text. **A region whose content the inspector will not show is barely better than a region that is absent**, and the deferred item in these notes underestimated it by counting only the missing rows.
+
+**Not a fault, and worth not re-deriving: three rows is correct.** `top` inside the sandbox sees `bwrap`, `sh` and `top`. That is isolation working.
+
+## The default model moves to a dated pin, 2026-08-04
+
+Operator direction. **Read from the OpenRouter registry rather than recalled, and the reading changed the shape of the change**: `deepseek/deepseek-v4-flash` resolves to "DeepSeek V4 Flash 0423", so the undated ID is not a floating alias but an old snapshot that has been aging silently under the word default. `deepseek/deepseek-v4-flash-0731` is the current dated build and is what the specs now name. A floating `~deepseek/deepseek-v4-flash-latest` exists and was declined: capture-time behaviour that changes with no commit is the opposite of the determinism this project sells.
+
+Specs edited: `features/inference-provider.feature`, `features/inference-profiles.feature`, `features/interactive-help.feature`. `src/inference.rs` `DEFAULT_MODEL` is the production half and is Crew's. `AGENTS.md` and `RIGGING.md` both name the old ID in prose and are Shipwright's at the next harbour.
+
 ## Harbour of 2026-08-04, and the four findings ruled by doctrine rather than by asking
 
 **Harbour is complete and committed at `42377b7`; the deck is at rest, three commits ahead of `origin/main`, and outbound is unasked.** The release rides harbour's own full regression, so no further sweep is owed for it.
