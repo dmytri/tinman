@@ -402,6 +402,18 @@ The reason it happens is structural rather than lax. `AGENTS.md` is where a sett
 
 Either the Article widens to let Shipwright write that file whenever Captain routes a settled decision to it, which is what happens now, or the doctrine needs a different home for a decision made at sea. Do not resolve it by having Captain write the file: routing through Shipwright is what caught three stale claims in it today, and every one was found because a second role read the tree instead of taking Captain's account.
 
+## The dispatch-surplus fault recurred a third time, 2026-08-04, and the pattern is now the finding
+
+Boatswain refused a custody dispatch carrying one sentence past the row: a description of the diff. **It was true, and it was a pre-judgment of the recheck selection Boatswain makes for itself**, which is the whole objection. Accepting it seats a caller's claim where a check belongs.
+
+**Three occurrences, each after reading the note about the previous one, and the third was written in the same turn as a note about notes failing to prevent faults.** That is no longer a discipline problem to be solved by another note. The surplus is always a true and helpful-seeming sentence, so the mistake and the helpful instinct are one motion, which is the `Background`-above-`Rule` shape exactly. **Doctrine's own contamination protocol says a fault recurring by mechanism wants a check rather than a note.** The row is four fields; enforcing it at the dispatch boundary is mechanizable where remembering it has now failed three times.
+
+## Boatswain read three faults in Captain's own `Rule:` prose, 2026-08-04, and all three were fair
+
+A bare `72760ms` with no date, where the exemption is a date; a `Rule:` citing a source file and an `rg` result, where durable prose cites the durable artifact rather than the machinery that moves whenever the check improves; and a sentence recording that an earlier Captain decision was wrong, where historical rationale belongs in git. **All three were written while quoting the rules they broke.** Corrected in place.
+
+**The gap Boatswain named is the durable part: no command reaches `Rule:` prose quality.** gplint carries no such rule and the conformance set carries none, so every finding here is a read-judgment. A derived `@conformance` rule over `Rule:` bodies would catch the mechanical half, an undated measurement and a citation of a path under the implementation directory, and would catch nothing of the third.
+
 ## The dispatch-surplus fault recurred 2026-08-02, after the note about it was read
 
 Boatswain flagged a Captain dispatch carrying a sentence characterizing the diff beyond the contract row of job, base commit and advanced targets. It quarantined rather than refused, on the ground that the sentence restated a deck read the role makes anyway and carried no product intent. **The note below from 2026-08-01 describes the identical fault, and reading it did not prevent it**, which is the shape the `Background`-above-`Rule` note already records: the mistake and the helpful instinct are one motion, so knowing the rule does not stop the hand. There is no check for it; the contract row is short enough to type from memory, so type only that.

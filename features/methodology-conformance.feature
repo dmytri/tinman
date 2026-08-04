@@ -271,7 +271,7 @@ Feature: methodology conformance
     Then every crate in that graph was queried
     And no advisory reaches any of them
 
-  Rule: the duplication gate reads implementation and stops there, so verification support carries duplication that nothing reads. Support is where a copied helper does the most damage, because its blast radius is every scenario routing through it rather than one seam. Captain's first decline of this gate was wrong and the correction is the durable part: arguing that a gate would redden byte-identical floor assertions argues for an allowance, which the duplication scantling already provides for implementation. What stands is that the support tree can only carry a ratchet, permitting what was present at adoption and catching what is added, and a ratchet is honest only where it says so.
+  Rule: the duplication gate reads implementation and stops there, so verification support carries duplication that nothing reads. Support is where a copied helper does the most damage, because its blast radius is every scenario routing through it rather than one seam. That a gate here would redden byte-identical floor assertions is an argument for an allowance rather than against a gate, since the duplication scantling already carries one for implementation. The support tree can only carry a ratchet, permitting what was present at adoption and catching what is added, and a ratchet is honest only where it says so.
 
   @captain
   Scenario: verification support adds no duplication beyond its recorded allowance

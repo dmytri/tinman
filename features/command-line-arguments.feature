@@ -41,7 +41,7 @@ Feature: command-line arguments
     When the operator executes "tinman expect PID top"
     Then the command exits with a zero status
 
-  Rule: this feature's help scenario runs 72760ms and is the binding constraint on its tier at any worker count, since a tier's wall clock cannot fall below its longest scenario. Its first two assertions need real execution and stay at one process per command. The third, that every option appears in each command's help, is a structural fact clap answers from the same definition that builds the help text, so it needs no process per command. This supersedes that third assertion rather than adding beside it.
+  Rule: a tier's wall clock cannot fall below the duration of its longest scenario, so the slowest scenario in a tier is that tier's floor at any worker count. Measured on 2026-08-04, this feature's help scenario held that position. Its first two assertions need real execution and stay at one process per command. The third, that every option appears in each command's help, is a structural fact the parser answers from the same definition that builds the help text, so it needs no process per command. Where this is promoted it takes that third assertion with it rather than standing beside it.
 
   @captain
   Scenario: every command names its options in the manual it emits

@@ -227,7 +227,7 @@ Feature: inspect command
     Then the inspect output lists a region named "disk full"
     And the inspect output reports that region is drawn in red
 
-  Rule: inference has no production caller. The engine at src/inference.rs is built, specified and green, and rg over src reports the model-building entry points called from nowhere but verification, so no command a person can run invokes it. The README and the bundled skill both promise capture-time inference, which makes the shipped binary contradict its own documentation. This is the shape a wildcard match arm produced once already, a declared command that did nothing: green scenarios over a seam the product cannot reach.
+  Rule: no command a person can run invokes inference. The inference engine is built, specified and green, and every scenario covering it reaches the seam through verification rather than through a command, so the enrichment it produces is unreachable from the product. The bundled skill and the README both promise that capture time may infer, which makes the shipped binary contradict its own documentation. This is the shape a declared command that did nothing produced once already: scenarios green over a seam no user can reach.
 
   @captain @inference
   Scenario: inspect enriches the deterministic model when a credential is configured
