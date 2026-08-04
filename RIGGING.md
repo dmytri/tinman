@@ -67,6 +67,8 @@
 - dependency: ast-grep
 - dependency: gplint
 - dependency: mandoc
+- dependency: ripgrep
+- dependency: curl
 - dependency: bwrap >= 0.11.2
 - dependency: passt
 - dependency: tui-markdown, default-features = false

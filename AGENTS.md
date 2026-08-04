@@ -190,6 +190,8 @@ So the move is deferred because there is no stable destination, by the upstream 
 
 **The revisit trigger is an event, not a date.** Re-open this when `saphyr-serde` is published, or when an advisory lands that reaches the pinned version. A harbour that re-opens it on the deprecation marker alone is repeating this decision.
 
+One precision about that trigger, because the obvious query reports it as already fired. The name `saphyr-serde` does resolve on crates.io, so a lookup answers 200 and a reader concludes the crate is published. Measured on 2026-08-04: it carries one version, `0.0.0`, described as `tmp`, created 2024-04-02 and never updated since. That is a reserved name rather than a released integration. Read the trigger as a usable release, and let the version and the publication date decide it rather than the name resolving.
+
 One precision the survey bought, because the obvious query gives the wrong answer. `serde_yaml` does carry an advisory, RUSTSEC-2018-0005, so a name-only advisory lookup reports a hit and reads as a live finding. Its affected range is `>=0.6.0-rc1, <0.8.4` and it was fixed in 0.8.4, so it cannot reach a 0.9 pin. Query the advisory databases by name and version together and let the answer decide; on 2026-07-30 the version-scoped query returned nothing.
 
 The environment reaches crates.io directly. A plain `curl` against the crates.io JSON API answered every query in this survey, and one against the OSV API answered the advisory queries. Any note claiming the registry is unreachable from this VM, and that `cargo search` is the only route, describes a past failure rather than a standing property. Prefer the JSON API for a version or a publication date, because `cargo search` reports neither and exits 0 whatever it finds.
@@ -223,6 +225,18 @@ No advisory reaches any of the three, and no spec needs anything a newer version
 **The revisit trigger is an event, not a delta**, on the `serde_yaml` precedent above. Re-open a pin when an advisory lands that reaches the pinned version, or when a spec or a seam needs something a newer version carries. A harbour that reports these three again on the version delta alone is repeating this decision.
 
 One of the three is not like the other two, and a later harbour should not batch them. `clap` and `clap_complete` are patch moves within a stable major line. `jsonschema` from 0.48 to 0.49 is a minor bump on a 0.x line, where the semantic-versioning contract permits a breaking change, so it owes a real look when its trigger fires rather than a routine bump taken along with the others.
+
+### An advisory moved brace-expansion, which is the pin trigger working
+
+The Captain ruled on 2026-08-04. Advisory GHSA-rgw5-rvv9-x895 reaches `brace-expansion` from 4.0.0 through 5.0.8 and is fixed in 5.0.9. The resolved version was 5.0.8, so the advisory reached a version the `locked` policy held, and the resolved version is now 5.0.9.
+
+This is the trigger above firing rather than an exception to it, and it is the first record of that clause doing any work. The held-pins entry says to re-open a pin when an advisory lands that reaches the pinned version. A harbour that reads these entries as a general reluctance to move versions has them backwards: the policy holds a version against drift and moves it against a reason, and an advisory is the reason it names.
+
+Two facts bound what the advisory reached, and both are recorded because the obvious reading is wider than the truth. The package arrives through the feature linter alone: `gplint` depends on `glob`, which depends on `minimatch`, which depends on `brace-expansion`. Its lockfile entry carries `"dev": true`, so it builds nothing a user receives. `npm/package.json` declares no dependencies at all, so the published npm artifact is a prebuilt binary beside `README.md` and `LICENSE` and carries none of this graph. A reader who meets a high-severity advisory in this lockfile's history should not conclude that any released version shipped it.
+
+The move cost no manifest change. `minimatch` declares a caret range that 5.0.9 already satisfies, so the lockfile moved alone and `package.json` was not touched. No `overrides` entry was added and none is owed, because an override would declare a floor the existing range already resolves above.
+
+**Advisories on both graphs are found by asking, not by failing.** No command in `RIGGING.md` and no scenario runs an advisory check, so nothing reddens when an advisory lands on either the npm graph or the crate graph. This one was found because it was looked for. Read a green suite as saying nothing whatever about advisories until a check carries the question.
 
 ### The default tier's budget stays at 120s, and a red is answered by the suite
 
