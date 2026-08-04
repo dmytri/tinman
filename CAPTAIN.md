@@ -6,13 +6,13 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**0.6.0 is shipped and verified on all three targets. The deck is at rest at `2c1c028`, tree clean, no watchbill, one commit ahead of `origin/main`. No version bump is owed.** Run the Opening retrieval and believe it over this.
+**0.6.0 is shipped and verified on all three targets. The deck is at rest, tree clean, no watchbill, no version bump owed.** Run the Opening retrieval and believe it over this; it answers the head, the branch position and the tag, and this block deliberately names none of them.
 
-**The one commit ahead is the model change, committed after the release and unpushed.** It rides the next release or ships on its own; the operator has not ruled and was not asked.
+**The commits ahead of `origin/main` are post-release work and are unpushed:** the default-model change, the `@captain` skeletons carrying the next voyage, and the notes. They ride the next release or ship on their own; the operator has not ruled and was not asked.
 
 **Open blocker, first work item: `RIGGING.md:42` and `AGENTS.md:50` still name `deepseek/deepseek-v4-flash` as the default.** The specs and `src/inference.rs:18` carry `-0731`. A role reads `RIGGING.md` on open, so this is wrong information in a durable artifact rather than cosmetic drift. Both files are Shipwright's; route the refit rather than editing them.
 
-**The next voyage is designed and it is in the specs, not here. Seven `@captain` skeletons carry it**, three product faults the operator found by driving the shipped binary and four checks. Read them in the features; each carries its own `Rule:` with the reasoning and the trap. Do not restate them here, because two carriers for one design is the drift this file records against itself.
+**The next voyage is designed and it is in the specs, not here. The `@captain` skeletons carry it**, some being product faults the operator found by driving the shipped binary and the rest being checks. Read them in the features, where each carries its own `Rule:` with the reasoning and the trap; the retrieval enumerates them, so no count belongs here. Do not restate them here either, because two carriers for one design is the drift this file records against itself.
 
 **Why they are skeletons rather than notes prose, and it was the operator's correction.** A design held in these notes decays and only Captain reads it. A `@captain` scenario is durable, linted, ignored by QM and every derived command, visible in the deck signals a fresh session retrieves, and promoted by deleting one tag. **Captain authored them, which is a stretch: the tag-lifecycle table names Shipwright as their author, from code inspection.** The Articles give Captain `.feature` specs and restrict no tag, and the review these await is Captain's own, so the stretch is in who wrote them rather than in what they are. Raised upstream below.
 
