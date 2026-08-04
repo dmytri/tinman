@@ -96,6 +96,10 @@ Durable artifacts authored this pass: `scantlings/verification-conformance/unsha
 
 ## Harbour of 2026-08-04, and the four findings ruled by doctrine rather than by asking
 
+**Harbour is complete and committed at `42377b7`; the deck is at rest, three commits ahead of `origin/main`, and outbound is unasked.** The release rides harbour's own full regression, so no further sweep is owed for it.
+
+**One manifest edit is owed and is deliberately batched with the version bump.** `package-lock.json` gained `"name": "tinman"` because the root `package.json` declares no `name`, so npm derived it from the checkout directory basename; a clone into a differently-named directory rewrites that field on the next install. **Both that line and the 0.5.0 to 0.6.0 bump of `Cargo.toml` and `npm/package.json` are the same write scope**, so they go in one pass rather than two dispatch cycles. Doing the trivial one alone would have cost exactly what doing both together costs.
+
 **Zero `@captain` skeletons and zero condemnations, which is a finding rather than a quiet harbour.** Every candidate resolved to a live green check, settled `Rule:` prose, or a report-only finding. Both required methodology skeletons are already disposed, so writing either would repeat a settled decision.
 
 **The advisory was taken and the pin was held, and the two are one ruling applied twice.** `brace-expansion` 5.0.8 carries GHSA-rgw5-rvv9-x895 at high, reaching the tree through `gplint -> glob -> minimatch`; its trigger fired, so it goes, dev-only exposure notwithstanding. `jsonschema` 0.49.4 is available and its trigger did not fire: OSV returned nothing across 479 transitive packages and no spec needs it. **A pin is reopened on its stated trigger and on nothing else**, which is the whole reason the trigger is written down.
