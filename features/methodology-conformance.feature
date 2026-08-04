@@ -279,3 +279,13 @@ Feature: methodology conformance
     When each duplicated group is matched against the allowance
     Then every group the report found was matched
     And no group falls outside the allowance
+
+  @captain
+  Rule: durable prose that cites machinery rots every time the machinery improves, and the better the check gets the faster it rots. Only part of that rule has a findable subject. A sentence hardcoding a live count was declined on a measurement, because most bare integers in this corpus are status codes, byte counts and versions, and separating a live count from a dated one means reading which date governs a sentence. A sentence recording that a past decision was wrong is discourse and no query reaches it. What a query does reach is a citation of the implementation tree itself, which is the fault this rule exists for: prose naming a source path outlives the seam it names.
+
+  @captain
+  Scenario: no rule body cites a path under the implementation directory
+    Given the rule bodies the specs carry
+    When each is read for a path under the implementation directory
+    Then every rule body was read
+    And no rule body cites such a path
