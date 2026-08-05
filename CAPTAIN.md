@@ -6,6 +6,14 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
+## 0.7.0 shipped and verified on all three targets, 2026-08-05
+
+Tag first, then crates.io, then npm, each read from its own `verify` output rather than from the fact that `ship` exited. jsdelivr answers 200 at `@v0.7.0`, so the twenty-four published schema URIs resolve; crates.io and npm each installed from the registry and the binary answered `tinman 0.7.0`.
+
+**Two roles have now re-derived "the tag is unplaced, so the URIs answer 404" from the bump commit's own message, which was true the moment it was written and false within the hour.** The tag is on `origin` and serving. This is the durable-prose decay rule appearing in a commit message: history states a condition, a later reader takes it for the present. Nothing checks it, because the repository-side scenario correctly reports every URI naming the packaged version while saying nothing about whether the network serves them. **Believe `git ls-remote --tags origin` and the outbound `verify` line over any prose, this block included.**
+
+**Two outbound faults were met and neither was in the artifact.** The first crates.io verify failed to compile and read exactly like a broken release; the disk was 100% full, with `target` alone at 52G on a 99G volume. And the first npm verify **exited 0 while the installed binary answered `tinman 0.6.0`**, because the tarball had not reached the CDN and `@latest` resolved to the previous release. **A green exit status over a wrong artifact is the whole reason the policy says to read the output**, and reporting the status would have called npm shipped and correct.
+
 ## An assistant-like inspect mode, operator-agreed 2026-08-05, design settled and unspecified
 
 **Three parts.** Stream the model's output rather than blocking on a single read, so the reasoning is visible and the arriving tokens are the progress signal the operator asked for. Let the operator adjudicate what inference proposes before it lands. Record the outcome in the plan, never the conversation.
