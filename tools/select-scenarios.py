@@ -160,8 +160,19 @@ def fn_ranges(path):
 
 
 # ---- 5. changed lines --------------------------------------------------------
+def changed_paths(base):
+    """Every path the diff touches, Rust or not.
+
+    Read before the Rust filter, because a filter applied silently is how this
+    tool under-selects: a diff touching only a scantling, a spec, the rigging or
+    this file itself printed the same line as a diff touching nothing at all,
+    and a role reading that ran nothing and saw no reason to.
+    """
+    return [f for f in sh("git", "diff", "--name-only", base).split() if f]
+
+
 def changed(base):
-    files = [f for f in sh("git", "diff", "--name-only", base).split() if f.endswith(".rs")]
+    files = [f for f in changed_paths(base) if f.endswith(".rs")]
     result = {}
     for f in files:
         lines = set()
@@ -241,8 +252,9 @@ def main():
     scns = scenarios()
     defs = step_defs()
     diff = changed(BASE)
-    if not diff:
-        print("no rust changes"); return
+    touched_paths = changed_paths(BASE)
+    if not touched_paths:
+        print("no changes"); return
 
     selected, unresolved, notes = set(), [], []
     all_patterns = set()
@@ -285,6 +297,37 @@ def main():
                     frontier |= callers
                 else:
                     unresolved.append(f"{path}:{fn} (helper, no caller found)")
+
+    # Paths the Rust join cannot reach. A spec selects the scenarios it declares;
+    # a scantling selects the scenarios naming it; anything else is named as
+    # unresolved so the caller sweeps rather than reading silence as coverage.
+    for path in touched_paths:
+        if path.endswith(".rs"):
+            continue
+        if path.endswith(".feature"):
+            here = {(sc["file"], sc["name"]) for sc in scns if sc["file"] == path}
+            selected |= here
+            notes.append(f"spec {path} -> {len(here)} scenario(s)")
+        elif path.startswith("scantlings/"):
+            named = {(sc["file"], sc["name"]) for sc in scns
+                     for step in sc["steps"] if path in step}
+            if not named:
+                # A rule in the conformance set is reached by the directory the
+                # scan configuration names, never by a step naming its path, so
+                # the scenario attesting the whole set is what covers it. Left
+                # unresolved it would report on every rule edit forever, and a
+                # warning that always fires is one nobody reads.
+                named = {(sc["file"], sc["name"]) for sc in scns
+                         for step in sc["steps"]
+                         if "verification-conformance" in path
+                         and "rule set" in sc["name"]}
+            if named:
+                selected |= named
+                notes.append(f"scantling {path} -> {len(named)} scenario(s)")
+            else:
+                unresolved.append(f"{path} (scantling named by no step)")
+        else:
+            unresolved.append(f"{path} (no join reaches this path)")
 
     hits = pattern_to_scenarios(scns, all_patterns)
     for p, s in hits.items():
