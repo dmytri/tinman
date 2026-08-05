@@ -34,6 +34,16 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 **The same custody pass found the prose half of it.** `AGENTS.md` enumerated six conformance rules where the set held seven, and nothing reddened because the floor asserts at least what it lists. The correction was not to add the seventh but to stop enumerating, which is what the count rule says to do.
 
+## The selection tool has no check, and it is the one thing here that decides what gets checked
+
+**Open for the operator, and it is the sharpest thing left on the deck.** `tools/select-scenarios.py` decides the recheck set for every role. Nothing binds it: no scenario, no step definition, and no Python gate exists in the environment, so the `lint` chain reads Gherkin and Rust and passes straight over it. **Two defects were found in it on the day it was written, both by roles reading its output rather than by any check** - a restated tier list that filed 51 scenarios under the wrong tier, and a plank resolver that reinstated the tier sweep it exists to remove. Neither would have been caught by anything standing.
+
+**The under-selecting direction is what makes this urgent rather than tidy.** A tool that over-selects wastes a sweep and a role notices the clock. A tool that under-selects reports a green set that never ran the scenarios the change reached, and nothing anywhere contradicts it. The first defect was exactly that shape.
+
+**Two routes and the choice is the operator's.** A Python gate is a dependency selection, so it routes to Shipwright once chosen. The route needing no dependency is a `@conformance` scenario that runs the tool and joins what it reports against what `RIGGING.md` declares, which is the fault that actually shipped rather than a class of style faults. Captain did not open either unasked.
+
+**Recorded under a departure: `python3` now sits under `## Dependencies`.** The `select` command invoked an interpreter the rigging did not name. Boatswain routed it to Shipwright as a rigging fault and that routing is right in general; it was taken here because the gap sits under a command already in use and the line records a tool the tree already runs rather than selecting a new one.
+
 ## The TOM scenarios prove a seam the operator never reaches, 2026-08-05
 
 **`inspect 'ls -la'` still reads as a list, and the scenario specifying otherwise is green.** Isolated by driving the shipped binary: aligned columns alone read as a table, aligned columns with a header read as a table, and the same columns under a `total` line read as a list. The fixture the green scenario builds is byte-identical in shape to real `ls -l`, and the same content through the real binary produces a list.

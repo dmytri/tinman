@@ -80,6 +80,7 @@
 - dependency: mandoc
 - dependency: ripgrep
 - dependency: mold
+- dependency: python3
 - dependency: curl
 - dependency: bwrap >= 0.11.2
 - dependency: passt
