@@ -1,6 +1,6 @@
 {
   "name": "@dk/tinman",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Deterministic black-box testing framework for CLIs and full-screen TUIs, webrat/capybara/selenium for terminals. Drives real programs through a PTY under a Bubblewrap sandbox. Early prototype.",
   "license": "0BSD",
   "repository": {

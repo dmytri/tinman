@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/driver-protocol.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.7.0/scantlings/driver-protocol.schema.json",
   "title": "Tinman driver protocol message",
   "description": "One newline-delimited JSON-RPC 2.0 message exchanged with the Tinman driver on stdin and stdout, per the specification at https://www.jsonrpc.org/specification. Tinman defines no wire protocol of its own: a client in any language reaches for an existing JSON-RPC library, and the language servers, debug adapters and model-context servers a test author already runs speak the same framing. A protocol fault is an `error` object carrying a reserved code. A failed expectation is not a protocol fault, because the call succeeded and the product disagreed, so it returns a `result` whose `ok` is false. Referenced by features/driver-protocol.feature.",
   "oneOf": [

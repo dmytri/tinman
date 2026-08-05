@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/assistant-ui.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.7.0/scantlings/assistant-ui.schema.json",
   "title": "Tinman assistant interface",
   "description": "The terminal object model Tinman's own interactive assistant must produce. Tinman's user interface is specified in the model Tinman derives from every other program it drives, so the shape of its own screen is checked the way a test author checks theirs. This is a constraint on the model, not a recorded copy of it: it names the regions that must exist and the bounds and presentation they must respect, and says nothing about the rest of the screen. A role verifying this interface validates one document against one schema rather than writing a bespoke assertion per property, so a change to the interface is an edit here rather than an edit to verification support. This is the terminal answer to a web interface's stylesheet: the model carries structure and computed presentation together, so layout, measure, colour and the cursor are all constrained in one contract rather than split between a schema and a pile of prose assertions. What stays outside is behaviour over time, such as whether a reported wait advances or whether escape abandons a call, which no single screen can show. Referenced by features/interactive-help.feature.",
   "type": "object",

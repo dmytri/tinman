@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/inference-request.schema.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.7.0/scantlings/inference-request.schema.json",
   "title": "Outbound inference request",
   "description": "The shape of a chat-completions request Tinman sends to the configured provider. Tinman speaks the OpenAI-compatible protocol, so any compatible endpoint serves. The endpoint, model and credential are resolved from the environment or a dotenv file before the request is built. The endpoint and the credential are transport rather than payload, so they sit beside the body instead of inside it: an earlier revision listed them as body fields, and a second encoder that sent neither could diverge from this contract while the attestation stayed green. Referenced by features/inference-provider.feature.",
   "type": "object",

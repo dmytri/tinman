@@ -1,5 +1,5 @@
 {
-  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.6.0/scantlings/backend-construction-boundary.json",
+  "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.7.0/scantlings/backend-construction-boundary.json",
   "title": "Sandbox backend construction boundary",
   "description": "Only backend resolution constructs a sandbox backend. Tinman chooses the backend for the platform it runs on, so a launch path naming a concrete backend has decided the platform question for itself and will keep deciding it wrongly on the next platform. Discharged by the construction-boundary checker in verification support, which scans the implementation tree for construction expressions naming the type and reports any outside the permitted set. Attested by the @contract scenario in features/sandbox-backend-selection.feature.",
   "constructedType": "BubblewrapBackend",
