@@ -2,10 +2,11 @@
 //! render it for an operator discovering the roles and names to address.
 
 use crate::backend::resolve;
+use crate::inference::Settings;
 use crate::pty::capture_interactive;
 use crate::sandbox::{CommandSpec, SandboxSpec};
 use crate::screen::VirtualScreen;
-use crate::tom::{Model, Region, build, read_stream};
+use crate::tom::{Model, Region, build, enrich, read_stream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -123,6 +124,23 @@ pub fn launched(command: &str, workspace: &Path) -> Result<Run, String> {
     Ok(launched)
 }
 
+/// The launch the inspect command makes: what `launched` read, with the naming
+/// pass the configured engine makes over it. A run with no credential
+/// configured reaches no provider, so the deterministic reading is what the
+/// command reports. The root keeps the program the operator asked about, so
+/// what the engine proposes adds names where the reading had none rather than
+/// displacing the subject the operator named.
+///
+/// @planks("the operator inspects the fixture terminal program")
+pub fn inspected(command: &str, workspace: &Path, settings: &Settings) -> Result<Run, String> {
+    let mut inspected = launched(command, workspace)?;
+    inspected.model = named(
+        enrich(inspected.model, &inspected.screen, settings),
+        command,
+    );
+    Ok(inspected)
+}
+
 /// Name the root region for the program the operator asked about. The root
 /// carries the `application` role, and a listener told the role and not the
 /// subject has been told half of it, so the model says which application this
@@ -154,16 +172,21 @@ pub fn render(model: &Model) -> String {
 /// own is named with that colour, because presentation is half of what a test
 /// author decides whether to assert on; a region drawn in the terminal's own
 /// colours is named without one, which is what keeps an ordinary listing short.
+/// A status region carries its content as text and no name, so the text stands
+/// where the name would: a bare role tells an operator a region exists and
+/// nothing about what it says.
 ///
 /// @planks("the operator inspects the fixture terminal program")
 /// @planks("the operator inspects a command that prints {string} in red")
 /// @planks("the operator inspects a command that prints {string} {attribute}")
+/// @planks("the operator inspects that screen")
 fn describe(region: &Region, depth: usize, lines: &mut Vec<String>) {
     let indent = "  ".repeat(depth);
     let role = region.role();
-    let name = match &region.name {
-        Some(name) => format!(" {name:?}"),
-        None => String::new(),
+    let name = match (&region.name, &region.text) {
+        (Some(name), _) => format!(" {name:?}"),
+        (None, Some(text)) if role == "status" => format!(" {text:?}"),
+        (None, _) => String::new(),
     };
     let colour = match region.colour() {
         Some(colour) => format!(" in {colour}"),

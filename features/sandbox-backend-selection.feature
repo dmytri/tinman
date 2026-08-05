@@ -25,7 +25,7 @@ Feature: sandbox backend selection
     Then launching fails and reports Bubblewrap is unavailable
     And no unsandboxed process is started
 
-  Rule: the checker matched the type as the contract spells it, so a construction written with its full path slipped past while this scenario stayed green. A plant found it and no count could: src/backend.rs supplies a legitimate construction, so a not-empty floor reads satisfied whatever any other module does. The floor that catches it names the spelling rather than the tally, which is the shape a floor has to take whenever one permitted use keeps the count honest on its own.
+  Rule: the checker matched the type as the contract spells it, so a construction written with its full path slipped past while this scenario stayed green. A plant found it and no count could: the backend module supplies a legitimate construction, so a not-empty floor reads satisfied whatever any other module does. The floor that catches it names the spelling rather than the tally, which is the shape a floor has to take whenever one permitted use keeps the count honest on its own.
 
   @contract
   Scenario: every launch path reaches its backend through resolution

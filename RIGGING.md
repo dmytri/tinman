@@ -17,12 +17,14 @@
 ## Commands
 - discover: none
 - focused: `ref="{scenario}"; cargo test --test cucumber -- -i "${ref%%:*}" --name "^${ref#*:}$"`
-- broad: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @captain and not @shipwright" cargo test --test cucumber -- -c 64; r=$?; printf '{"tier":"@logic","workers":64,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
+- broad: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @advisory and not @captain and not @shipwright" cargo test --test cucumber -- -c 64; r=$?; printf '{"tier":"@logic","workers":64,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
 - broad-sandbox: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo test --test cucumber -- -c 4; r=$?; printf '{"tier":"@sandbox","workers":4,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
 - broad-inference: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="@inference and not @captain and not @shipwright" cargo test --test cucumber -- -c 2; r=$?; printf '{"tier":"@inference","workers":2,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
-- coverage: `CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 64`
+- broad-advisory: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="@advisory and not @captain and not @shipwright" cargo test --test cucumber -- -c 2; r=$?; printf '{"tier":"@advisory","workers":2,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
+- coverage: `CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @advisory and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 64`
 - coverage-sandbox: `CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 4`
 - coverage-inference: `CUCUMBER_FILTER_TAGS="@inference and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 2`
+- coverage-advisory: `CUCUMBER_FILTER_TAGS="@advisory and not @captain and not @shipwright" cargo llvm-cov --test cucumber --summary-only -- -c 2`
 - step-usage: `ast-grep scan --inline-rules '{id: step-usage, language: rust, rule: {any: [{pattern: "#[given(expr = $P)]"}, {pattern: "#[when(expr = $P)]"}, {pattern: "#[then(expr = $P)]"}, {pattern: "#[given($P)]"}, {pattern: "#[when($P)]"}, {pattern: "#[then($P)]"}]}}' --json=compact tests`
 - plank-inventory: `ast-grep scan --inline-rules '{id: planks, language: rust, rule: {kind: line_comment, regex: "@planks"}}' --json=compact src`
 - typecheck: `cargo check --all-targets`
@@ -37,12 +39,15 @@
 - default: @logic
 - sandbox: @sandbox
 - inference: @inference
+- advisory: @advisory
 - policy: The default tier holds pure, local, deterministic tests that need no external tool and no credential; untagged scenarios belong to it.
 - policy-sandbox: The @sandbox tier holds scenarios that launch a real process under Bubblewrap and requires the `bwrap` binary and unprivileged user namespaces. Scenarios routing egress through the proxy also require the `pasta` binary from passt: the sandbox keeps its own network namespace and pasta is the only route out of it, so a direct dial has nowhere to go and the refusal a scenario asserts is a real one rather than a policy nothing enforces.
 - policy-inference: The @inference tier holds scenarios that call the configured inference provider for real and requires `TINMAN_API_KEY`, read from the environment or from a git-ignored `.env` file, with optional `TINMAN_BASE_URL` and `TINMAN_MODEL` overrides defaulting to OpenRouter and deepseek/deepseek-v4-flash; it costs money per run and is never on the inner loop.
+- policy-advisory: The @advisory tier holds scenarios that query a public advisory database over the network for the crates the released binary carries. It requires network egress and is never on the inner loop, because it reddens on a publisher's action rather than on a change made here; run it when deciding to ship, where a person is already weighing the answer.
 - budget: 120s
 - budget-sandbox: 120s
 - budget-inference: 300s
+- budget-advisory: 300s
 - weather: target/tinman-weather.jsonl
 - durations: target/tinman-durations.jsonl
 - runrecord: target/tinman-runrecord.jsonl

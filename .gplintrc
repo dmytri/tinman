@@ -22,6 +22,7 @@
         "@logic",
         "@sandbox",
         "@inference",
+        "@advisory",
         "@contract",
         "@conformance",
         "@captain",

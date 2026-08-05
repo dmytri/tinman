@@ -380,12 +380,18 @@ pub fn build(screen: &VirtualScreen) -> Model {
         children.push(plain_region(grid, 0, column, rows));
         children.push(plain_region(grid, column + 1, cols - column - 1, rows));
     }
+    let summaries = summaries(grid, cols);
     children.extend(tables(grid, cols));
-    if let Some(menu) = menu_bar(grid, cols, screen) {
-        children.push(menu);
-    } else if let Some(status) = top_status(grid, cols) {
-        children.push(status);
+    // The summary reading owns the top line where it claims it, so the line is
+    // read once rather than as a summary region and a top status both.
+    if !summaries.iter().any(|region| region.rect.y == 0) {
+        if let Some(menu) = menu_bar(grid, cols, screen) {
+            children.push(menu);
+        } else if let Some(status) = top_status(grid, cols) {
+            children.push(status);
+        }
     }
+    children.extend(summaries);
     children.extend(controls(grid));
     if let Some(status) = status_bar(grid, rows, cols) {
         children.push(status);
@@ -741,14 +747,77 @@ fn table_row(grid: &[Vec<String>], cols: u16, fields: &[(usize, usize)], row: us
 
 /// The tables `grid` draws, one per run of lines that sustains columns. A
 /// program still running has drawn its columns onto the screen like anything
-/// else it shows, so the same reading serves a table there.
+/// else it shows, so the same reading serves a table there. A block opening
+/// with a summary line reads from the line the columns begin at, because the
+/// summary line is not part of the table beneath it.
 ///
 /// @planks("the operator inspects {string}")
+/// @planks("the total line is not a row of that table")
 fn tables(grid: &[Vec<String>], cols: u16) -> Vec<Region> {
     blocks_of(grid)
         .iter()
-        .filter_map(|block| table_of(grid, cols, block))
+        .filter_map(|block| {
+            let start = table_start(grid, cols, block)?;
+            table_of(grid, cols, &block[start..])
+        })
         .collect()
+}
+
+/// The row of `block` a table begins at: the first row whose remaining lines
+/// sustain columns. A summary line draws in fewer fields than the lines beneath
+/// it, so the whole block yields an empty cell and is declined while the lines
+/// under that summary line read as the table they are.
+///
+/// @planks("the total line is not a row of that table")
+fn table_start(grid: &[Vec<String>], cols: u16, block: &[usize]) -> Option<usize> {
+    (0..block.len()).find(|&start| table_of(grid, cols, &block[start..]).is_some())
+}
+
+/// The lines `grid` draws above the first table it draws, each read as a status
+/// region. A block of lines above a table is the program reporting on itself,
+/// which is what the status role already means at the other edge of the screen,
+/// and a leading summary line is no more a row of the table beneath it than the
+/// block a process monitor opens above one is.
+///
+/// @planks("the model contains {int} regions with the role {string}")
+/// @planks("each one carries the text of the line it was read from")
+fn summaries(grid: &[Vec<String>], cols: u16) -> Vec<Region> {
+    let mut above: Vec<usize> = Vec::new();
+    for block in blocks_of(grid) {
+        let Some(start) = table_start(grid, cols, &block) else {
+            above.extend_from_slice(&block);
+            continue;
+        };
+        above.extend_from_slice(&block[..start]);
+        return above
+            .into_iter()
+            .map(|row| summary_region(grid, cols, row))
+            .collect();
+    }
+    Vec::new()
+}
+
+/// One summary line read as a status region, carrying the text of the line it
+/// was read from across the full width of the screen.
+///
+/// @planks("each one carries the text of the line it was read from")
+fn summary_region(grid: &[Vec<String>], cols: u16, row: usize) -> Region {
+    let rect = Rect {
+        x: 0,
+        y: row as u16,
+        width: cols,
+        height: 1,
+    };
+    Region {
+        role: Role::Status,
+        name: None,
+        text: Some(stream_line(grid, row)),
+        selected: false,
+        rect,
+        children: Vec::new(),
+        style: None,
+        cells: cells_of(grid, rect),
+    }
 }
 
 /// Read the presentation `region` and everything nested inside it is drawn with.
@@ -810,8 +879,18 @@ fn cursor_of(screen: &VirtualScreen) -> Option<Cursor> {
 /// @planks("the terminal object model is inferred")
 /// @planks("the terminal object model is inferred by the configured engine")
 pub fn infer(screen: &VirtualScreen, settings: &Settings) -> Model {
+    enrich(build(screen), screen, settings)
+}
+
+/// `model`, carrying the names the configured engine reads off `screen`. A
+/// caller that has already read the screen its own way keeps that reading as
+/// the spine, so a stream read whole stays read whole and the engine's
+/// contribution stays the names it proposes for what is already there.
+///
+/// @planks("the operator inspects the fixture terminal program")
+pub fn enrich(model: Model, screen: &VirtualScreen, settings: &Settings) -> Model {
     enriched(
-        screen,
+        model,
         crate::inference::tom_completion(settings, &screen.contents()),
     )
 }
@@ -823,20 +902,20 @@ pub fn infer(screen: &VirtualScreen, settings: &Settings) -> Model {
 /// @planks("the plan for {string} is written")
 pub fn infer_for(screen: &VirtualScreen, settings: &Settings, program: &str) -> Model {
     enriched(
-        screen,
+        build(screen),
         crate::inference::tom_completion_for(settings, &screen.contents(), program),
     )
 }
 
-/// The deterministic model of `screen`, carrying the names `reply` proposed for
-/// its regions. A reply that never arrived, and one nothing of the model's own
-/// shape can be read from, both leave the deterministic model standing.
+/// The model handed in, carrying the names `reply` proposed for its regions. A
+/// reply that never arrived, and one nothing of the model's own shape can be
+/// read from, both leave the deterministic model standing.
 ///
 /// @planks("the terminal object model is inferred")
 /// @planks("the terminal object model is inferred by the configured engine")
 /// @planks("the terminal object model of {string} is inferred")
-fn enriched(screen: &VirtualScreen, reply: Option<String>) -> Model {
-    let mut deterministic = build(screen);
+fn enriched(deterministic: Model, reply: Option<String>) -> Model {
+    let mut deterministic = deterministic;
     let Some(reply) = reply else {
         return deterministic;
     };
@@ -848,24 +927,61 @@ fn enriched(screen: &VirtualScreen, reply: Option<String>) -> Model {
 }
 
 /// Take onto `region` and the regions beneath it the names `proposed` carries
-/// for them, paired position by position. A region the engine named with
-/// nothing is a region the enrichment is refused for, so the deterministic
-/// reading stands there: a role the model requires a name on would otherwise
-/// carry none, which is the reply arriving in part rather than whole.
+/// for them, each deterministic region paired with the proposal that plays its
+/// role over the same part of the screen. An engine reads the screen into a
+/// tree of its own, grouping and ordering it as it sees fit, so a pairing that
+/// walked both trees in step would hand a region the name of whatever the
+/// engine happened to put in that slot. A region the engine named with nothing,
+/// and one no proposal covers, are regions the enrichment is refused for, so the
+/// deterministic reading stands there.
 ///
 /// @planks("the terminal object model is inferred")
 /// @planks("the terminal object model is inferred by the configured engine")
+/// @planks("the operator inspects the fixture terminal program")
 fn take_names(region: &mut Region, proposed: &Region) {
-    if let Some(name) = proposed
-        .name
-        .as_deref()
+    let mut proposals = Vec::new();
+    collect(proposed, &mut proposals);
+    named_from(region, &proposals);
+}
+
+/// Every region `proposed` carries, itself included, so a deterministic region
+/// is matched against the whole reading rather than against one branch of it.
+///
+/// @planks("the terminal object model is inferred")
+fn collect<'a>(proposed: &'a Region, into: &mut Vec<&'a Region>) {
+    into.push(proposed);
+    for child in &proposed.children {
+        collect(child, into);
+    }
+}
+
+/// Take onto `region` and the regions beneath it the name of the proposal that
+/// plays the same role over the most of the same screen cells.
+///
+/// @planks("the terminal object model is inferred")
+fn named_from(region: &mut Region, proposals: &[&Region]) {
+    let covering = proposals
+        .iter()
+        .filter(|proposed| proposed.role == region.role && shared(proposed.rect, region.rect) > 0)
+        .max_by_key(|proposed| shared(proposed.rect, region.rect));
+    if let Some(name) = covering
+        .and_then(|proposed| proposed.name.as_deref())
         .filter(|name| !name.trim().is_empty())
     {
         region.name = Some(name.to_string());
     }
-    for (child, proposed) in region.children.iter_mut().zip(&proposed.children) {
-        take_names(child, proposed);
+    for child in region.children.iter_mut() {
+        named_from(child, proposals);
     }
+}
+
+/// The screen cells `one` and `other` both cover.
+///
+/// @planks("the terminal object model is inferred")
+fn shared(one: Rect, other: Rect) -> u32 {
+    let across = one.x.max(other.x)..(one.x + one.width).min(other.x + other.width);
+    let down = one.y.max(other.y)..(one.y + one.height).min(other.y + other.height);
+    u32::from(across.len() as u16) * u32::from(down.len() as u16)
 }
 
 /// The bordered panes `grid` draws, each read as a list of the lines it shows.

@@ -264,25 +264,16 @@ Feature: methodology conformance
 
   Rule: nothing in this tree reddens when an advisory lands. Both advisories found so far were found because a role went looking, one by a harbour audit and one by a role reading a 200 as publication for a package abandoned since 2024. A fact discovered only when somebody remembers to look is a fact the suite is not carrying. The shipped graph is the one that matters, because what ships is a Rust binary and the npm graph is dev rigging no released artifact carries. An advisory is queried by name and version together, since a name-only lookup returns a hit that reads as live against a pinned version that is unaffected, and a false alarm reopens a settled pin.
 
-  @captain
+  @conformance @advisory
   Scenario: no advisory reaches a crate in the shipped graph
     Given the crates the release graph carries
     When each is queried against the advisory database by name and version
     Then every crate in that graph was queried
     And no advisory reaches any of them
 
-  Rule: the duplication gate reads implementation and stops there, so verification support carries duplication that nothing reads. Support is where a copied helper does the most damage, because its blast radius is every scenario routing through it rather than one seam. That a gate here would redden byte-identical floor assertions is an argument for an allowance rather than against a gate, since the duplication scantling already carries one for implementation. The support tree can only carry a ratchet, permitting what was present at adoption and catching what is added, and a ratchet is honest only where it says so.
-
-  @captain
-  Scenario: verification support adds no duplication beyond its recorded allowance
-    Given the duplication report for the verification support tree
-    When each duplicated group is matched against the allowance
-    Then every group the report found was matched
-    And no group falls outside the allowance
-
   Rule: durable prose that cites machinery rots every time the machinery improves, and the better the check gets the faster it rots. Only part of that rule has a findable subject. A sentence hardcoding a live count was declined on a measurement, because most bare integers in this corpus are status codes, byte counts and versions, and separating a live count from a dated one means reading which date governs a sentence. A sentence recording that a past decision was wrong is discourse and no query reaches it. What a query does reach is a citation of the implementation tree itself, which is the fault this rule exists for: prose naming a source path outlives the seam it names.
 
-  @captain
+  @conformance
   Scenario: no rule body cites a path under the implementation directory
     Given the rule bodies the specs carry
     When each is read for a path under the implementation directory
@@ -291,7 +282,7 @@ Feature: methodology conformance
 
   Rule: a tag on a rule line is inherited by every scenario inside that rule, which is useful for a tier tag and a trap for a lifecycle tag. A tier tag has no promotion path, so inheriting it is how a whole rule declares its cost once, and this corpus uses it deliberately. A lifecycle tag is workflow state that ends by being deleted, and deleting the one on the scenario leaves the one on the rule still excluding it from every derived command. Nothing announces that: the scenario count does not move, no run reddens, and the promotion silently does nothing. Captain wrote this fault twice in one session, the second time into the skeleton arguing against prose faults, so the placement wants a check rather than more care.
 
-  @captain
+  @conformance
   Scenario: no lifecycle tag sits on a rule line
     Given the lifecycle tag lines the specs carry
     When each is read for what it precedes

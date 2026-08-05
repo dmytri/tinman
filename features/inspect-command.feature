@@ -229,15 +229,18 @@ Feature: inspect command
 
   Rule: no command a person can run invokes inference. The inference engine is built, specified and green, and every scenario covering it reaches the seam through verification rather than through a command, so the enrichment it produces is unreachable from the product. The bundled skill and the README both promise that capture time may infer, which makes the shipped binary contradict its own documentation. This is the shape a declared command that did nothing produced once already: scenarios green over a seam no user can reach.
 
-  @captain @inference
+  Rule: what this asserts is that the command reaches the engine and applies what comes back, which is Tinman's seam. Whether a live model chooses to name a region is that model's judgment, the same class as whether it obeys an instruction, and a scenario reddening on it asserts the provider rather than the product. The corpus already records a null name as the ordinary reply rather than an edge. Both fixtures tried here drew that reply: a menu bar the screen never labels, refused across five calls on two providers, and then an untitled pane under a heading, refused once on the first custody sweep. So the reply is controlled here and the live call is covered where it belongs, at the seam, by the scenario asserting the model Tinman produces from a real screen conforms.
+
+  @sandbox
   Scenario: inspect enriches the deterministic model when a credential is configured
     Given an inference credential is configured
-    When the operator inspects the fixture terminal program
-    Then the inspect output names a region the deterministic pass leaves unnamed
+    And a terminal program drawing an untitled bordered pane under a line reading "Recent Files"
+    And the configured provider names that pane "Recent Files"
+    When the operator inspects that program
+    Then the inspect output names that pane "Recent Files"
 
   Rule: a status region carries its content as text and no name, and the listing prints a region's name, so a status region prints as a bare role with nothing beside it. An operator reading that learns a region exists and nothing about what it says, which is barely better than the region being absent. This is what top's summary line looks like today.
 
-  @captain
   Scenario: the listing shows the text a status region carries
     Given a virtual screen whose bottom line reads "NORMAL  main  3 files"
     When the operator inspects that screen

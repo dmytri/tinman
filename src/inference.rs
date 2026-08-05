@@ -65,7 +65,15 @@ const ASSISTANT_TEMPERATURE: f64 = 0.1;
 const TOM_TEMPERATURE: f64 = 0.1;
 
 /// What the engine is asked when it reads a screen into a terminal object
-/// model.
+/// model. The schema alone leaves an engine free to put every line it reads
+/// into `text` and leave every `name` null, which is a reading that adds
+/// nothing the deterministic pass had not already read, so the instruction
+/// says what a name is and where the screen shows one. It says as well that
+/// the name belongs on the region holding the labelled content, because a
+/// reply that hangs the label on a wrapper of its own leaves the region the
+/// deterministic reading built still unnamed.
+///
+/// @planks("the operator inspects that program")
 const TOM_INSTRUCTION: &str = concat!(
     "Read the terminal screen below and reply with a JSON terminal object model ",
     "and nothing else. The object carries the integer keys \"rows\" and \"cols\" ",
@@ -75,6 +83,13 @@ const TOM_INSTRUCTION: &str = concat!(
     "\"text\", each a string or null; \"selected\", a boolean; \"rect\", with the ",
     "integer keys \"x\", \"y\", \"width\" and \"height\"; and \"children\", an ",
     "array of regions.\n",
+    "A region's \"name\" is the label the screen itself shows for that region. A ",
+    "line of text standing above a bordered pane labels what the pane holds, and ",
+    "a title drawn into the border labels it the same way. Carry that text as ",
+    "the \"name\" of the list, table, menu or pane drawn there, and report the ",
+    "label as no region of its own. Only \"root\" covers the whole screen, and no ",
+    "region exists merely to hold another. Leave \"name\" null where the screen ",
+    "shows no label for the region.\n",
 );
 
 /// What the engine is told the page in front of the screen is. A tldr page
@@ -574,10 +589,19 @@ pub fn assistant_completion_for_turn(
 pub fn tom_completion(settings: &Settings, screen: &str) -> Option<String> {
     settings.api_key.as_ref()?;
     let prompt = format!("{TOM_INSTRUCTION}{screen}");
-    complete(
-        &request(settings, TOM_TEMPERATURE, prompt),
-        GENERATION_CEILING,
-    )
+    complete(&tom_reading(settings, prompt), GENERATION_CEILING)
+}
+
+/// The reading request a naming pass sends, carrying `prompt`. A reasoning model
+/// spends its thinking budget on whatever it is asked, and reading a screen into
+/// a document is asked of every inspection, so the request turns reasoning off
+/// rather than the ceiling growing to fit it.
+///
+/// @planks("the operator inspects the fixture terminal program")
+fn tom_reading(settings: &Settings, prompt: String) -> Request {
+    let mut request = request(settings, TOM_TEMPERATURE, prompt);
+    request.reasoning = Some(false);
+    request
 }
 
 /// The request a naming pass over `program` sends: the reading instruction, the
@@ -593,7 +617,7 @@ pub fn tom_request(settings: &Settings, screen: &str, program: &str) -> Request 
         Some(page) => format!("{TOM_INSTRUCTION}{TOM_PAGE_INSTRUCTION}{page}\n{screen}"),
         None => format!("{TOM_INSTRUCTION}{screen}"),
     };
-    request(settings, TOM_TEMPERATURE, prompt)
+    tom_reading(settings, prompt)
 }
 
 /// `tom_completion`, naming the program the screen belongs to so the pass reads

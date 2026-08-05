@@ -168,7 +168,12 @@ fn main() {
                 }
                 return;
             }
-            match tinman::inspect::launched(&command, &workspace) {
+            // Inspection is capture time, where the configured engine names
+            // what the deterministic reading cannot, so the command resolves
+            // the credential the same way every other configured endpoint is
+            // resolved.
+            let settings = tinman::inference::Settings::from_process();
+            match tinman::inspect::inspected(&command, &workspace, &settings) {
                 Ok(launched) => {
                     if json {
                         println!(
@@ -261,55 +266,14 @@ fn main() {
             tinman::driver::serve().expect("the driver answers its client")
         }
         Some(Command::Man { command }) => {
-            // A doc comment on a command type is written for a developer, and
-            // the operator reading the page wants the copy the help asset
-            // carries, so the page's own prose is joined to the asset rather
-            // than to whatever the compiler happens to read.
-            let mut root = Cli::command()
-                .about(tinman::help::one_line_description())
-                .long_about(tinman::help::closing_paragraph());
-            root.build();
-            // A cross-reference is a claim that the page exists, so every
-            // `tinman-<command>(1)` the page prints is one the binary writes.
-            let man = match &command {
-                Some(name) => {
-                    let Some(subcommand) = root.find_subcommand(name) else {
-                        eprintln!("tinman has no {name:?} command");
-                        std::process::exit(1);
-                    };
-                    clap_mangen::Man::new(subcommand.clone()).title(format!("tinman-{name}"))
-                }
-                None => clap_mangen::Man::new(root),
+            // Tinman's own page is always rendered, so a name is the only thing
+            // that can leave the parser without a page to write.
+            let Some(page) = tinman::cli::manual_page(command.as_ref()) else {
+                let name = command.expect("only a named command has no page");
+                eprintln!("tinman has no {name:?} command");
+                std::process::exit(1);
             };
-            let mut page = Vec::new();
-            man.render(&mut page).expect("the manual page is rendered");
-            let page = String::from_utf8(page).expect("the manual page is text");
-            // The doc comments clap renders into this page are where the trace
-            // annotations live, so an annotation line is dropped along with the
-            // paragraph macro that opens it, leaving the operator the prose.
-            let mut kept: Vec<&str> = Vec::new();
-            for line in page.lines() {
-                if line.contains("@planks") {
-                    if kept.last() == Some(&".PP") {
-                        kept.pop();
-                    }
-                    continue;
-                }
-                kept.push(line);
-            }
-            let page = format!("{}\n", kept.join("\n"));
-            // A man page opens with its title macro, and the roff writer opens
-            // with its own apostrophe preamble, which the page still needs for
-            // the apostrophes it carries. The title leads and the preamble
-            // follows it.
-            let title = page
-                .find(".TH")
-                .expect("the rendered page carries a title macro");
-            let (preamble, body) = page.split_at(title);
-            let (title_line, rest) = body
-                .split_once('\n')
-                .expect("the title macro ends its line");
-            print!("{title_line}\n{preamble}{rest}");
+            print!("{page}");
         }
         Some(Command::Completions { shell }) => {
             clap_complete::generate(shell, &mut Cli::command(), "tinman", &mut std::io::stdout());

@@ -19,7 +19,7 @@ Feature: test command
     Then the output reports the step expecting "Deployed"
     And the output contains the text "Username"
 
-  Rule: the scenarios above cover a plan that ran. A plan that never loads is the more common operator error, and the binary aborts on both of its forms: an unreadable file and a file that does not parse each reach a panic in src/main.rs rather than a reported failure. The operator meets a panic message and a backtrace note, and the process leaves status 101 where every handled failure beside it leaves 1. The panic-free contract at scantlings/panic-free-seams.json states the rule these paths break, and its search paths reach the driver and the assistant rather than the binary every operator runs.
+  Rule: the scenarios above cover a plan that ran. A plan that never loads is the more common operator error, and the binary aborts on both of its forms: an unreadable file and a file that does not parse each reach a panic in the binary's entry point rather than a reported failure. The operator meets a panic message and a backtrace note, and the process leaves status 101 where every handled failure beside it leaves 1. The panic-free contract at scantlings/panic-free-seams.json states the rule these paths break, and its search paths reach the driver and the assistant rather than the binary every operator runs.
 
   Scenario: a plan file that is not there is reported rather than fatal
     Given no file named "missing.yaml" exists

@@ -33,7 +33,7 @@ Feature: replay
 
   Rule: the plan schema names the locator's narrowing key `within` and production declares it `scope`, so a plan carrying either loses it: the schema closes to additional properties and rejects `scope`, while production never reads `within`. Proven by validating both shapes against the schema. Nothing caught it because no check compares a scantling's declared properties against the fields production emits, which is the gap this pair of scenarios exists to close as much as the behaviour is.
 
-  Rule: a plan captures the model at a point in its flow so a consumer can assert against what the screen held there, which is the capture limb of the tool's own job. The step form is declared in the plan schema and implemented in `src/plan.rs`, and no scenario has ever exercised it, so it is unspecified behaviour rather than a broken promise: the round-trip check below fails on it for exactly that reason, a property nothing carries being indistinguishable from a property nothing supports.
+  Rule: a plan captures the model at a point in its flow so a consumer can assert against what the screen held there, which is the capture limb of the tool's own job. The step form is declared in the plan schema and implemented in the plan module, and no scenario has ever exercised it, so it is unspecified behaviour rather than a broken promise: the round-trip check below fails on it for exactly that reason, a property nothing carries being indistinguishable from a property nothing supports.
 
   Scenario: a plan captures the model where its flow says to
     Given a harness plan whose flow captures the model after activating the "menuitem" named "Settings"

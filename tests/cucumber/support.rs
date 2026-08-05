@@ -529,6 +529,35 @@ pub fn fixture_ignoring_directional_keys_source() -> &'static str {
     FIXTURE_TUI_NO_ARROWS
 }
 
+/// Stage a terminal program drawing a bordered pane carrying no title, under a
+/// line reading `heading`, and answer the relative name a launch addresses it
+/// by. The deterministic pass reads a pane's name off its own top border, so a
+/// pane drawn with a bare border reaches the model carrying no name while the
+/// screen still carries the words that name it. The program waits for the
+/// operator rather than exiting, so what it has drawn is a screen.
+pub fn stage_untitled_pane_fixture_in(workspace: &std::path::Path, heading: &str) -> String {
+    let source = format!(
+        "\
+#!/bin/sh
+printf '\\033[2J'
+printf '\\033[1;1H{heading}'
+printf '\\033[3;1H\u{250c}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2510}'
+printf '\\033[4;1H\u{2502}report.txt    \u{2502}'
+printf '\\033[5;1H\u{2502}notes.md      \u{2502}'
+printf '\\033[6;1H\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}'
+printf '\\033[24;1HREADY'
+while read -r _key; do
+  printf '\\033[24;1H\\033[KREADY'
+done
+"
+    );
+    let program = workspace.join("fixture-untitled-pane");
+    std::fs::write(&program, source)
+        .unwrap_or_else(|e| panic!("fixture program {} not written: {e}", program.display()));
+    set_executable(&program);
+    "./fixture-untitled-pane".to_string()
+}
+
 /// The fixture terminal program's source with the menu item named `from` drawn
 /// as `to` instead. Real renaming, not a simulated failure: the program draws
 /// the new name everywhere it drew the old one, so a locator naming the old one
@@ -855,9 +884,11 @@ pub enum ProviderReply {
 /// @exceptional-double: the canned reply satisfies the Verification agreement's
 /// first named condition, a specific condition the real environment cannot
 /// produce on demand. The default tier's scenarios name the exact expansion a
-/// provider returns, an empty generation, and a rejected credential; a real
-/// model produces none of those on request. The real provider is exercised for
-/// real by the @inference tier, which is where normal-path coverage lives.
+/// provider returns, an empty generation, a rejected credential, and a model
+/// that names an untitled pane; a real model produces none of those on request,
+/// and the last was refused across five calls on two providers and again on a
+/// custody sweep. The real provider is exercised for real by the @inference
+/// tier, which is where normal-path coverage lives.
 #[derive(Debug)]
 pub struct LocalProvider {
     base_url: String,
@@ -2174,6 +2205,19 @@ pub fn top_line_screen_with_reversed(text: &str, label: &str) -> tinman::screen:
 /// and the rest of the grid stays blank.
 pub fn text_at_screen(text: &str, row: u16, col: u16) -> tinman::screen::VirtualScreen {
     tinman::screen::VirtualScreen::from_text(&format!("\x1b[{row};{col}H{text}"))
+}
+
+/// Draw `lines` down the screen from its top row, each addressed with real ANSI
+/// cursor positioning so a blank entry leaves that row empty rather than
+/// closing the gap beneath it. A long listing opening with its total line, and a
+/// process monitor reporting on itself above its own table, both draw this
+/// shape.
+pub fn lines_screen(lines: &[&str]) -> tinman::screen::VirtualScreen {
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        out.push_str(&format!("\x1b[{};1H{line}", index + 1));
+    }
+    tinman::screen::VirtualScreen::from_text(&out)
 }
 
 /// Run the real `tinman` binary to completion on a real pseudo-terminal, so the
@@ -4680,24 +4724,218 @@ pub fn spec_scenarios() -> Vec<SpecScenario> {
     SPEC_SCENARIOS.clone()
 }
 
-/// The parsed specs, read once per run. Parsing every spec is the cost this
-/// corpus carries, so the parsed scenarios are what is shared rather than the
-/// listing that reaches them.
-static SPEC_SCENARIOS: std::sync::LazyLock<Vec<SpecScenario>> = std::sync::LazyLock::new(|| {
-    let mut found = Vec::new();
-    for path in SPEC_PATHS.iter() {
-        let display = path.display().to_string();
-        // The runner's own parser expands a Scenario Outline into one scenario
-        // per example row before matching any step, so a checker reading the
-        // unexpanded outline would see `<placeholder>` where the runner sees a
-        // value, and would report every outline-only step definition as binding
-        // nothing. Expanding here reads what the runner runs.
-        use cucumber::feature::Ext as _;
-        let feature =
-            cucumber::gherkin::Feature::parse_path(path, cucumber::gherkin::GherkinEnv::default())
+/// Every spec the specs directory carries, parsed once per run with the runner's
+/// own Gherkin parser. Parsing the corpus is the cost it carries, so the parsed
+/// features are what is shared and every reading of the specs is derived from
+/// them rather than parsing them again.
+///
+/// The runner's own parser expands a Scenario Outline into one scenario per
+/// example row before matching any step, so a checker reading the unexpanded
+/// outline would see `<placeholder>` where the runner sees a value, and would
+/// report every outline-only step definition as binding nothing. Expanding here
+/// reads what the runner runs.
+static SPEC_FEATURES: std::sync::LazyLock<Vec<(String, cucumber::gherkin::Feature)>> =
+    std::sync::LazyLock::new(|| {
+        SPEC_PATHS
+            .iter()
+            .map(|path| {
+                use cucumber::feature::Ext as _;
+                let display = path.display().to_string();
+                let feature = cucumber::gherkin::Feature::parse_path(
+                    path,
+                    cucumber::gherkin::GherkinEnv::default(),
+                )
                 .unwrap_or_else(|e| panic!("spec {display} did not parse: {e}"))
                 .expand_examples()
                 .unwrap_or_else(|e| panic!("spec {display} did not expand its examples: {e:?}"));
+                (display, feature)
+            })
+            .collect()
+    });
+
+/// One `Rule:` body a spec carries: the spec declaring it and the prose it
+/// states, its continuation lines included.
+#[derive(Debug, Clone)]
+pub struct RuleBody {
+    pub feature: String,
+    pub body: String,
+}
+
+/// Every `Rule:` body the specs carry, read through the runner's own parser, so
+/// the prose read is the prose the runner parsed rather than a second reading of
+/// the same files.
+pub fn rule_bodies() -> Vec<RuleBody> {
+    let mut found = Vec::new();
+    for (display, feature) in SPEC_FEATURES.iter() {
+        for rule in &feature.rules {
+            let mut body = rule.name.clone();
+            if let Some(description) = &rule.description {
+                body.push(' ');
+                body.push_str(description);
+            }
+            found.push(RuleBody {
+                feature: display.clone(),
+                body,
+            });
+        }
+    }
+    found
+}
+
+/// The tags whose whole lifecycle ends in their being deleted, named without
+/// their leading `@`.
+const LIFECYCLE_TAGS: [&str; 2] = ["captain", "shipwright"];
+
+/// One lifecycle tag a spec carries: the spec declaring it, the tag itself, the
+/// construct its line precedes, and that construct's name.
+#[derive(Debug, Clone)]
+pub struct LifecycleTag {
+    pub feature: String,
+    pub tag: String,
+    pub precedes: String,
+    pub subject: String,
+}
+
+/// Every lifecycle tag line the specs carry, each read for what it precedes. A
+/// tag line before a rule is inherited by every scenario inside that rule, so
+/// deleting the tag on a scenario leaves the rule's still excluding it.
+pub fn lifecycle_tags() -> Vec<LifecycleTag> {
+    let mut found = Vec::new();
+    for (display, feature) in SPEC_FEATURES.iter() {
+        let mut take = |tags: &[String], precedes: &str, subject: &str| {
+            for tag in strip_tag_marks(tags) {
+                if LIFECYCLE_TAGS.contains(&tag.as_str()) {
+                    found.push(LifecycleTag {
+                        feature: display.clone(),
+                        tag,
+                        precedes: precedes.to_string(),
+                        subject: subject.to_string(),
+                    });
+                }
+            }
+        };
+        take(&feature.tags, "feature", &feature.name);
+        for scenario in &feature.scenarios {
+            take(&scenario.tags, "scenario", &scenario.name);
+        }
+        for rule in &feature.rules {
+            take(&rule.tags, "rule", &rule.name);
+            for scenario in &rule.scenarios {
+                take(&scenario.tags, "scenario", &scenario.name);
+            }
+        }
+    }
+    found
+}
+
+/// Every crate the released binary carries, as `(name, version)` pairs ordered
+/// by name. What ships is a Rust binary, so the edges asked for are the normal
+/// ones: a dev dependency builds this suite and reaches no released artifact.
+pub fn release_graph_crates() -> Vec<(String, String)> {
+    let output = std::process::Command::new("cargo")
+        .args(["tree", "--edges", "normal", "--prefix", "none", "--quiet"])
+        .output()
+        .unwrap_or_else(|e| panic!("the release graph could not be read: {e}"));
+    assert!(
+        output.status.success(),
+        "the release graph could not be read: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listing = String::from_utf8(output.stdout).expect("the package manager emits UTF-8");
+    let mut crates: Vec<(String, String)> = listing
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let name = words.next()?;
+            let version = words.next()?.strip_prefix('v')?;
+            Some((name.to_string(), version.to_string()))
+        })
+        .collect();
+    crates.sort();
+    crates.dedup();
+    crates
+}
+
+/// What the advisory database answered about one crate: the crate asked about
+/// and the advisory identifiers it returned for that exact version.
+#[derive(Debug, Clone)]
+pub struct AdvisoryAnswer {
+    pub name: String,
+    pub version: String,
+    pub advisories: Vec<String>,
+}
+
+/// The failure ceiling one advisory query carries.
+const ADVISORY_ATTEMPT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The deadline an advisory query retries toward. A database that answers
+/// nothing once is asked again; one that answers nothing until this passes is
+/// reported rather than read as a clean bill.
+const ADVISORY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Ask the public advisory database about `name` at `version`. The version is
+/// sent with the name because a name-only lookup answers with advisories a
+/// pinned version may not be affected by, and a false alarm reopens a settled
+/// pin. The database decides which advisories reach this version.
+pub fn advisories_for(name: &str, version: &str) -> Option<AdvisoryAnswer> {
+    let name = name.to_string();
+    let version = version.to_string();
+    let asked = (name.clone(), version.clone());
+    within_deadline(
+        &format!("the advisory database about {name} {version}"),
+        ADVISORY_ATTEMPT,
+        ADVISORY_DEADLINE,
+        move || {
+            let (name, version) = asked.clone();
+            let query = serde_json::json!({
+                "version": version,
+                "package": { "name": name, "ecosystem": "crates.io" },
+            });
+            let mut response = ureq::post("https://api.osv.dev/v1/query")
+                .config()
+                .timeout_global(Some(ADVISORY_ATTEMPT))
+                .build()
+                .header("Content-Type", "application/json")
+                .send(&serde_json::to_string(&query).ok()?)
+                .ok()?;
+            let text = response.body_mut().read_to_string().ok()?;
+            let answered: serde_json::Value = serde_json::from_str(&text).ok()?;
+            // A crate nothing is filed against answers with no vulns member at
+            // all, which is the ordinary answer rather than a missing one.
+            let advisories = answered
+                .get("vulns")
+                .and_then(|vulns| vulns.as_array())
+                .map(|vulns| {
+                    vulns
+                        .iter()
+                        .filter_map(|vuln| vuln.get("id").and_then(|id| id.as_str()))
+                        .map(|id| id.to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(AdvisoryAnswer {
+                name,
+                version,
+                advisories,
+            })
+        },
+    )
+}
+
+/// The directory the rigging at `path` names as the implementation tree.
+pub fn implementation_directory(path: &str) -> String {
+    rigging_section(path, "Directories")
+        .into_iter()
+        .find(|(key, _)| key == "implementation")
+        .map(|(_, value)| value)
+        .unwrap_or_else(|| panic!("the rigging at {path} names no implementation directory"))
+}
+
+/// The parsed specs read as scenarios, one per scenario the runner runs.
+static SPEC_SCENARIOS: std::sync::LazyLock<Vec<SpecScenario>> = std::sync::LazyLock::new(|| {
+    let mut found = Vec::new();
+    for (display, feature) in SPEC_FEATURES.iter() {
+        let display = display.clone();
         let feature_background: Vec<String> = feature
             .background
             .iter()

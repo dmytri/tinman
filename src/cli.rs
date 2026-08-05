@@ -188,6 +188,60 @@ pub fn command_help(arguments: &[String]) -> Option<String> {
     Some(command.find_subcommand_mut(name)?.render_help().to_string())
 }
 
+/// The manual page the `man` command writes, rendered from the same command
+/// definitions the parser carries, so every option a command declares reaches
+/// the page. A named command the parser does not accept has no page.
+///
+/// @planks("the manual page for each command is read")
+/// @planks("it carries the one-line description from the asset at {string}")
+/// @planks("the DESCRIPTION section carries the closing paragraph of the asset at {string}")
+/// @planks("the error stream reports Tinman has no {string} command")
+pub fn manual_page(command: Option<&String>) -> Option<String> {
+    // A doc comment on a command type is written for a developer, and the
+    // operator reading the page wants the copy the help asset carries, so the
+    // page's own prose is joined to the asset rather than to whatever the
+    // compiler happens to read.
+    let mut root = Cli::command()
+        .about(crate::help::one_line_description())
+        .long_about(crate::help::closing_paragraph());
+    root.build();
+    // A cross-reference is a claim that the page exists, so every
+    // `tinman-<command>(1)` the page prints is one the binary writes.
+    let man = match command {
+        Some(name) => clap_mangen::Man::new(root.find_subcommand(name)?.clone())
+            .title(format!("tinman-{name}")),
+        None => clap_mangen::Man::new(root),
+    };
+    let mut page = Vec::new();
+    man.render(&mut page).expect("the manual page is rendered");
+    let page = String::from_utf8(page).expect("the manual page is text");
+    // The doc comments clap renders into this page are where the trace
+    // annotations live, so an annotation line is dropped along with the
+    // paragraph macro that opens it, leaving the operator the prose.
+    let mut kept: Vec<&str> = Vec::new();
+    for line in page.lines() {
+        if line.contains("@planks") {
+            if kept.last() == Some(&".PP") {
+                kept.pop();
+            }
+            continue;
+        }
+        kept.push(line);
+    }
+    let page = format!("{}\n", kept.join("\n"));
+    // A man page opens with its title macro, and the roff writer opens with its
+    // own apostrophe preamble, which the page still needs for the apostrophes
+    // it carries. The title leads and the preamble follows it.
+    let title = page
+        .find(".TH")
+        .expect("the rendered page carries a title macro");
+    let (preamble, body) = page.split_at(title);
+    let (title_line, rest) = body
+        .split_once('\n')
+        .expect("the title macro ends its line");
+    Some(format!("{title_line}\n{preamble}{rest}"))
+}
+
 /// The commands the parser accepts, named as the operator types them.
 ///
 /// @planks("the commands the parser accepts")
