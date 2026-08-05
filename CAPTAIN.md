@@ -26,6 +26,14 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 **The general rule, which is the operator's own and worth stating as theirs: where a seam is too wide to observe, a scantling narrows the implementation until it is decidable.** An event nobody can trigger and a structure anybody can read are not the same claim, and the second is the one worth checking.
 
+## Captain shipped the fault it had just written the rule against, 2026-08-05
+
+**`tools/select-scenarios.py` restated the tier list in source while `RIGGING.md` declares it.** The `@assistant` tier added the same hour was missing from the tuple, so 51 scenarios filed as `@logic` while the default sweep excludes them by tag: a role trusting that breakdown would have run a sweep containing none of the scenarios the tool had just named reachable. **Silent under-selection, in the tool built to make selection trustworthy.** Boatswain caught it by sweeping the tier separately rather than believing the report, which is the discipline working.
+
+**The general fault is the one this file and `AGENTS.md` both already carry: two lists, one in code and one in copy.** It was written on the same day the durable-prose rules against it were being cited. Knowing a rule is not obeying it, and the moment of writing a convenience is exactly when the rule is furthest from mind. The tool now reads `## Tiers` from the rigging and fails loudly where it finds none.
+
+**The same custody pass found the prose half of it.** `AGENTS.md` enumerated six conformance rules where the set held seven, and nothing reddened because the floor asserts at least what it lists. The correction was not to add the seventh but to stop enumerating, which is what the count rule says to do.
+
 ## The TOM scenarios prove a seam the operator never reaches, 2026-08-05
 
 **`inspect 'ls -la'` still reads as a list, and the scenario specifying otherwise is green.** Isolated by driving the shipped binary: aligned columns alone read as a table, aligned columns with a header read as a table, and the same columns under a `total` line read as a list. The fixture the green scenario builds is byte-identical in shape to real `ls -l`, and the same content through the real binary produces a list.

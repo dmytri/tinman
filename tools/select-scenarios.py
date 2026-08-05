@@ -22,6 +22,30 @@ def ast(rule, path):
         return []
 
 
+# ---- 0. tiers, read from RIGGING.md rather than restated here ----------------
+def tiers():
+    """Every non-default tier tag RIGGING.md declares under ## Tiers.
+
+    Restating this list in source is how the tool silently under-selects: a tier
+    added to the rigging and not to the tuple files its scenarios under the
+    default tier, and the default sweep excludes them by tag.
+    """
+    text = pathlib.Path("RIGGING.md").read_text()
+    block = re.search(r"^## Tiers$(.*?)^## ", text, re.M | re.S)
+    if not block:
+        raise SystemExit("RIGGING.md declares no ## Tiers section")
+    found = []
+    for key, tag in re.findall(r"^- ([a-z-]+):\s*(@\w+)\s*$", block.group(1), re.M):
+        if key != "default":
+            found.append(tag)
+    if not found:
+        raise SystemExit("RIGGING.md declares no non-default tier")
+    return found
+
+
+TIERS = tiers()
+
+
 # ---- 1. scenarios and their steps -------------------------------------------
 def scenarios():
     out = []
@@ -46,17 +70,28 @@ def scenarios():
 
 
 # ---- 2. step definitions: pattern + line range -------------------------------
-STEP_ATTR = re.compile(r'#\[(given|when|then)\s*\(\s*(?:expr\s*=\s*)?"((?:[^"\\]|\\.)*)"')
+STEP_ATTR = re.compile(
+    r'#\[(given|when|then)\s*\(\s*(?:expr\s*=\s*)?"((?:[^"\\]|\\.)*)"', re.S
+)
 
 
 def step_defs(path="tests/cucumber.rs"):
-    src = pathlib.Path(path).read_text().splitlines()
+    """Every step definition's pattern and function name.
+
+    Matched over the whole text rather than line by line: the attribute is
+    routinely written across several lines, and a per-line scan misses those,
+    which degrades the symbol to the tier-sweep fallback.
+    """
+    text = pathlib.Path(path).read_text()
+    src = text.splitlines()
+    starts, pos = [], 0
+    for line in src:
+        starts.append(pos)
+        pos += len(line) + 1
     defs = []
-    for i, line in enumerate(src):
-        m = STEP_ATTR.search(line)
-        if not m:
-            continue
-        for j in range(i + 1, min(i + 6, len(src))):
+    for m in STEP_ATTR.finditer(text):
+        i = max(k for k, off in enumerate(starts) if off <= m.start())
+        for j in range(i, min(i + 12, len(src))):
             fn = re.search(r"\b(?:async\s+)?fn\s+(\w+)", src[j])
             if fn:
                 defs.append({"pattern": m.group(2), "fn": fn.group(1), "line": j + 1})
@@ -197,7 +232,7 @@ def main():
     tiers = collections.Counter()
     for f, n in sorted(selected):
         tag = next((t for sc in scns if sc["file"] == f and sc["name"] == n for t in sc["tags"]
-                    if t in ("@sandbox", "@inference", "@advisory")), "@logic")
+                    if t in TIERS), "@logic")
         tiers[tag] += 1
         print(f"  {f}:{n}")
     print("by tier:", dict(tiers))
