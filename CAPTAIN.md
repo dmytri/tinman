@@ -6,6 +6,18 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
+## An assistant-like inspect mode, operator-agreed 2026-08-05, design settled and unspecified
+
+**Three parts.** Stream the model's output rather than blocking on a single read, so the reasoning is visible and the arriving tokens are the progress signal the operator asked for. Let the operator adjudicate what inference proposes before it lands. Record the outcome in the plan, never the conversation.
+
+**Determinism is untouched and the reason is the operator's own July ruling, not a new exception.** Inference may propose any structure a deterministic pass can refute, and may never propose one it cannot. **A human saying "that is a table" is a structure proposal like any other**, so it is legal exactly where the plan can record column boundaries and replay can split each row at them, rejoin, and get the original line back byte for byte. Where the correction does not reconstruct, the tool refuses it rather than recording it. This is stronger than the name rule, which only asks whether the screen carries the text; arithmetic decides here.
+
+**The constraint that survives: a role is derived, never assigned.** A correction that cannot be expressed as a structure the deterministic pass re-derives has nowhere to live, because replay rebuilds the model from the screen alone.
+
+**The trap to write into the specs: guidance must not become a way to paper over defects.** `ls -la` reading as a list is a fault in the deterministic pass. A mode that let the operator hand-correct it every time would produce plans that work only because a person was present, and the defect would outlive every one of them.
+
+**Two rules it inherits.** Styling and transcript reach a terminal and no other stream. The mode reuses the raw-mode guard and the bordered-box shell, and inherits none of the assistant feature's faults.
+
 ## The iteration loop was rebuilt on 2026-08-05, on the operator's instruction that it was give-up slow
 
 **Measured before and after rather than argued.** Test-binary rebuild 26.1s to 5.5s. Default-tier sweep 78,582ms to 55,092ms. Recheck selection on a real diff, 437 scenarios swept to 81 selected. The operator authorized project overrides in `AGENTS.md` to reach this, with custody and the bulkhead untouched, and neither was touched.
