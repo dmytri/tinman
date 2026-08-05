@@ -162,7 +162,9 @@ fn run_flow(
                     .spawn()
                     .map_err(|e| e.to_string())?;
                 if let Some(text) = &run.stdin {
-                    let mut pipe = child.stdin.take().expect("the step's input is a pipe");
+                    let mut pipe = child.stdin.take().ok_or_else(|| {
+                        format!("the step {:?} opened no input pipe", run.command)
+                    })?;
                     pipe.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
                 }
                 let output = child.wait_with_output().map_err(|e| e.to_string())?;
@@ -288,16 +290,21 @@ fn collect(session: &InteractiveCapture, role: &str) -> Vec<String> {
 /// so what a later step types lands on the screen the program redrew rather than
 /// on the one it is about to erase. The activation reports the region it bound,
 /// so a run says which region a locator reached rather than only that it reached
-/// one.
+/// one. A plan is operator input, so the shapes the plan schema accepts and
+/// resolution cannot use are reported the same way a locator matching nothing
+/// is: an activation written as a bare name states no role, and a scope naming a
+/// region the screen does not carry narrows to nothing, and each leaves the
+/// operator a sentence naming what the step asked for.
 ///
 /// @planks("the plan is replayed")
 /// @planks("that plan is replayed")
+/// @planks("the replay fails and reports the locator that named no role")
+/// @planks("the replay fails and reports the scope that matched no region")
 fn activate(session: &mut InteractiveCapture, locator: &Locator) -> Result<LocatorBinding, String> {
     let name = &locator.name;
-    let role = locator
-        .role
-        .as_deref()
-        .unwrap_or_else(|| panic!("the activation of {name:?} names no role"));
+    let Some(role) = locator.role.as_deref() else {
+        return Err(format!("the activation of {name:?} names no role"));
+    };
     let model = build(&session.screen());
     let target = crate::tom::Locator::new(role, name);
     let target = match locator.within.as_deref() {
@@ -305,7 +312,12 @@ fn activate(session: &mut InteractiveCapture, locator: &Locator) -> Result<Locat
         None => target,
     };
     match target.resolve(&model) {
-        Resolution::NoMatch => Err(format!("no {role} named {name:?} was found")),
+        Resolution::NoMatch => Err(match locator.within.as_deref() {
+            Some(scope) => {
+                format!("no {role} named {name:?} was found within the region named {scope:?}")
+            }
+            None => format!("no {role} named {name:?} was found"),
+        }),
         Resolution::Ambiguous(count) => {
             Err(format!("{count} matches for the {role} named {name:?}"))
         }
@@ -352,15 +364,17 @@ fn answered(before: &str, now: &str) -> bool {
 /// reading the live screen in short intervals until the deadline. An
 /// expectation stating no text asserts nothing against a screen, so what it
 /// states is the region, and a locator that resolves to nothing is the failure
-/// the reader is told about by the region it looked for.
+/// the reader is told about by the region it looked for. A bare locator stating
+/// no role names nothing resolution can search, so that shape is reported the
+/// same way rather than aborting the run.
 ///
 /// @planks("the operator executes {string}")
+/// @planks("the replay fails and reports the locator that named no role")
 fn await_region(session: &InteractiveCapture, locator: &Locator) -> Result<(), String> {
     let name = &locator.name;
-    let role = locator
-        .role
-        .as_deref()
-        .expect("a bare locator names the role of the region it addresses");
+    let Some(role) = locator.role.as_deref() else {
+        return Err(format!("the expectation of {name:?} names no role"));
+    };
     let deadline = Instant::now() + EXPECT_DEADLINE;
     loop {
         let screen = session.screen();

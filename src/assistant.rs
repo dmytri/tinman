@@ -292,7 +292,7 @@ pub fn converse(settings: &Settings) -> std::io::Result<()> {
     let coloured = std::env::var_os("NO_COLOR").is_none();
     let mut out = std::io::stdout();
     let mut question = String::new();
-    crossterm::terminal::enable_raw_mode()?;
+    let raw = crate::rawmode::RawMode::enter()?;
     write!(out, "{ALTERNATE_SCREEN}")?;
     writeln!(out)?;
     // The session owns the terminal however it leaves, and an interrupt is the
@@ -429,7 +429,7 @@ pub fn converse(settings: &Settings) -> std::io::Result<()> {
             }
         }
     }
-    crossterm::terminal::disable_raw_mode()?;
+    drop(raw);
     write!(out, "{MAIN_SCREEN}")?;
     out.flush()?;
     println!();

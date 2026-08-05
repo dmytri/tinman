@@ -206,7 +206,7 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
         workspace,
         None,
     )?;
-    crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    let raw = crate::rawmode::RawMode::enter().map_err(|e| e.to_string())?;
     let mut capture = capture_interactive_at(&prepared, None)?;
     let (opening, opening_view) = opening_screen(&mut capture);
     let mut session = RecordingSession::for_command(command.clone());
@@ -224,7 +224,7 @@ pub fn record(command: &CommandSpec, workspace: &Path, output: Option<&str>) -> 
             capture.press_key(&key);
         }
     }
-    crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
+    drop(raw);
 
     if !capture.end_session() {
         return Err(

@@ -40,8 +40,10 @@ Feature: driver session
     Then every exchange conforms to the protocol
     And the methods read are not empty
 
+  Rule: the contract's reach is the part of it that decays, and it decayed here. Naming two modules left the replay path outside a rule written for exactly its failure mode, so three shapes the plan schema accepts aborted the process while the contract stayed green over the seams it did name. A contract that forbids a construct is only as good as the paths it searches, and a scenario naming its own search paths in its title invites the same drift a second time.
+
   @contract
-  Scenario: the driver and assistant seams discharge the panic-free contract
+  Scenario: the implementation seams discharge the panic-free contract
     Given the implementation sources
     When the verifier checks the seams named in "scantlings/panic-free-seams.json"
     Then no counterexample is found

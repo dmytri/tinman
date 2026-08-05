@@ -1,0 +1,29 @@
+id: raw-mode-without-guard
+language: rust
+severity: error
+message: Raw mode is entered outside the guard that restores it.
+note: |
+  A program holding the terminal in raw mode on the alternate screen owns giving both
+  back however it leaves, and a restore written as a tail call runs on the ordinary path
+  only. Every fallible operation between the two is an early return that skips it, and the
+  operator meets a terminal with no prompt, no cursor and no echo that they have to reset
+  by hand.
+
+  This is a rule rather than a scenario because the failure cannot be observed from
+  outside. The scenarios read the terminal state through the shell that launched the
+  program, and once raw mode is entered the only route to an error is a failed write to
+  the terminal itself, which takes the reporting shell with it. Simulating the failure
+  instead would be the forbidden double, and inventing a trigger would be writing a
+  scenario against an event the product does not have. What is left is the structure, and
+  the structure is decidable: acquisition belongs in one guard whose Drop restores, so
+  every path out restores by construction and no future early return can skip it.
+
+  Three modules entered raw mode as a bare pair when this rule was written on 2026-08-05,
+  in the assistant, the recorder and the setup form, so the guard is shared rather than
+  written once per caller.
+files:
+  - src/**
+ignores:
+  - src/rawmode.rs
+rule:
+  pattern: crossterm::terminal::enable_raw_mode()

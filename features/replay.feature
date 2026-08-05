@@ -60,6 +60,23 @@ Feature: replay
     When that plan is replayed
     Then the replay fails and reports the locator that bound no matching region
 
+  Rule: a locator's role is optional in the plan language and in the plan schema, which records that an absent role matches any role. Three shapes the schema accepts reach a replay without one: an activation written as a bare name, an expectation written as a bare locator, and a scope naming a region the screen does not carry. A plan is operator input, so a shape the schema accepts is answered rather than fatal. The scenario above already fixes that a locator binding nothing reports the locator, and these carry the same contract to the shapes that currently abort the run instead, which leaves an operator a panic message and a status of 101 where every neighbouring failure leaves a sentence and a status of 1.
+
+  Scenario: an activation written as a bare name is reported rather than fatal
+    Given a harness plan whose step activates the bare name "Save"
+    When that plan is replayed
+    Then the replay fails and reports the locator that named no role
+
+  Scenario: an expectation written as a bare locator is reported rather than fatal
+    Given a harness plan whose step expects the region named "Save" and states no role
+    When that plan is replayed
+    Then the replay fails and reports the locator that named no role
+
+  Scenario: a scope naming a region the screen does not carry is reported rather than fatal
+    Given a harness plan whose step activates the "button" named "Save" within the region named "Nowhere"
+    When that plan is replayed
+    Then the replay fails and reports the scope that matched no region
+
   Scenario: a failed expectation names the step that failed
     Given a harness plan driving the fixture terminal program whose final step expects the text "Deployed"
     When that plan is replayed

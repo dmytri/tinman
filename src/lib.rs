@@ -19,6 +19,7 @@ pub mod plan;
 pub mod process;
 pub mod proxy;
 pub mod pty;
+pub mod rawmode;
 pub mod record;
 pub mod sandbox;
 pub mod screen;

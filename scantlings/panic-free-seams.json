@@ -4,7 +4,9 @@
   "description": "Constructs that abort the process, forbidden in the seams that must answer instead of dying. Discharged by the reference-boundary checker in verification support and attested by the @contract scenario in features/driver-session.feature.",
   "searchPaths": [
     "src/driver.rs",
-    "src/assistant.rs"
+    "src/assistant.rs",
+    "src/flow.rs",
+    "src/tom.rs"
   ],
   "forbiddenReferences": [
     "panic!",

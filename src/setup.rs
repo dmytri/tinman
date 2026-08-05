@@ -170,7 +170,7 @@ pub fn form(settings: &Settings) -> std::io::Result<()> {
     let columns = crossterm::terminal::size()?.0 as usize;
     let width = columns.min(MAX_COLUMNS);
     let mut out = std::io::stdout();
-    crossterm::terminal::enable_raw_mode()?;
+    let raw = crate::rawmode::RawMode::enter()?;
     draw(&mut out, &form_lines(width, settings))?;
     let mut input = std::io::stdin();
     let mut byte = [0u8; 1];
@@ -191,7 +191,7 @@ pub fn form(settings: &Settings) -> std::io::Result<()> {
         }
         key.push(byte[0]);
     }
-    crossterm::terminal::disable_raw_mode()?;
+    drop(raw);
     println!();
     Ok(())
 }

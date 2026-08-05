@@ -309,6 +309,11 @@ struct TinmanWorld {
     // step can rename that region in the driven program and a failure assertion
     // can read the name the plan asked for
     replay_activated_region: Option<String>,
+    // the name a plan's roleless locator addresses, so the step asserting the
+    // failure reads the locator the plan asked for. An activation written as a
+    // bare name and an expectation written as a bare locator both reach a replay
+    // with a name and no role, so both are reported against the same name
+    replay_roleless_locator: Option<String>,
     // the region a scoped activation narrows to, with the role and name it
     // addresses, so the step asserting what the program shows reads the same
     // three the plan was written with
@@ -8125,6 +8130,70 @@ async fn a_plan_whose_step_activates_the_region(world: &mut TinmanWorld, name: S
     world.replay_activated_region = Some(name);
 }
 
+#[given(expr = "a harness plan whose step activates the bare name {string}")]
+async fn a_plan_whose_step_activates_a_bare_name(world: &mut TinmanWorld, name: String) {
+    // A bare name is one of the two written forms of a locator, so the plan is
+    // written the way the plan language reads it rather than as a map whose role
+    // was left out.
+    let program = support::fixture_terminal_source();
+    let source = format!("tui: {program:?}\nsteps:\n  - expect: READY\n  - activate: {name:?}\n");
+    world.replay_plan = Some(
+        tinman::plan::parse(&source)
+            .unwrap_or_else(|e| panic!("the bare-name activation plan did not parse: {e}")),
+    );
+    world.replay_plan_source = Some(source);
+    world.replay_roleless_locator = Some(name);
+}
+
+#[given(expr = "a harness plan whose step expects the region named {string} and states no role")]
+async fn a_plan_whose_step_expects_a_roleless_region(world: &mut TinmanWorld, name: String) {
+    // An expectation carrying a locator and no text is the bare-locator form,
+    // and the role is what this one leaves out. The name is written as a quoted
+    // scalar, because a name opening with a YAML indicator is not the document
+    // the scenario states.
+    let program = support::fixture_terminal_source();
+    let source =
+        format!("tui: {program:?}\nsteps:\n  - expect: READY\n  - expect:\n      name: {name:?}\n");
+    world.replay_plan = Some(
+        tinman::plan::parse(&source)
+            .unwrap_or_else(|e| panic!("the bare-locator expectation plan did not parse: {e}")),
+    );
+    world.replay_plan_source = Some(source);
+    world.replay_roleless_locator = Some(name);
+}
+
+#[then("the replay fails and reports the locator that named no role")]
+async fn the_replay_fails_reporting_the_roleless_locator(world: &mut TinmanWorld) {
+    let name = world
+        .replay_roleless_locator
+        .clone()
+        .expect("the plan named the locator its step addresses");
+    let reported = world
+        .flow_error
+        .as_deref()
+        .expect("the replay was expected to fail, and it passed");
+    assert!(
+        reported.contains(&name),
+        "the failure does not name the locator that stated no role, the one named {name:?}:\n{reported}"
+    );
+}
+
+#[then("the replay fails and reports the scope that matched no region")]
+async fn the_replay_fails_reporting_the_unmatched_scope(world: &mut TinmanWorld) {
+    let (scope, _, _) = world
+        .scoped_activation
+        .clone()
+        .expect("the plan named the region its step narrows to");
+    let reported = world
+        .flow_error
+        .as_deref()
+        .expect("the replay was expected to fail, and it passed");
+    assert!(
+        reported.contains(&scope),
+        "the failure does not name the scope that matched no region, {scope:?}:\n{reported}"
+    );
+}
+
 /// The scoped activation a scenario's plan carries: the region it narrows to,
 /// the role and the name it addresses, so the step that follows reads the same
 /// three the plan was written with.
@@ -8161,16 +8230,17 @@ fn drawn_inside(outer: tinman::tom::Rect, inner: tinman::tom::Rect) -> bool {
         && inner.y + inner.height <= outer.y + outer.height
 }
 
-#[given(
-    expr = "a harness plan whose step activates the {string} named {string} within the region named {string}"
-)]
-async fn a_plan_whose_step_activates_within(
+/// A plan whose activation step narrows to `scope`, driving `program`. The
+/// locator is written once here so the step below can rebuild the plan against a
+/// program that draws the scope while leaving the locator exactly as the plan
+/// recorded it.
+fn give_scoped_activation_plan(
     world: &mut TinmanWorld,
-    role: String,
-    name: String,
-    scope: String,
+    program: &str,
+    role: &str,
+    name: &str,
+    scope: &str,
 ) {
-    let program = support::fixture_with_scoped_button_source(&scope, &name);
     // The narrowing key is the one the plan schema declares, so the plan is
     // written the way the contract says an operator writes one.
     let source = format!(
@@ -8182,6 +8252,30 @@ async fn a_plan_whose_step_activates_within(
             .unwrap_or_else(|e| panic!("the scoped activation plan did not parse: {e}")),
     );
     world.replay_plan_source = Some(source);
+}
+
+#[given(
+    expr = "a harness plan whose step activates the {string} named {string} within the region named {string}"
+)]
+async fn a_plan_whose_step_activates_within(
+    world: &mut TinmanWorld,
+    role: String,
+    name: String,
+    scope: String,
+) {
+    // The step states what the plan says, and says nothing about what the driven
+    // program draws, so the program is the ordinary fixture until a step states
+    // otherwise. A scenario about a scope the screen does not carry is exactly
+    // the one that states nothing further, and a fixture built to draw whatever
+    // scope it is handed would carry that scope and answer the opposite of what
+    // the scenario asks.
+    give_scoped_activation_plan(
+        world,
+        support::fixture_terminal_source(),
+        &role,
+        &name,
+        &scope,
+    );
     world.scoped_activation = Some((scope, role, name));
 }
 
@@ -8189,10 +8283,14 @@ async fn a_plan_whose_step_activates_within(
     expr = "the program under replay shows another {string} named {string} outside that region"
 )]
 async fn the_program_shows_another_outside(world: &mut TinmanWorld, role: String, name: String) {
-    let (scope, _, _) = world
+    let (scope, activated_role, activated_name) = world
         .scoped_activation
         .clone()
         .expect("the plan named the region its step narrows to");
+    // The plan keeps the locator it recorded; only the program changes, so the
+    // replay is the recorded flow meeting the program this step describes.
+    let program = support::fixture_with_scoped_button_source(&scope, &name);
+    give_scoped_activation_plan(world, &program, &activated_role, &activated_name, &scope);
     let screen = support::scoped_button_screen(&scope, &name);
     let model = tinman::tom::build(&screen);
     let region = model

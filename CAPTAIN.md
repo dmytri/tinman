@@ -6,7 +6,43 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
+## The iteration loop was rebuilt on 2026-08-05, on the operator's instruction that it was give-up slow
+
+**Measured before and after rather than argued.** Test-binary rebuild 26.1s to 5.5s. Default-tier sweep 78,582ms to 55,092ms. Recheck selection on a real diff, 437 scenarios swept to 81 selected. The operator authorized project overrides in `AGENTS.md` to reach this, with custody and the bulkhead untouched, and neither was touched.
+
+**Three causes, and none of them was the workflow.** No fast linker was installed and there was no `.cargo/config.toml` at all, so every compile in every role paid GNU ld on a 360MB debug binary; `mold` is now installed and recorded. Recheck selection fell back to a tier sweep for any support edit, because the shared agreement says support carries no planks, and every step definition in this project lives in one file, so touching three of them swept four tiers. And `interactive-help` held 51 of 322 default-tier scenarios and about 38% of that tier's wall clock, for a feature the operator will not open.
+
+**The selection join was the operator's argument, not Captain's.** Their words: shared helpers have finite callers, and those callers carry the mapping already. A step definition declares its own pattern in its attribute, which is what a plank gives a production seam, so the closure runs helper to callers to patterns to scenarios and always terminates. `tools/select-scenarios.py` implements it and `select` in `RIGGING.md` names it. **The tier sweep was never necessary for a support edit; nobody had derived the exact set.**
+
+**What this does not change, and the operator drew the line: custody and the bulkhead.** Selection narrows how a recheck set is derived and not what custody guarantees. Every scenario a change can reach is still run before a commit. Where `select` cannot resolve a symbol it reports it, and the tier that symbol serves is swept, so the fallback survives where it is actually needed.
+
+**Doctrine suggestions the operator asked to be held for later, not acted on.** The support-edit fallback in the Planking agreement should derive the closure before sweeping, since the derivation exists wherever step definitions carry patterns. And a tier tag belongs to any scenario that drives the real binary, which nothing currently checks and which cost a round trip this session.
+
+## An unobservable scenario became a rule, 2026-08-05
+
+**QM blocked on a scenario Captain promoted and could not have verified, and its argument was the right one.** `a session that ends in an error still gives the terminal back` had no reachable trigger: once raw mode is entered the only route to an error is a failed write to the terminal, which takes the shell the scenario reads its answer through. **Simulating it is the forbidden double and inventing a trigger is a scenario against an event the product does not have**, so the scenario was unprovable rather than merely unimplemented. Promoting it on Shipwright's read, without asking what would make it red, is the same omission this file records repeatedly.
+
+**The restatement is structural and it found more than the scenario did.** The assistant, the recorder and the setup form each entered raw mode as a bare enable-and-disable pair, so the fault was three modules rather than one. `raw-mode-without-guard` in the verification-conformance set reddens on all three, and it was proven red by the tree itself rather than by a plant. The behaviour is now guaranteed by construction, since acquisition through one guard makes every path out restore and no later early return can skip it.
+
+**The general rule, which is the operator's own and worth stating as theirs: where a seam is too wide to observe, a scantling narrows the implementation until it is decidable.** An event nobody can trigger and a structure anybody can read are not the same claim, and the second is the one worth checking.
+
+## The TOM scenarios prove a seam the operator never reaches, 2026-08-05
+
+**`inspect 'ls -la'` still reads as a list, and the scenario specifying otherwise is green.** Isolated by driving the shipped binary: aligned columns alone read as a table, aligned columns with a header read as a table, and the same columns under a `total` line read as a list. The fixture the green scenario builds is byte-identical in shape to real `ls -l`, and the same content through the real binary produces a list.
+
+**The cause is the seam the scenario reaches.** The `When` calls the model builder on a screen the step constructs, while the operator's path captures through a PTY first. So the scenario proves the builder and the operator meets the command. **This is the same fault this voyage opened on**, where every inference scenario reached the engine directly and no command invoked it, and it is a class rather than an instance: a TOM scenario asserting through the builder cannot see what the capture path does to the screen before the builder runs.
+
+**The corrective is a scenario that drives the command**, the way the `@sandbox` inspect scenarios already do. Not yet written; the operator was away and this is a product change rather than a loop repair.
+
 **The voyage closed on 2026-08-05 and the deck is at rest: tree clean, watchbill struck, every tier green inside its budget.** Eight scenarios landed of the nine promoted; the ninth was withdrawn on an operator ruling rather than built. Run the Opening retrieval and believe it over this block, which names no head, branch position or count.
+
+**Harbour completed 2026-08-05 and opened a voyage rather than closing to outbound.** The full regression was green on all four tiers with an empty red list. Four skeletons were written and the operator promoted all four; the panic-free contract was widened to the replay path in the same pass. **Harbour custody was deliberately not dispatched:** promotion makes the tree red by construction, since the aborts it specifies are still in the source, so a custody commit would have been refused and correctly. The harbour edits ride the voyage's own closing commit.
+
+**The finding worth carrying past this voyage: a contract's reach is the part of it that decays.** `panic-free-seams.json` forbade exactly the construct that shipped three times, and stayed green throughout, because its search paths named two modules and the replay path was not among them. Nothing was wrong with the rule. **A guard pointed at the wrong files reports the same green as a guard with nothing to find**, which is the check-that-cannot-fail pattern this file already records, arriving through scope rather than through the assertion. The attesting scenario also named its own search paths in its title, so it was rewritten to stop inviting the same drift.
+
+**Still outside the contract and knowingly so: the binary's entry point.** `features/test-command.feature` already records that an unreadable or unparseable plan file reaches a panic there, and the operator widened the contract to the replay path rather than to all of `src`. That gap is named in durable prose and is the next candidate, not an oversight.
+
+**The bump number is proposed and unruled: Captain said 0.7.0 twice and the operator answered neither time, so it is an assumption and not a decision.** The reading behind it: this voyage turns three plan-replay aborts into reported failures, which is user-visible behaviour changing rather than a fix under the surface, and the model gained status regions for summary lines. Minor rather than breaking, because no consumer's plan or scantling has to change. **Do not ship on this without asking**, since an unruled assumption that reaches a tag is unrecoverable: a published version number cannot be withdrawn.
 
 **Outbound is blocked on arithmetic rather than on a decision, and this is the first thing to check.** `Cargo.toml` names the version the newest tag already carries, so shipping would re-ship a released version. The bump is a manifest edit and manifests are Shipwright's, so **harbour comes before outbound this time** whatever the operator's preference on sequencing, and the docket below rides with it.
 

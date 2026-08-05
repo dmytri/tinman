@@ -4,10 +4,11 @@ severity: error
 message: Verification support kills a child process outright, discarding whatever it measured.
 note: |
   A process killed with SIGKILL never runs its exit path, so an instrumented binary never
-  flushes its coverage counters and everything it executed is lost. src/driver.rs reads
-  20.70% while the scenarios binding its planks pass, which is not low coverage but absent
-  attribution, and it reads that way because the child was killed rather than asked to
-  stop. The distinction matters beyond a number: a role reading 0% cannot tell unreached
+  flushes its coverage counters and everything it executed is lost. The driver module read
+  20.70% on 2026-07-31 while the scenarios binding its planks passed, which was not low
+  coverage but absent attribution, and it read that way because the child was killed rather
+  than asked to stop; with this rule in place it read 81.42% on 2026-08-05. The distinction
+  matters beyond a number: a role reading 0% cannot tell unreached
   code from unattributed code, and this project has already once ruled a live seam dead on
   that reading. Ask the child to terminate and wait on it with a deadline. Escalation is
   still owed when the deadline passes, and it goes through the system's own signalling

@@ -114,7 +114,9 @@ impl Role {
         ROLES.iter().any(|role| role.as_str() == name)
     }
 
-    /// The role `name` addresses.
+    /// The role `name` addresses. A name no role carries reads as the generic
+    /// region role, so a model is still built rather than the process aborted;
+    /// `is_produced` is what answers whether a name is a role at all.
     ///
     /// @planks("a terminal object model with a {string} containing the menu items {string}, {string}, and {string}")
     pub fn from_name(name: &str) -> Role {
@@ -122,7 +124,7 @@ impl Role {
             .iter()
             .copied()
             .find(|role| role.as_str() == name)
-            .unwrap_or_else(|| panic!("no region role is named {name:?}"))
+            .unwrap_or(Role::Region)
     }
 }
 
@@ -1551,7 +1553,10 @@ impl Locator {
     /// matches, so it binds one region or none.
     ///
     /// A scope narrows the matches to the regions drawn inside the region it
-    /// names. Containment is read off the rectangles rather than off the tree,
+    /// names, and a scope naming a region the screen does not carry narrows to
+    /// nothing, so the locator matches no region and the caller reports the
+    /// scope it looked for. Containment is read off the rectangles rather than
+    /// off the tree,
     /// because a region drawn inside a pane is not always filed under it: the
     /// model reads controls off the whole screen, so a button drawn inside a
     /// pane is a sibling of that pane. A scope means the part of the screen the
@@ -1562,12 +1567,15 @@ impl Locator {
     /// @planks("the locator for the {string} named {string} is resolved within the region named {string}")
     /// @planks("the locator addresses the first {string} of the region named {string}")
     /// @planks("that plan is replayed")
+    /// @planks("the replay fails and reports the scope that matched no region")
     pub fn resolve(&self, model: &Model) -> Resolution {
-        let scope = self.scope.as_ref().map(|scope| {
-            model
-                .find_named(scope)
-                .unwrap_or_else(|| panic!("the model contains no region named {scope:?}"))
-        });
+        let scope = match self.scope.as_ref() {
+            Some(name) => match model.find_named(name) {
+                Some(region) => Some(region),
+                None => return Resolution::NoMatch,
+            },
+            None => None,
+        };
         let mut found = Vec::new();
         model.root.collect(
             &|region| {
