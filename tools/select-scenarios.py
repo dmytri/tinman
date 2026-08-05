@@ -161,16 +161,64 @@ def changed(base):
 
 
 # ---- 6. planks on production seams ------------------------------------------
+IMPL_RULE = '{id: impls, language: rust, rule: {kind: impl_item}}'
+
+
+def planks_above(src, start_line):
+    """Planks in the docblock immediately above the item starting at start_line."""
+    found, i = [], start_line - 2
+    while i >= 0 and (src[i].strip().startswith("///") or src[i].strip().startswith("#[")):
+        m = re.search(r'@planks\("((?:[^"\\]|\\.)*)"\)', src[i])
+        if m:
+            found.append(m.group(1))
+        i -= 1
+    return found
+
+
+def type_planks(src):
+    """Planks on each type declaration, keyed by type name."""
+    out = {}
+    for i, line in enumerate(src):
+        m = re.match(r"\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s+(\w+)", line)
+        if m:
+            got = planks_above(src, i + 1)
+            if got:
+                out[m.group(1)] = got
+    return out
+
+
 def planks_for(path, ranges):
+    """Planks for each touched function, inherited outward where it carries none.
+
+    A trait impl's method is a seam whose plank lives on the impl or on the type
+    it implements, so resolving per function alone reports an unplanked symbol
+    and reinstates the tier sweep this tool exists to replace.
+    """
     src = pathlib.Path(path).read_text().splitlines()
+    impls = []
+    for m in ast(IMPL_RULE, path):
+        r = m.get("range", {})
+        s, e = r.get("start", {}).get("line"), r.get("end", {}).get("line")
+        text = (m.get("text", "") or "").splitlines()[0] if m.get("text") else ""
+        target = re.search(r"\bimpl\b.*?\bfor\s+(\w+)|^\s*impl(?:<[^>]*>)?\s+(\w+)", text)
+        if s is not None:
+            impls.append({"start": s + 1, "end": e + 1,
+                          "type": (target.group(1) or target.group(2)) if target else None})
+    by_type = type_planks(src)
+
     out = collections.defaultdict(list)
     for fr in ranges:
-        i = fr["start"] - 2
-        while i >= 0 and (src[i].strip().startswith("///") or src[i].strip().startswith("#[")):
-            m = re.search(r'@planks\("((?:[^"\\]|\\.)*)"\)', src[i])
-            if m:
-                out[fr["fn"]].append(m.group(1))
-            i -= 1
+        own = planks_above(src, fr["start"])
+        if own:
+            out[fr["fn"]] = own
+            continue
+        enclosing = [im for im in impls if im["start"] <= fr["start"] <= im["end"]]
+        enclosing.sort(key=lambda im: im["end"] - im["start"])
+        for im in enclosing:
+            got = planks_above(src, im["start"]) or by_type.get(im["type"] or "", [])
+            if got:
+                out[fr["fn"]] = got
+                break
     return out
 
 
