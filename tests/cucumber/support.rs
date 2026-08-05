@@ -5180,13 +5180,20 @@ struct ScannerRule {
 #[derive(Debug, Deserialize)]
 struct DuplicationSummary {
     exact_duplicate_groups: usize,
+    total_code_units: usize,
 }
 
 /// What the duplication scanner reports over a source tree: the exact-duplicate
-/// groups it found, with the members of each as it named them.
+/// groups it found, with the members of each as it named them, and how many code
+/// units it analysed to find them.
+///
+/// The unit count is carried because zero groups is the healthy resting state
+/// once a threshold is applied, and a scanner that analysed nothing reports zero
+/// groups identically. The count is what separates the two.
 #[derive(Debug, Clone)]
 pub struct DuplicationReport {
     pub groups: Vec<DuplicateGroup>,
+    pub code_units: usize,
 }
 
 /// One exact-duplicate group out of the scanner's listing: the fingerprint the
@@ -5195,15 +5202,6 @@ pub struct DuplicationReport {
 pub struct DuplicateGroup {
     pub fingerprint: String,
     pub members: Vec<String>,
-}
-
-/// One group the duplication allowance names. Only the fingerprint is read: it
-/// is the scanner's own group identity and therefore the whole join. The reason
-/// and the member list the allowance carries are written for a human reading the
-/// file, and reading them here would assert nothing a run could fail on.
-#[derive(Debug, Deserialize)]
-struct AllowedDuplicateGroup {
-    fingerprint: String,
 }
 
 /// One duplicated-constant group the allowance names. The declarations
@@ -5217,10 +5215,10 @@ struct AllowedDuplicateConstants {
 
 #[derive(Debug, Deserialize)]
 struct DuplicationAllowance {
-    #[serde(rename = "allowedGroups")]
-    allowed_groups: Vec<AllowedDuplicateGroup>,
     #[serde(rename = "allowedConstants", default)]
     allowed_constants: Vec<AllowedDuplicateConstants>,
+    #[serde(rename = "minimumLines")]
+    minimum_lines: usize,
 }
 
 /// The duplication allowance at `path`, read once.
@@ -5231,14 +5229,11 @@ fn duplication_allowance(path: &str) -> DuplicationAllowance {
         .unwrap_or_else(|e| panic!("the duplication allowance {path} did not parse: {e}"))
 }
 
-/// The group fingerprints the duplication allowance at `path` names as
-/// coincidence rather than as copied logic.
-pub fn duplication_allowance_fingerprints(path: &str) -> Vec<String> {
-    duplication_allowance(path)
-        .allowed_groups
-        .into_iter()
-        .map(|group| group.fingerprint)
-        .collect()
+/// The minimum source line count the allowance at `path` names, below which the
+/// duplication scanner is not consulted. It is read from the file rather than
+/// written here so the number a run applies is the number the scantling declares.
+pub fn duplication_minimum_lines(path: &str) -> usize {
+    duplication_allowance(path).minimum_lines
 }
 
 /// The duplicated-constant groups the allowance at `path` names as coincidence,
@@ -5559,7 +5554,8 @@ fn parse_duplicate_groups(section: &str) -> Vec<DuplicateGroup> {
     groups
 }
 
-/// Run the duplication scanner over `path` and read what it reports.
+/// Run the duplication scanner over `path`, analysing only units of at least
+/// `minimum_lines` source lines, and read what it reports.
 ///
 /// The count comes from the scanner's own JSON field rather than from its
 /// printed prose, so a wording change cannot quietly turn a red green. The
@@ -5567,11 +5563,17 @@ fn parse_duplicate_groups(section: &str) -> Vec<DuplicateGroup> {
 /// summary carries counts alone and a failing assertion needs the members. The
 /// scanner prints a closing line after its JSON, so the object is taken as the
 /// span between its outermost braces.
-pub fn duplication_report(path: &str) -> DuplicationReport {
+///
+/// The threshold is passed to both invocations. Handing it to the counting run
+/// alone would list members out of a different unit set than the one counted,
+/// and the two would then disagree for a reason that is not drift.
+pub fn duplication_report(path: &str, minimum_lines: usize) -> DuplicationReport {
+    let minimum = minimum_lines.to_string();
     let run = |arguments: &[&str]| -> String {
         let output = std::process::Command::new("cargo")
             .arg("dupes")
             .args(arguments)
+            .args(["--min-lines", &minimum])
             .output()
             .unwrap_or_else(|e| {
                 panic!("the duplication scanner over {path} could not be run: {e}")
@@ -5606,7 +5608,10 @@ pub fn duplication_report(path: &str) -> DuplicationReport {
         parsed.exact_duplicate_groups,
         groups.len()
     );
-    DuplicationReport { groups }
+    DuplicationReport {
+        groups,
+        code_units: parsed.total_code_units,
+    }
 }
 
 /// The exact-duplicate listing out of the duplication scanner's printed report:

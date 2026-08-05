@@ -27,23 +27,20 @@ Feature: methodology conformance
     Then every mark names one of the three conditions the Verification agreement permits
     And the marks read are not empty
 
-  Rule: the scanner reports groups that are coincidence rather than copied logic, so a gate demanding none is unsatisfiable. A threshold does not separate them either: at the setting that drops the noise it also dropped the one pair that motivated adopting a scanner at all, because the shape small functions share is what makes them small rather than what makes them copied. So the gate reads zero outside a named allowance, and each entry carries the reason it is one.
-
-  Rule: the join runs both ways, and the second direction is the one that rots. Reading only that every reported group is allowed lets an entry outlive the duplication it excused: the code changes, the scanner stops reporting it, and a permission nobody needs sits in the file granting cover to whatever later matches its fingerprint. Nothing announces that, because the gate it weakens stays green throughout. An allowance is a claim about the tree as much as a permission, so it is checked as one.
-
   Rule: the scanner reads functions and not items, so this gate covers duplicated functions only. What it cannot see is covered by a second census rather than counted here, at features/methodology-conformance.feature:every duplicated constant the census reports is named as coincidence. A count in this prose would decay every time the tree gained or lost a copy, and would decay silently, because nothing about a sentence changes when its number stops being true.
 
+  Rule: the scanner fingerprints shape with identifiers normalised, so it cannot tell a copied body from a shape two unrelated functions share, and every exemption this gate once carried described the second. The size the scantling names is what separates them: across a substantial body, structural identity is copied logic. So the gate reads zero groups rather than a named set, and the floor moves to what the scanner analysed, because zero groups is the healthy resting state here and a scanner that read nothing reports it identically.
+
   @conformance
-  Scenario: every duplicate group the scanner reports is named as coincidence
-    Given the implementation sources and the allowance in "scantlings/duplication-allowance.json"
-    When the duplication scanner reads the sources
-    Then every group it reports is one the allowance names
-    And every group the allowance names is one it reports
-    And the groups read are not empty
+  Scenario: no duplicated body survives above the size the scantling names
+    Given the implementation sources and the threshold in "scantlings/duplication-allowance.json"
+    When the duplication scanner reads the sources at that threshold
+    Then it reports no duplicate group
+    And the code units it analysed are not empty
 
   Rule: the duplication scanner reads functions and not items, so a duplicated constant is invisible to it. Its unit census names closures, methods, functions and trait impl blocks and carries no unit kind for a constant at all, which means no threshold and no flag reaches one. The blindness was proven structural rather than a threshold effect on 2026-07-31 by a two-file probe: two byte-identical sources holding only constant declarations analyse as zero code units, so lowering the node and line minimums to 1 changes nothing. A green from the scanner therefore covers duplicated functions only, and a second census is what covers the rest.
 
-  Rule: a duplicated constant is worth its own census because the constants that get copied are the ones that encode a decision. A deadline, a key sequence or a limit repeated in two files is two places to change and one place to forget, and the copy stays green while it drifts, because nothing joins the two declarations. Both allowances are read in both directions for the same reason the function one is: an entry outliving the duplication it excused would otherwise sit on, granting cover to whatever later matches it.
+  Rule: a duplicated constant is worth its own census because the constants that get copied are the ones that encode a decision. A deadline, a key sequence or a limit repeated in two files is two places to change and one place to forget, and the copy stays green while it drifts, because nothing joins the two declarations. This allowance is read in both directions, and the second direction is the one that rots: reading only that every reported constant is allowed lets an entry outlive the duplication it excused, so the copy is collapsed, the census stops reporting it, and a permission nobody needs sits in the file granting cover to whatever later matches it. Nothing announces that, because the gate it weakens stays green throughout. The function gate needs no such reading, because it names no entries at all.
 
   Rule: a constant is keyed by its name and its declaration together, and keying on the declaration alone was tried first. That key reads two constants agreeing in value as one duplicate, so unrelated deadlines that happen to sit at the same two seconds arrive as copies, and each would need a permanent allowance entry excusing duplication that never existed. A copy is one name declared twice. Two independent decisions that coincide are not a copy, and a census that cannot tell them apart fills its own allowance with noise until nobody reads it.
 

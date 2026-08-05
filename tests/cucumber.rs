@@ -83,11 +83,11 @@ struct TinmanWorld {
     // the construction-boundary contract the verifier last checked, so a floor
     // asserting how the checker counts reads the same contract the check did
     boundary_contract: Option<String>,
-    // what the duplication scanner reported over the implementation, and the
-    // group fingerprints the allowance names as coincidence, with the path it
-    // was read from so a failure names the file that would have to name them
+    // what the duplication scanner reported over the implementation, the
+    // minimum unit size it was asked to analyse at, and the path both were read
+    // from so a failure names the file that declares the threshold
     duplication: Option<support::DuplicationReport>,
-    duplication_allowance: Option<Vec<String>>,
+    duplication_minimum_lines: Option<usize>,
     duplication_allowance_path: Option<String>,
     // what the constant census read over the implementation, the groups it
     // reports as duplicated, and the groups the allowance names as coincidence
@@ -12258,109 +12258,85 @@ async fn none_of_them_precedes_a_rule(world: &mut TinmanWorld) {
 // methodology conformance: duplication across the implementation
 // ---------------------------------------------------------------------------
 
-#[given(expr = "the implementation sources and the allowance in {string}")]
-async fn the_sources_and_the_duplication_allowance(world: &mut TinmanWorld, allowance: String) {
-    // One allowance file answers both censuses, so both of its lists are read
-    // here: the scanner reads functions and the census reads constants, and each
-    // scenario joins the list its own census answers.
-    world.duplication_allowance = Some(support::duplication_allowance_fingerprints(&allowance));
-    world.constant_allowance = Some(support::duplication_allowance_constants(&allowance));
-    world.duplication_allowance_path = Some(allowance);
+#[given(expr = "the implementation sources and the threshold in {string}")]
+async fn the_sources_and_the_duplication_threshold(world: &mut TinmanWorld, scantling: String) {
+    // The size is read from the scantling rather than written here, so the
+    // number a run applies is the number the durable file declares.
+    world.duplication_minimum_lines = Some(support::duplication_minimum_lines(&scantling));
+    world.duplication_allowance_path = Some(scantling);
 }
 
-#[when("the duplication scanner reads the sources")]
-async fn the_duplication_scanner_reads_the_sources(world: &mut TinmanWorld) {
+#[when("the duplication scanner reads the sources at that threshold")]
+async fn the_duplication_scanner_reads_the_sources_at_that_threshold(world: &mut TinmanWorld) {
+    let minimum = world
+        .duplication_minimum_lines
+        .expect("the threshold was read");
     // The implementation directory the rigging names, which is the scope its
     // own conformance command hands the scanner.
-    world.duplication = Some(support::duplication_report("src"));
+    world.duplication = Some(support::duplication_report("src", minimum));
 }
 
-#[then("every group it reports is one the allowance names")]
-async fn every_group_reported_is_one_the_allowance_names(world: &mut TinmanWorld) {
+#[then("it reports no duplicate group")]
+async fn it_reports_no_duplicate_group(world: &mut TinmanWorld) {
     let report = world
         .duplication
         .as_ref()
         .expect("the duplication scanner ran");
-    let allowed = world
-        .duplication_allowance
-        .as_ref()
-        .expect("the duplication allowance was read");
     let path = world
         .duplication_allowance_path
         .as_deref()
-        .expect("the duplication allowance was named");
-    // The fingerprint is the scanner's own identity for a group, so the join is
-    // over fingerprints; the members are carried into the message only, because
-    // a failure that names a hash alone says nothing about what is duplicated.
-    let unnamed: Vec<String> = report
+        .expect("the threshold was named");
+    // Above the declared size the gate is zero and nothing is exempt, so a group
+    // is named with its members rather than joined against a list. The
+    // fingerprint rides along because it is the scanner's own identity for the
+    // group and is what a reader would search its report by.
+    let reported: Vec<String> = report
         .groups
         .iter()
-        .filter(|group| !allowed.contains(&group.fingerprint))
         .map(|group| format!("{}: {}", group.fingerprint, group.members.join(", ")))
         .collect();
     assert!(
-        unnamed.is_empty(),
-        "{} duplicate group(s) the scanner reports are not named in {path}:\n{}",
-        unnamed.len(),
-        unnamed.join("\n")
+        reported.is_empty(),
+        "{} duplicate group(s) survive at or above the size {path} names, where structural \
+         identity is copied logic:\n{}",
+        reported.len(),
+        reported.join("\n")
     );
 }
 
-#[then("every group the allowance names is one it reports")]
-async fn every_allowed_group_is_one_the_scanner_reports(world: &mut TinmanWorld) {
+#[then("the code units it analysed are not empty")]
+async fn the_code_units_analysed_are_not_empty(world: &mut TinmanWorld) {
     let report = world
         .duplication
         .as_ref()
         .expect("the duplication scanner ran");
-    let allowed = world
-        .duplication_allowance
-        .as_ref()
-        .expect("the duplication allowance was read");
     let path = world
         .duplication_allowance_path
         .as_deref()
-        .expect("the duplication allowance was named");
-    // The reverse direction of the same fingerprint join. An entry the scanner no
-    // longer reports excused duplication that is gone, and it stays in the file
-    // granting cover to whatever later matches its fingerprint.
-    let unreported: Vec<&String> = allowed
-        .iter()
-        .filter(|fingerprint| {
-            !report
-                .groups
-                .iter()
-                .any(|group| &group.fingerprint == *fingerprint)
-        })
-        .collect();
+        .expect("the threshold was named");
+    // Zero groups is the healthy resting state here, and a scanner that read
+    // nothing reports it identically. A threshold set above every unit in the
+    // tree, or a scope naming no source, would both pass the gate above while
+    // inspecting nothing at all.
     assert!(
-        unreported.is_empty(),
-        "{} allowance entr(ies) in {path} name a group the scanner no longer reports, so each \
-         excuses duplication that is gone:\n{}",
-        unreported.len(),
-        unreported
-            .iter()
-            .map(|fingerprint| fingerprint.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-}
-
-#[then("the groups read are not empty")]
-async fn the_duplicate_groups_read_are_not_empty(world: &mut TinmanWorld) {
-    let report = world
-        .duplication
-        .as_ref()
-        .expect("the duplication scanner ran");
-    assert!(
-        !report.groups.is_empty(),
-        "the duplication scanner named no group at all, so the join read nothing and this \
-         scenario would assert nothing"
+        report.code_units > 0,
+        "the duplication scanner analysed no code unit at the size {path} names, so the gate \
+         above passed while reading nothing"
     );
 }
 
 // ---------------------------------------------------------------------------
 // methodology conformance: duplicated constants across the implementation
 // ---------------------------------------------------------------------------
+
+#[given(expr = "the implementation sources and the allowance in {string}")]
+async fn the_sources_and_the_duplication_allowance(world: &mut TinmanWorld, allowance: String) {
+    // The scanner reads functions and carries no unit kind for a constant, so
+    // the list this census joins against is the only one the allowance still
+    // carries.
+    world.constant_allowance = Some(support::duplication_allowance_constants(&allowance));
+    world.duplication_allowance_path = Some(allowance);
+}
 
 #[when("the constant census reads the sources")]
 async fn the_constant_census_reads_the_sources(world: &mut TinmanWorld) {

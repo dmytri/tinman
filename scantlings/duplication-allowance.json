@@ -1,79 +1,9 @@
 {
   "$id": "https://cdn.jsdelivr.net/gh/dmytri/tinman@v0.7.0/scantlings/duplication-allowance.json",
   "title": "Duplication allowance",
-  "description": "The duplicates that are structural coincidence rather than copied logic, in two lists because two censuses read the sources. Every entry names why. Anything a census reports that this file does not name is a finding, so the gate is zero outside these lists rather than a tuned threshold. allowedGroups answers the duplication scanner, which reads functions. allowedConstants answers the constant census, which exists because the scanner carries no unit kind for a constant and so cannot see one at any threshold. Both are discharged by verification support joining a census against its list, and both are attested by @conformance scenarios in features/methodology-conformance.feature.",
-  "allowedGroups": [
-    {
-      "fingerprint": "15454e94f5e4376a",
-      "members": [
-        "Request::address",
-        "Request::model",
-        "Proposal::command",
-        "ResolvedBackend::backend"
-      ],
-      "reason": "Single-expression accessors returning a field of four unrelated types. Sharing no logic, they share only the shape every accessor has."
-    },
-    {
-      "fingerprint": "d0f576cb647a2aff",
-      "members": [
-        "Request::authorization",
-        "Proposal::answer",
-        "ResolvedBackend::name",
-        "Locator::scope"
-      ],
-      "reason": "The same accessor shape on four unrelated types."
-    },
-    {
-      "fingerprint": "ba56c1b7313a65b5",
-      "members": [
-        "assistant_request",
-        "assistant_completion",
-        "ask"
-      ],
-      "reason": "Single-expression delegations, each forwarding to a different seam with different arguments."
-    },
-    {
-      "fingerprint": "c1d5572d653c8e7e",
-      "members": [
-        "ScreenSize::total_lines",
-        "ScreenSize::screen_lines",
-        "ScreenSize::columns"
-      ],
-      "reason": "Three accessors a trait requires separately. Collapsing them would mean not implementing the trait."
-    },
-    {
-      "fingerprint": "e5323be8a394fba6",
-      "members": [
-        "execute",
-        "execute_over_tree"
-      ],
-      "reason": "Two entry points over different inputs, alike in shape and not in what they walk."
-    },
-    {
-      "fingerprint": "8ea192ed2fb7b1b2",
-      "members": [
-        "VirtualScreen::cell",
-        "VirtualScreen::reverse"
-      ],
-      "reason": "Two grid reads returning different attributes of a cell. The indexing arithmetic is the grid's, not copied logic."
-    },
-    {
-      "fingerprint": "b92a56a1873f0fad",
-      "members": [
-        "MountMode::as_name",
-        "Binding::as_str"
-      ],
-      "reason": "Exhaustive match arms mapping two unrelated enums to their own strings. The strings differ; only the match shape agrees."
-    },
-    {
-      "fingerprint": "bb61490898a21805",
-      "members": [
-        "is_available",
-        "capture_interactive"
-      ],
-      "reason": "Single-expression delegations into unrelated subsystems, one inference and one PTY."
-    }
-  ],
+  "description": "The duplication policy for the implementation. The scanner fingerprints AST shape with identifiers normalised, so two functions of the same shape returning different fields register as identical while sharing no logic at all. Shape is therefore not the subject: duplication matters where one behaviour is implemented twice, or where two sites must stay aligned because they derive one value or hold one resource. A minimum size is what separates the two with this tool, because structural identity across a substantial body is copied logic while structural identity across an accessor is the shape every accessor has. Below the minimum the scanner is not consulted; at or above it the gate is zero and this file names no exemption. allowedConstants answers the constant census, which exists because the scanner carries no unit kind for a constant and so cannot see one at any threshold.",
+  "allowedGroups": [],
   "allowedConstants": [],
-  "rationale": "A gate asserting no duplicate group at all is unsatisfiable, because the scanner reports coincidence alongside copied logic. A tuned threshold is worse: at the setting that dropped the noise when this was measured on 2026-07-31, it also dropped the one pair that had motivated adopting a scanner. No number separates copied logic from the shape small functions share, because that shape is what makes them small rather than what makes them copied. Naming each allowance instead makes every exemption a decision somebody wrote down, and leaves the gate at zero outside them. The genuine duplication this file was written beside was collapsed rather than allowed, which is why no entry here excuses one: an entry that ever does is a decision to argue in review, not a threshold to nudge. The attesting scenario reads this list in both directions, so an entry outliving the duplication it excused reddens rather than sitting on, granting cover to whatever later matches its fingerprint."
+  "rationale": "Eight exemptions stood here until 2026-08-05 and every one of them described the same non-issue: accessors, trait methods a trait requires separately, and match arms mapping unrelated enums to their own strings. None duplicated a behaviour and none held a value another site had to match, so the gate was spending written decisions to permit coincidence, and each new pair of small functions owed another one. The operator's rule retired them: similar code that can duplicate no resource, threaten no integrity and copy no seam is not a problem. What replaced them is a size below which this scanner is not asked, because a filter that cannot identify its own subject either matches nothing or matches the wrong thing, and this one could not tell a copied body from a shared shape. The threshold was measured rather than guessed on 2026-08-05: eight groups at the tool's default, two at five lines, none at eight, and every group that fell away was a coincidence named above. A tuned threshold was refused once before, on the ground that it also dropped the duplication that motivated adopting a scanner. That duplication was three constants, which the census below owns and which no function threshold ever reached, so the refusal does not reach this split. An exemption appearing here again is a decision to argue in review: at this size, structural identity is copied logic.",
+  "minimumLines": 8
 }
