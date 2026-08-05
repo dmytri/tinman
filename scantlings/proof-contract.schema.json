@@ -381,15 +381,14 @@
     },
     {
       "title": "Duplication allowance contract",
-      "description": "Declares the size at or above which the duplication scanner is consulted, and names any group at that size which is structural coincidence rather than copied logic. The scanner fingerprints shape with identifiers normalised, so below the declared size it cannot tell a copied body from the shape small functions share and is not asked; at or above it, structural identity is copied logic and the gate is zero. An empty allowance is therefore the healthy resting state rather than a gap. A fingerprint is content-derived, so an allowed group whose code changes stops matching its entry and reddens, which is the safe direction to be wrong in.",
+      "description": "Declares the size at or above which the duplication scanner is consulted. The scanner fingerprints shape with identifiers normalised, so below that size it cannot tell a copied body from the shape small functions share and is not asked; at or above it, structural identity is copied logic and the gate is zero with no exemption available. allowedConstants answers the constant census, which exists because the scanner carries no unit kind for a constant and so cannot see one at any threshold.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "$id",
         "title",
         "description",
-        "minimumLines",
-        "allowedGroups"
+        "minimumLines"
       ],
       "properties": {
         "$id": {
@@ -403,36 +402,6 @@
         "description": {
           "type": "string",
           "minLength": 1
-        },
-        "allowedGroups": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "fingerprint",
-              "members",
-              "reason"
-            ],
-            "properties": {
-              "fingerprint": {
-                "type": "string",
-                "minLength": 1
-              },
-              "members": {
-                "type": "array",
-                "minItems": 2,
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
         },
         "allowedConstants": {
           "description": "The duplicated constants a constant census reports that are coincidence rather than copies, each with the reason it is one. Carries no minimum, because none excused is the healthy resting state and the census scenario's own floor guards the reader rather than this list. A constant is keyed by name and declaration together, so an entry names the constant rather than a content fingerprint.",
@@ -472,7 +441,8 @@
         "minimumLines": {
           "type": "integer",
           "minimum": 1,
-          "description": "Source lines a unit must carry before the scanner is consulted about it."
+          "maximum": 12,
+          "description": "Source lines a unit must carry before the scanner is consulted about it. Bounded above because the threshold is the whole gate: raised far enough, the scanner reads almost nothing and reports no group, which is indistinguishable from a clean tree. The ceiling is set by the subject rather than by a coverage figure, since a copied body of a dozen lines is duplication anyone would act on."
         }
       }
     }
