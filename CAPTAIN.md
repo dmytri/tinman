@@ -6,7 +6,11 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
-**A voyage is open and the deck is not at rest.** The skeletons were reviewed with the operator on 2026-08-05 and every one was promoted; `watchbill.json` is live and carries the order. Captain's durable work is uncommitted and is work in flight rather than dirt, so it rides to QM as it stands. Next role is QM and context clears first. Run the Opening retrieval and believe it over this block, which names no head, branch position or count.
+**The voyage closed on 2026-08-05 and the deck is at rest: tree clean, watchbill struck, every tier green inside its budget.** Eight scenarios landed of the nine promoted; the ninth was withdrawn on an operator ruling rather than built. Run the Opening retrieval and believe it over this block, which names no head, branch position or count.
+
+**Outbound is blocked on arithmetic rather than on a decision, and this is the first thing to check.** `Cargo.toml` names the version the newest tag already carries, so shipping would re-ship a released version. The bump is a manifest edit and manifests are Shipwright's, so **harbour comes before outbound this time** whatever the operator's preference on sequencing, and the docket below rides with it.
+
+**Harbour docket, all derived this voyage and none of it actionable at sea.** `AGENTS.md` is stale in three places against the tier this voyage added, one of them the outright claim that nothing reddens when an advisory lands, which the shipped scenario now contradicts. `RIGGING.md` and `AGENTS.md` still name the undated default model. The `focused` command drops its tag exclusions. `_pin_prepared_process` is dead scaffold the operator has ruled should simply go. Two verification-economy items carry a named pivot. The advisory check is adopted-unproven and its plant is a dependency move. And two candidate checks: documentation against `RIGGING.md` tier values, and a tier tag on any scenario that drives the real binary.
 
 **Do not restate the promoted scenarios here.** They are in the specs with their own `Rule:` bodies, and the watchbill carries the order; two carriers for one design is the drift this file records against itself.
 
