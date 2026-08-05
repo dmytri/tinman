@@ -138,6 +138,11 @@ struct TinmanWorld {
     tier_budgets: Option<Vec<support::TierBudget>>,
     recorded_sweeps: Option<Vec<support::RecordedSweep>>,
     over_budget_sweeps: Option<Vec<String>>,
+    // the tier tags the rigging declares, and the tiers the selection tool
+    // reports it recognises, joined so a tier the tool misses is a red rather
+    // than a set it silently never selected
+    declared_tiers: Option<Vec<String>>,
+    recognised_tiers: Option<Vec<String>>,
     // the generated concurrency fixture, held so it outlives the runs that read
     // it and is reclaimed with the scenario, and the wall clock each arm of the
     // comparison observed
@@ -13055,6 +13060,72 @@ async fn every_budgeted_tier_records_its_wall_clock(world: &mut TinmanWorld) {
 }
 
 // ---------------------------------------------------------------------------
+// methodology conformance: the tiers the selection tool recognises
+// ---------------------------------------------------------------------------
+
+#[given(expr = "the tier tags declared under {string} in {string}")]
+async fn the_tier_tags_declared_under_a_rigging_section(
+    world: &mut TinmanWorld,
+    section: String,
+    rigging: String,
+) {
+    world.declared_tiers = Some(support::declared_tier_tags(&rigging, &section));
+    world.rigging_path = Some(rigging);
+}
+
+#[when("the selection tool reports the tiers it recognises")]
+async fn the_selection_tool_reports_the_tiers_it_recognises(world: &mut TinmanWorld) {
+    let rigging = world
+        .rigging_path
+        .as_ref()
+        .expect("the rigging was named")
+        .clone();
+    world.recognised_tiers = Some(support::selection_tool_tiers(&rigging));
+}
+
+#[then("every declared tier is one it recognises")]
+async fn every_declared_tier_is_one_the_selection_tool_recognises(world: &mut TinmanWorld) {
+    let declared = world
+        .declared_tiers
+        .as_ref()
+        .expect("the declared tier tags were read");
+    let recognised = world
+        .recognised_tiers
+        .as_ref()
+        .expect("the selection tool reported the tiers it recognises");
+    let missed: Vec<&String> = declared
+        .iter()
+        .filter(|tag| !recognised.contains(tag))
+        .collect();
+    assert!(
+        missed.is_empty(),
+        "the rigging declares {} tier(s) the selection tool does not report: {}. It reports {}. \
+         A tier the tool misses files its scenarios under the default tier, whose sweep excludes \
+         them by tag, so the tool reports a set that was never run.",
+        missed.len(),
+        missed
+            .iter()
+            .map(|tag| tag.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        recognised.join(", ")
+    );
+}
+
+#[then("the declared tiers read are not empty")]
+async fn the_declared_tiers_read_are_not_empty(world: &mut TinmanWorld) {
+    let declared = world
+        .declared_tiers
+        .as_ref()
+        .expect("the declared tier tags were read");
+    let rigging = world.rigging_path.as_ref().expect("the rigging was named");
+    assert!(
+        !declared.is_empty(),
+        "the rigging at {rigging} declares no tier tag, so this scenario would assert nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // methodology conformance: where a tier sweep spent its wall clock
 // ---------------------------------------------------------------------------
 
@@ -14066,13 +14137,6 @@ async fn the_written_plan_records_the_documented_example(world: &mut TinmanWorld
         text.contains(&example),
         "the written plan records no {example:?} as the documented example it came from; it reads:\n{text}"
     );
-}
-
-// Keep the prepared-process type referenced so the launch seam signature stays
-// pinned by the suite even before watch2 exercises capture.
-#[allow(dead_code)]
-fn _pin_prepared_process(p: &PreparedProcess) -> &str {
-    &p.program
 }
 
 #[tokio::main]

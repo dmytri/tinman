@@ -5758,6 +5758,51 @@ pub fn tier_budgets(rigging: &str) -> Vec<TierBudget> {
     budgets
 }
 
+/// Every tier tag the named rigging section declares. A tier declaration is a
+/// `- <name>: @<tag>` item, which is the findable form that separates a tier
+/// from the policies, budgets and record paths declared beside it. The default
+/// tier is read like any other: it is declared in the same section by the same
+/// shape, and a reader dropping it here could not report a tool that carries a
+/// copy of it.
+pub fn declared_tier_tags(rigging: &str, section: &str) -> Vec<String> {
+    rigging_section(rigging, section.trim_start_matches("## "))
+        .into_iter()
+        .filter(|(_, value)| value.starts_with('@'))
+        .map(|(_, value)| value)
+        .collect()
+}
+
+/// The tiers the selection tool reports it recognises, read by running the
+/// rigging's own `select` command with `--tiers` in its base slot. The command
+/// is read from the rigging rather than from a tool path restated here: a
+/// scenario that joins a tool to a declaration cannot itself carry a copy of
+/// where that tool lives.
+pub fn selection_tool_tiers(rigging: &str) -> Vec<String> {
+    let command = rigging_section(rigging, "Commands")
+        .into_iter()
+        .find(|(key, _)| key == "select")
+        .map(|(_, command)| command)
+        .unwrap_or_else(|| panic!("the rigging at {rigging} declares no select command"));
+    let invocation = command.replace("{base}", "--tiers");
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&invocation)
+        .output()
+        .unwrap_or_else(|e| panic!("the selection tool did not run as `{invocation}`: {e}"));
+    assert!(
+        output.status.success(),
+        "the selection tool exited {} running `{invocation}`, so it reports no tiers at all:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// The path the rigging keeps the weather record at.
 pub fn weather_record_path(rigging: &str) -> String {
     rigging_section(rigging, "Tiers")

@@ -10,13 +10,14 @@
 - implementation: src
 - specs: features
 - verification: tests
+- verification: tools
 - assets: assets
 - scantlings: scantlings
 - scantlings: scantlings/verification-conformance
 
 ## Commands
 - discover: none
-- focused: `ref="{scenario}"; cargo test --test cucumber -- -i "${ref%%:*}" --name "^${ref#*:}$"`
+- focused: `ref="{scenario}"; f="${ref%%:*}"; n="${ref#*:}"; awk -v want="  Scenario: $n" '/^[[:space:]]*@/{t=t" "$0;next} $0==want{print t;exit} {t=""}' "$f" | grep -qE "@(captain|shipwright)" && { echo "refusing lifecycle-tagged target: $ref"; exit 1; }; cargo test --test cucumber -- -i "$f" --name "^$n$"`
 - broad: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="not @sandbox and not @inference and not @advisory and not @assistant and not @captain and not @shipwright" cargo test --test cucumber -- -c 64; r=$?; printf '{"tier":"@logic","workers":64,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
 - broad-sandbox: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="@sandbox and not @captain and not @shipwright" cargo test --test cucumber -- -c 4; r=$?; printf '{"tier":"@sandbox","workers":4,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`
 - broad-inference: `s=$(date +%s%3N); CUCUMBER_FILTER_TAGS="@inference and not @captain and not @shipwright" cargo test --test cucumber -- -c 2; r=$?; printf '{"tier":"@inference","workers":2,"ms":%s,"result":%s}\n' "$(( $(date +%s%3N) - s ))" "$r" >> target/tinman-weather.jsonl; exit $r`

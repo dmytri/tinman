@@ -1,0 +1,22 @@
+id: dead-code-allowance
+language: rust
+severity: error
+message: Verification support keeps code alive with an allowance instead of deleting it.
+note: |
+  Dead code is removed rather than measured, and an allowance attribute is how it survives
+  a compiler that would otherwise report it. The instance this rule was written against
+  kept a type referenced so a signature stayed pinned, and its comment cited a watchbill
+  that custody struck the same voyage: the scaffold outlived the reason for it, and nothing
+  announced that, because the allowance silenced the one check that would have.
+
+  This is the durable-prose decay rule appearing in code rather than in prose. A comment
+  naming transient state reads as current forever, and an allowance beside it means the
+  compiler agrees to stop asking.
+
+  Where a signature genuinely needs pinning, a scenario pins it. That is what the suite is
+  for, and it reddens when the signature moves, which an unused function cannot.
+files:
+  - tests/**
+rule:
+  kind: attribute_item
+  regex: 'allow\(dead_code\)'

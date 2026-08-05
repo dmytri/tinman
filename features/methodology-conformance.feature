@@ -27,6 +27,15 @@ Feature: methodology conformance
     Then every mark names one of the three conditions the Verification agreement permits
     And the marks read are not empty
 
+  Rule: the tool that decides which scenarios a change selects is the one thing here whose mistakes are invisible. Over-selecting costs a sweep and a role notices the clock; under-selecting reports a set that was never run, and nothing contradicts it. It restated the tier list in its own source once, on the day it was written, and filed every scenario of a tier the rigging had just gained under the default tier, whose sweep excludes them by tag. Nothing caught that except a role sweeping the tier separately rather than believing the report. The rigging declares the tiers, so the tool is joined to that declaration rather than trusted to carry a copy.
+
+  @conformance
+  Scenario: the selection tool recognises every tier the rigging declares
+    Given the tier tags declared under "## Tiers" in "RIGGING.md"
+    When the selection tool reports the tiers it recognises
+    Then every declared tier is one it recognises
+    And the declared tiers read are not empty
+
   Rule: the scanner reads functions and not items, so this gate covers duplicated functions only. What it cannot see is covered by a second census rather than counted here, at features/methodology-conformance.feature:every duplicated constant the census reports is named as coincidence. A count in this prose would decay every time the tree gained or lost a copy, and would decay silently, because nothing about a sentence changes when its number stops being true.
 
   Rule: the scanner fingerprints shape with identifiers normalised, so it cannot tell a copied body from a shape two unrelated functions share, and every exemption this gate once carried described the second. The size the scantling names is what separates them: across a substantial body, structural identity is copied logic. So the gate reads zero groups rather than a named set, and the floor moves to what the scanner analysed, because zero groups is the healthy resting state here and a scanner that read nothing reports it identically.

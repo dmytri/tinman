@@ -24,26 +24,41 @@ def ast(rule, path):
 
 # ---- 0. tiers, read from RIGGING.md rather than restated here ----------------
 def tiers():
-    """Every non-default tier tag RIGGING.md declares under ## Tiers.
+    """Every tier tag RIGGING.md declares under ## Tiers, and the default one.
 
     Restating this list in source is how the tool silently under-selects: a tier
     added to the rigging and not to the tuple files its scenarios under the
     default tier, and the default sweep excludes them by tag.
+
+    The default tier is read from the rigging alongside the rest, because a
+    literal naming it is that same copy in a shorter form. The tag an untagged
+    scenario falls back to is the rigging's to declare, and a tool carrying its
+    own answer keeps reporting the old one after the rigging renames it.
     """
     text = pathlib.Path("RIGGING.md").read_text()
     block = re.search(r"^## Tiers$(.*?)^## ", text, re.M | re.S)
     if not block:
         raise SystemExit("RIGGING.md declares no ## Tiers section")
-    found = []
-    for key, tag in re.findall(r"^- ([a-z-]+):\s*(@\w+)\s*$", block.group(1), re.M):
-        if key != "default":
-            found.append(tag)
+    declared = re.findall(r"^- ([a-z-]+):\s*(@\w+)\s*$", block.group(1), re.M)
+    found = [tag for _, tag in declared]
+    default = next((tag for key, tag in declared if key == "default"), None)
     if not found:
-        raise SystemExit("RIGGING.md declares no non-default tier")
-    return found
+        raise SystemExit("RIGGING.md declares no tier")
+    if default is None:
+        raise SystemExit("RIGGING.md declares no default tier")
+    return found, default
 
 
-TIERS = tiers()
+TIERS, DEFAULT_TIER = tiers()
+
+if BASE == "--tiers":
+    # The tiers this tool recognises, so a scenario can join them against the
+    # rigging that declares them. A tier the rigging names and this list misses
+    # files its scenarios under the default tier, and the default sweep excludes
+    # them by tag, so the run reports a set it never covered.
+    for tag in TIERS:
+        print(tag)
+    raise SystemExit(0)
 
 
 # ---- 1. scenarios and their steps -------------------------------------------
@@ -280,7 +295,7 @@ def main():
     tiers = collections.Counter()
     for f, n in sorted(selected):
         tag = next((t for sc in scns if sc["file"] == f and sc["name"] == n for t in sc["tags"]
-                    if t in TIERS), "@logic")
+                    if t in TIERS), DEFAULT_TIER)
         tiers[tag] += 1
         print(f"  {f}:{n}")
     print("by tier:", dict(tiers))
