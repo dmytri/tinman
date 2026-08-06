@@ -6,6 +6,32 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
+## The reading-spec architecture, operator-agreed 2026-08-05, specified nowhere yet
+
+**This is the next voyage and the design is settled. It is recorded here because it exists only here.**
+
+**The problem it solves.** Rule-based idiom recognition over arbitrary terminal programs does not finish. The catalogue has no end, and every bug the operator has hit by driving the binary is in it: `ls -la` reading as a list, `top`'s summary block reaching the model nowhere, a status line read as a menu. Inference reaches what rules cannot. The constraint that kept inference out of the answer was replay: a test must rebuild against the live screen, and calling a model there costs money and returns a different answer on different days.
+
+**The resolution, and it is the operator's.** Replay does not need to *recognize*. It needs to *re-apply*. So recognition moves to capture, and what it recognized is written down as rules a deterministic pass re-runs. Coverage from the model, reproducibility from the recording.
+
+**Three ways a model gets built, and none of them recognizes an idiom.** A reading spec exists, so apply it: deterministic, free, and always preferred over inference. No spec and a credential and a deliberate ask, so infer, and the inference writes the spec. Neither, so the whole screen is one generic region carrying its text and cells. **The precedence is absolute: where a spec exists it is used and nothing is inferred**, so a run cannot change its answer because a model changed its mind. Re-inferring is an explicit act, the way regenerating a page object is.
+
+**Two artifacts, split by lifetime, and the split is what makes hand-authoring reasonable.** A reading spec belongs to a *program* and is reused by every test of it, which is the page-object pattern the operator's own Playwright and Capybara borrowing already licenses. A plan belongs to a *test* and carries the flow. `top`'s columns are the same in every test ever written against it; its flow differs each time. **Keyed on the binary**, so `ls -l` and `ls -la` share one spec.
+
+**What stays deterministic, and why each earns it.** Grid facts, because the program *declared* them: the emulator parses the escape sequences and stores reverse video, dim, hidden, strikeout, colour and cursor per cell, so reading one is a lookup rather than a judgment. Nothing in a terminal stream ever declares "this is a table", which is why structure is guesswork and attributes are not. Anchor resolution, because a locator binds to something the grid can find. And refutation, because a proposed structure must reconstruct: split each row at the proposed boundaries, rejoin, and the original line returns byte for byte.
+
+**Locators anchor on grid content rather than on an inferred name.** A name inference invented cannot be re-derived at replay, so a locator resting on it binds nothing and the test fails while the program is fine. The anchor is a fact the grid carries, such as the text a region contains; the name stays as the human label. **This is the whole of what `named_from` was working around**, and it dissolves with it, taking the role-matching question with it. Do not rule on that question; it stops existing.
+
+**Boundaries are never recorded as positions.** A rule survives a resize and a content change; `columns: [0, 12, 20]` does not. The operator caught Captain proposing the fragile form, and the correct form is the derivation, re-applied.
+
+**The model's input is the attributed screen plus the program's own documentation**, gathered host-side from `--help`, `man` and tldr. Documentation supplies vocabulary, never authority: a man page says a column exists, not that it is column nine today. `ls -l`'s man page documents the total line, which is the bug the operator has been living with. Best-effort, since some programs ship no page, and absence degrades quality rather than correctness.
+
+**What retires: the recognizer, entirely.** Pane, table, menu, status and control detection, and the scenarios pinning them. Not shrunk. **The blocking objection was that `inspect` with no credential would return a wall of characters, and the operator removed it: inspect requires inference, and someone without it writes the reading spec by hand.** The generic-region fallback keeps text assertions working unconfigured, so the bare `tinman expect PID top` one-liner survives; a role-and-name locator correctly does not, and should say so plainly rather than answer wrongly.
+
+**The proving slice, one thing.** Capture a plan from `ls -l` with docs in the model's input and the structure recorded, then replay it. If it binds green by re-applying the rule rather than re-recognizing, the architecture holds and the retirement is mechanical. That slice also settles `ls -la`, so **do not fix the deterministic table detector**: it is leaving.
+
+**Deferred by the operator, not by Captain: the streaming assistant mode.** Design settled and recorded below; it is the one item explicitly held back.
+
 ## 0.7.0 shipped and verified on all three targets, 2026-08-05
 
 Tag first, then crates.io, then npm, each read from its own `verify` output rather than from the fact that `ship` exited. jsdelivr answers 200 at `@v0.7.0`, so the twenty-four published schema URIs resolve; crates.io and npm each installed from the registry and the binary answered `tinman 0.7.0`.
