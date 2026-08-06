@@ -6,6 +6,24 @@ Binding behaviour lives in `.feature` specs and referenced scantlings. History l
 
 ## First action
 
+**The deck is at rest and 0.7.0 is shipped and verified on all three targets. Run the Opening retrieval and believe it over this block, which names no head, branch position or count.**
+
+**Your voyage is the reading-spec architecture, and it is the section immediately below. Read it before anything else.** It is agreed with the operator in full and specified nowhere: no scenario, no scantling, no schema field exists for it yet. Authoring that is the work.
+
+**Start at the proving slice, not at the schema.** Capture a plan from `ls -l` with the program's documentation in the model's input and the structure recorded, then replay it. If it binds green by re-applying the rule rather than re-recognizing, everything else follows mechanically. **Do not fix the deterministic table detector to make `ls -la` read as a table**: that detector is being retired, and the fix would be work you then delete.
+
+**One thing the operator held back deliberately: the streaming assistant mode.** Design settled, recorded below, not in scope. Do not fold it in.
+
+**One question is open and it is the operator's, not yours.** Whether guidance may reclassify a role, as in "actually that is a table". Legal only where the correction reconstructs. Ask before building on either answer.
+
+**Do not rule on `named_from` or its role-matching tiebreak.** It dissolves when locators anchor on grid content, and ruling on it now decides a question that stops existing.
+
+**What the loop now costs, so you do not rediscover it.** Test-binary rebuild 5.5s, default tier 55s, a QM pass about 7 minutes. `mold` is installed and `.cargo/config.toml` configures it; if a build suddenly takes 90 seconds, something removed that. `tools/select-scenarios.py` derives the exact recheck set and `AGENTS.md` carries the override that supersedes the tier-sweep fallback. **Five defects were found in that tool on 2026-08-05, every one by a role reading its output and none by the Captain who wrote it.** It is now pinned by two `@conformance` scenarios. Trust its report only as far as those scenarios reach.
+
+**The operator's standing instruction on backlog: there is to be none.** Deferral is latency, not safety. Where something looks like debt, it is either work to do now or a decision to put to them; say which. The one live harbour item is the advisory check, adopted unproven, whose plant needs a genuinely vulnerable dependency and so is the operator's call.
+
+**Two habits this file records the Captain failing at, repeatedly, in one session.** Prose was written that the same session's own changes invalidated, three times, each caught by a command rather than by rereading. And a list was restated in code on the day the rule against restating lists was cited. **Before writing a sentence about machinery, ask what command would contradict it.**
+
 ## The reading-spec architecture, operator-agreed 2026-08-05, specified nowhere yet
 
 **This is the next voyage and the design is settled. It is recorded here because it exists only here.**
@@ -63,32 +81,6 @@ Tag first, then crates.io, then npm, each read from its own `verify` output rath
 **What this does not change, and the operator drew the line: custody and the bulkhead.** Selection narrows how a recheck set is derived and not what custody guarantees. Every scenario a change can reach is still run before a commit. Where `select` cannot resolve a symbol it reports it, and the tier that symbol serves is swept, so the fallback survives where it is actually needed.
 
 **Doctrine suggestions the operator asked to be held for later, not acted on.** The support-edit fallback in the Planking agreement should derive the closure before sweeping, since the derivation exists wherever step definitions carry patterns. And a tier tag belongs to any scenario that drives the real binary, which nothing currently checks and which cost a round trip this session.
-
-## An unobservable scenario became a rule, 2026-08-05
-
-**QM blocked on a scenario Captain promoted and could not have verified, and its argument was the right one.** `a session that ends in an error still gives the terminal back` had no reachable trigger: once raw mode is entered the only route to an error is a failed write to the terminal, which takes the shell the scenario reads its answer through. **Simulating it is the forbidden double and inventing a trigger is a scenario against an event the product does not have**, so the scenario was unprovable rather than merely unimplemented. Promoting it on Shipwright's read, without asking what would make it red, is the same omission this file records repeatedly.
-
-**The restatement is structural and it found more than the scenario did.** The assistant, the recorder and the setup form each entered raw mode as a bare enable-and-disable pair, so the fault was three modules rather than one. `raw-mode-without-guard` in the verification-conformance set reddens on all three, and it was proven red by the tree itself rather than by a plant. The behaviour is now guaranteed by construction, since acquisition through one guard makes every path out restore and no later early return can skip it.
-
-**The general rule, which is the operator's own and worth stating as theirs: where a seam is too wide to observe, a scantling narrows the implementation until it is decidable.** An event nobody can trigger and a structure anybody can read are not the same claim, and the second is the one worth checking.
-
-## Captain shipped the fault it had just written the rule against, 2026-08-05
-
-**`tools/select-scenarios.py` restated the tier list in source while `RIGGING.md` declares it.** The `@assistant` tier added the same hour was missing from the tuple, so 51 scenarios filed as `@logic` while the default sweep excludes them by tag: a role trusting that breakdown would have run a sweep containing none of the scenarios the tool had just named reachable. **Silent under-selection, in the tool built to make selection trustworthy.** Boatswain caught it by sweeping the tier separately rather than believing the report, which is the discipline working.
-
-**The general fault is the one this file and `AGENTS.md` both already carry: two lists, one in code and one in copy.** It was written on the same day the durable-prose rules against it were being cited. Knowing a rule is not obeying it, and the moment of writing a convenience is exactly when the rule is furthest from mind. The tool now reads `## Tiers` from the rigging and fails loudly where it finds none.
-
-**The same custody pass found the prose half of it.** `AGENTS.md` enumerated six conformance rules where the set held seven, and nothing reddened because the floor asserts at least what it lists. The correction was not to add the seventh but to stop enumerating, which is what the count rule says to do.
-
-## The selection tool has no check, and it is the one thing here that decides what gets checked
-
-**Open for the operator, and it is the sharpest thing left on the deck.** `tools/select-scenarios.py` decides the recheck set for every role. Nothing binds it: no scenario, no step definition, and no Python gate exists in the environment, so the `lint` chain reads Gherkin and Rust and passes straight over it. **Two defects were found in it on the day it was written, both by roles reading its output rather than by any check** - a restated tier list that filed 51 scenarios under the wrong tier, and a plank resolver that reinstated the tier sweep it exists to remove. Neither would have been caught by anything standing.
-
-**The under-selecting direction is what makes this urgent rather than tidy.** A tool that over-selects wastes a sweep and a role notices the clock. A tool that under-selects reports a green set that never ran the scenarios the change reached, and nothing anywhere contradicts it. The first defect was exactly that shape.
-
-**Two routes and the choice is the operator's.** A Python gate is a dependency selection, so it routes to Shipwright once chosen. The route needing no dependency is a `@conformance` scenario that runs the tool and joins what it reports against what `RIGGING.md` declares, which is the fault that actually shipped rather than a class of style faults. Captain did not open either unasked.
-
-**Recorded under a departure: `python3` now sits under `## Dependencies`.** The `select` command invoked an interpreter the rigging did not name. Boatswain routed it to Shipwright as a rigging fault and that routing is right in general; it was taken here because the gap sits under a command already in use and the line records a tool the tree already runs rather than selecting a new one.
 
 ## The TOM scenarios prove a seam the operator never reaches, 2026-08-05
 
@@ -158,7 +150,9 @@ Tag first, then crates.io, then npm, each read from its own `verify` output rath
 
 **The dispatch-surplus check QM asked for is declined, with a fact.** A dispatch is ephemeral and reaches no durable artifact, so no check in this tree can redden on one; `conformance` reads the repository and a dispatch is never in it. It stays the doctrine gap already recorded above, now three occurrences, and it is raised upstream rather than mechanised here.
 
-**Still unmodelled and deliberately left so: `top`'s rows 1 through 4**, the `Tasks:`, `%Cpu(s):`, `MiB Mem:` and `MiB Swap:` lines, which reach the model nowhere today. Only row 0 is in scope this voyage. Its pivot is whether the status reading generalises to a leading block; do not open it before watch1 is green, because watch1 decides the shape.
+**`top`'s rows 1 through 4 reach the model nowhere, and the operator has ruled it can wait.** The `Tasks:`, `%Cpu(s):`, `MiB Mem:` and `MiB Swap:` lines. It needs no separate work: the reading-spec architecture answers it the same way it answers `ls -la`, since a spec describing `top` describes that block and replay re-applies it. **Do not open it as a detector fix.**
+
+**Also ruled and worth not re-deriving: `top` showing three processes is the sandbox working**, not a fault. It sees `bwrap`, `sh` and itself because it has its own PID namespace. The operator's reaction is still the useful part, and it is a product question rather than a bug: a discovery tool showing three processes where forty are expected is correct and unhelpful at once.
 
 **State at the previous close, 2026-08-03: the release is tagged `v0.5.0`, all three tiers green inside their budgets at `@logic` 282, `@sandbox` 139, `@inference` 2.**
 
@@ -222,26 +216,6 @@ Durable artifacts authored this pass: `scantlings/verification-conformance/unsha
 
 **Captain's own faults this session, kept because they recurred.** A dispatch to Boatswain carried diff narration and a pre-stated expected value; it was refused as contaminated, correctly, and that is a rule I had followed all day until I did not. Durable prose was written naming machinery rather than what a check decides, and rotted three times in one file in one day. A watchbill was rewritten rather than appended to, dropping an edited scenario off it. A dependency survey stopped one link short of the live option. **The pattern in all four is a long context reasoning from memory where a fresh role would have run a command.**
 
-## 0.6.0 shipped and verified on all three targets, 2026-08-04
-
-Tag first, then crates.io, then npm, each read from its own `verify` output. jsdelivr answers at `@v0.6.0`, so all 21 published schema URIs resolve; crates.io and npm each installed from the registry and the binary answered `tinman 0.6.0`. The bump moved 28 files together, the two manifests and 24 schema URIs across 22 scantlings and both example plans, committed at `1960253`.
-
-## Three product faults the operator found by driving the shipped binary, 2026-08-04
-
-**Inference is unreachable from any command, and this is the serious one.** `tom::infer` and `tom::infer_for` have no production caller; `rg` over `src/` returns only their definitions, and the only callers are three sites in `tests/cucumber.rs`. So `inspect` runs the deterministic pass alone and no CLI path invokes inference at all. **The README and the bundled skill both claim capture-time inference, so the shipped binary contradicts its own documentation.** This is the `tinman replay` shape at product scale: declared, specified, green, and reachable by nobody. Every inference scenario passes because verification calls the seam directly.
-
-**A leading summary line collapses a whole table into a list.** `inspect 'ls -l'` reads 20 `listitem`s where the output is plainly columnar, because `total 384` is one short line that does not sustain the columns, so `columns_of` finds an empty cell and `table_of` declines the entire block. Every real `ls -l` starts with that line, and `df`, `ps` and `git log --oneline` are the neighbouring cases to check before specifying.
-
-**`top`'s summary block is still four fifths missing, and the fifth shows nothing.** 0.6.0 made row 0 a `status` region, and rows 1 through 4, `Tasks:`, `%Cpu(s):`, `MiB Mem:` and `MiB Swap:`, reach the model nowhere. Worse, `inspect` prints a bare `status` with no text, because the renderer prints a region's name and `status_bar` sets name to none while carrying the text. **A region whose content the inspector will not show is barely better than a region that is absent**, and the deferred item in these notes underestimated it by counting only the missing rows.
-
-**Not a fault, and worth not re-deriving: three rows is correct.** `top` inside the sandbox sees `bwrap`, `sh` and `top`. That is isolation working.
-
-## The default model moves to a dated pin, 2026-08-04
-
-Operator direction. **Read from the OpenRouter registry rather than recalled, and the reading changed the shape of the change**: `deepseek/deepseek-v4-flash` resolves to "DeepSeek V4 Flash 0423", so the undated ID is not a floating alias but an old snapshot that has been aging silently under the word default. `deepseek/deepseek-v4-flash-0731` is the current dated build and is what the specs now name. A floating `~deepseek/deepseek-v4-flash-latest` exists and was declined: capture-time behaviour that changes with no commit is the opposite of the determinism this project sells.
-
-Specs edited: `features/inference-provider.feature`, `features/inference-profiles.feature`, `features/interactive-help.feature`. `src/inference.rs` `DEFAULT_MODEL` is the production half and is Crew's. `AGENTS.md` and `RIGGING.md` both name the old ID in prose and are Shipwright's at the next harbour.
-
 ## Harbour of 2026-08-04, and the four findings ruled by doctrine rather than by asking
 
 **Harbour is complete and committed at `42377b7`; the deck is at rest, three commits ahead of `origin/main`, and outbound is unasked.** The release rides harbour's own full regression, so no further sweep is owed for it.
@@ -299,6 +273,8 @@ Everything else is a default, not a wall: write scopes, which role owns which fi
 ## Standing preferences the user has stated
 
 Read these before authoring any spec.
+
+- **Where a seam is too wide to observe, narrow the implementation with a scantling until it is decidable. Operator, 2026-08-05.** Proven on the assistant's raw-mode restore: the scenario asserting that an error path gives the terminal back had no reachable trigger, because once raw mode is entered the only route to an error is a failed write to the terminal, which kills the shell the scenario reads its answer through. Simulating it is the forbidden double; inventing a trigger is specifying an event the product does not have. **So the scenario was unprovable rather than merely unimplemented, and promoting it on a read was the fault.** The restatement was structural, `raw-mode-without-guard` in the conformance set, and it found three modules where the scenario would have covered one. **An event nobody can trigger and a structure anybody can read are not the same claim, and the second is the one worth checking.**
 
 - **Similar code is not a problem. Operator, 2026-08-05, and it retires a scenario written against the wrong subject.** Duplication is worth gating in exactly three cases, and shape agreement is not among them. **A duplicated seam** is one behaviour implemented twice, which is the two-checkers-for-one-rule fault this file already records. **Code that must stay aligned** is a shared derived value or resource where one copy drifting breaks the other silently, which is what the constant census caught in `EXPECT_DEADLINE`, `SELECT_KEY` and `RESPONSE_DEADLINE`. **Dead code is removed**, not measured. Everything else, similar code that can duplicate no resource, threaten no integrity and copy no seam, is not a problem and needs no allowance, no ratchet and no exemption naming why it was permitted. **What this retired:** a promoted scenario gating the support tree against a recorded allowance, withdrawn on 2026-08-05 before it ever ran. Support holds no seams, and its largest duplicate group is eighteen byte-identical floor assertions each bound to distinct step text, sharing no value and no resource. A gate there would have reddened the next correct assertion somebody wrote. **The open consequence, named and not acted on:** the eight entries in `scantlings/duplication-allowance.json` are all accessor-shape coincidences, so the implementation gate is spending written exemptions to permit non-issues under this rule. Reshaping it is the operator's call.
 
