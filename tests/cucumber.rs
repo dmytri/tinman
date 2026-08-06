@@ -143,6 +143,11 @@ struct TinmanWorld {
     // than a set it silently never selected
     declared_tiers: Option<Vec<String>>,
     recognised_tiers: Option<Vec<String>>,
+    // the fixture repository whose diff touches a spec, a scantling and a path
+    // no join reaches, held so it outlives the run that reads it, and the
+    // report the selection tool made over that diff
+    selection_fixture: Option<support::ScratchDir>,
+    selection_report: Option<support::SelectionReport>,
     // the generated concurrency fixture, held so it outlives the runs that read
     // it and is reclaimed with the scenario, and the wall clock each arm of the
     // comparison observed
@@ -13122,6 +13127,73 @@ async fn the_declared_tiers_read_are_not_empty(world: &mut TinmanWorld) {
     assert!(
         !declared.is_empty(),
         "the rigging at {rigging} declares no tier tag, so this scenario would assert nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// methodology conformance: every changed path the selection tool accounts for
+// ---------------------------------------------------------------------------
+
+#[given("a diff touching a spec, a scantling and a path no join reaches")]
+async fn a_diff_touching_a_spec_a_scantling_and_an_unreached_path(world: &mut TinmanWorld) {
+    world.selection_fixture = Some(support::ScratchDir::new("selection-diff"));
+    world.rigging_path = Some("RIGGING.md".to_string());
+}
+
+#[when("the selection tool reports the set that diff selects")]
+async fn the_selection_tool_reports_the_set_that_diff_selects(world: &mut TinmanWorld) {
+    let rigging = world
+        .rigging_path
+        .as_ref()
+        .expect("the rigging was named")
+        .clone();
+    let dir = world
+        .selection_fixture
+        .as_ref()
+        .expect("the fixture repository was created")
+        .path()
+        .to_path_buf();
+    world.selection_report = Some(support::selection_tool_mixed_diff(&rigging, &dir));
+}
+
+#[then("every changed path is selected for or named unresolved")]
+async fn every_changed_path_is_selected_for_or_named_unresolved(world: &mut TinmanWorld) {
+    let read = world
+        .selection_report
+        .as_ref()
+        .expect("the selection tool reported the set that diff selects");
+    let silent: Vec<&String> = read
+        .changed_paths
+        .iter()
+        .filter(|path| !read.report.contains(path.as_str()))
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "the selection tool names {} of the {} changed path(s) nowhere in its report: {}. \
+         A path the report passes over in silence reads as covered, so a role runs the set it \
+         printed and never learns the path went unjoined. Its report was:\n{}",
+        silent.len(),
+        read.changed_paths.len(),
+        silent
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        read.report
+    );
+}
+
+#[then("the changed paths read are not empty")]
+async fn the_changed_paths_read_are_not_empty(world: &mut TinmanWorld) {
+    let read = world
+        .selection_report
+        .as_ref()
+        .expect("the selection tool reported the set that diff selects");
+    assert!(
+        !read.changed_paths.is_empty(),
+        "the fixture diff touches no path at all, so this scenario would assert nothing. \
+         The report it read was:\n{}",
+        read.report
     );
 }
 

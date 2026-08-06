@@ -29,6 +29,15 @@ Feature: methodology conformance
 
   Rule: the tool that decides which scenarios a change selects is the one thing here whose mistakes are invisible. Over-selecting costs a sweep and a role notices the clock; under-selecting reports a set that was never run, and nothing contradicts it. It restated the tier list in its own source once, on the day it was written, and filed every scenario of a tier the rigging had just gained under the default tier, whose sweep excludes them by tag. Nothing caught that except a role sweeping the tier separately rather than believing the report. The rigging declares the tiers, so the tool is joined to that declaration rather than trusted to carry a copy.
 
+  Rule: the fault this tool commits is silence, not error. It filtered the diff to Rust files and printed the same line for a change touching a scantling, a spec, the rigging or itself as it printed for a change touching nothing, so a role read that and ran nothing with no reason to doubt it. What pins it is not the mechanics of each join but the property the silence broke: a changed path is accounted for, either by the scenarios it selects or by being named as one no join reaches. Naming it is enough, because the override sweeps the tier an unresolved path serves; going quiet is what cannot be recovered from.
+
+  @conformance
+  Scenario: every changed path is selected for or named unresolved
+    Given a diff touching a spec, a scantling and a path no join reaches
+    When the selection tool reports the set that diff selects
+    Then every changed path is selected for or named unresolved
+    And the changed paths read are not empty
+
   @conformance
   Scenario: the selection tool recognises every tier the rigging declares
     Given the tier tags declared under "## Tiers" in "RIGGING.md"

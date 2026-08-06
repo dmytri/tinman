@@ -281,7 +281,7 @@ def main():
                     continue
                 seen.add(fn)
                 if fn in bypat:
-                    all_patterns.add(bypat[fn]); notes.append(f"step {fn} -> pattern")
+                    all_patterns.add(bypat[fn]); notes.append(f"{path}:{fn} -> step pattern")
                     continue
                 # helper: find its callers inside tests/
                 callers = set()
@@ -293,7 +293,7 @@ def main():
                             if re.search(r"\b" + re.escape(fn) + r"\s*\(", body) and r["fn"] != fn:
                                 callers.add(r["fn"])
                 if callers:
-                    notes.append(f"helper {fn} -> {len(callers)} caller(s)")
+                    notes.append(f"{path}:{fn} -> helper, {len(callers)} caller(s)")
                     frontier |= callers
                 else:
                     unresolved.append(f"{path}:{fn} (helper, no caller found)")
@@ -342,6 +342,16 @@ def main():
         tiers[tag] += 1
         print(f"  {f}:{n}")
     print("by tier:", dict(tiers))
+    # Every path that did reach a join, named with what it reached. The set this
+    # tool prints is not an account of the diff: a path can select scenarios
+    # that carry another path's name, and reading the selected list is then no
+    # way to tell a path that was joined from one the tool passed over. Printing
+    # what each path resolved to is what lets a reader hold the report against
+    # the diff and see nothing went missing.
+    if notes:
+        print("accounted for:")
+        for n in sorted(set(notes)):
+            print("  ", n)
     if dead:
         print(f"patterns binding no scenario: {len(dead)}")
     if unresolved:

@@ -5778,11 +5778,7 @@ pub fn declared_tier_tags(rigging: &str, section: &str) -> Vec<String> {
 /// scenario that joins a tool to a declaration cannot itself carry a copy of
 /// where that tool lives.
 pub fn selection_tool_tiers(rigging: &str) -> Vec<String> {
-    let command = rigging_section(rigging, "Commands")
-        .into_iter()
-        .find(|(key, _)| key == "select")
-        .map(|(_, command)| command)
-        .unwrap_or_else(|| panic!("the rigging at {rigging} declares no select command"));
+    let command = select_command(rigging);
     let invocation = command.replace("{base}", "--tiers");
     let output = std::process::Command::new("sh")
         .arg("-c")
@@ -5801,6 +5797,121 @@ pub fn selection_tool_tiers(rigging: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// One selection-tool report, and the paths the diff it read touches.
+#[derive(Debug)]
+pub struct SelectionReport {
+    pub changed_paths: Vec<String>,
+    pub report: String,
+}
+
+/// The `select` command the named rigging declares.
+fn select_command(rigging: &str) -> String {
+    rigging_section(rigging, "Commands")
+        .into_iter()
+        .find(|(key, _)| key == "select")
+        .map(|(_, command)| command)
+        .unwrap_or_else(|| panic!("the rigging at {rigging} declares no select command"))
+}
+
+/// Run a command through a shell in the named directory, failing loudly.
+fn run_in(dir: &std::path::Path, command: &str) -> String {
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|e| panic!("`{command}` did not run in {}: {e}", dir.display()));
+    assert!(
+        output.status.success(),
+        "`{command}` exited {} in {}:\n{}",
+        output.status,
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The report the selection tool makes over a diff touching a spec, a scantling
+/// and a path no join reaches.
+///
+/// The diff is built here, in a real git repository holding the smallest tree
+/// the tool reads, rather than taken from whatever this deck happens to carry:
+/// the assertion is that every changed path is accounted for, and it can only
+/// be made against a changed set the scenario declared. The tool is copied in
+/// from the path its own rigging command names, so this helper carries no
+/// second copy of where the tool lives.
+pub fn selection_tool_mixed_diff(rigging: &str, dir: &std::path::Path) -> SelectionReport {
+    let command = select_command(rigging);
+    let tool = command
+        .split_whitespace()
+        .find(|token| token.ends_with(".py"))
+        .unwrap_or_else(|| panic!("the select command `{command}` names no tool to run"));
+
+    for sub in ["features", "tests", "scantlings"] {
+        std::fs::create_dir_all(dir.join(sub))
+            .unwrap_or_else(|e| panic!("{sub} not created under {}: {e}", dir.display()));
+    }
+    let tool_path = dir.join(tool);
+    if let Some(parent) = tool_path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("{} not created: {e}", parent.display()));
+    }
+    std::fs::copy(tool, &tool_path)
+        .unwrap_or_else(|e| panic!("{tool} not copied into {}: {e}", dir.display()));
+
+    let scantling = "scantlings/thing.schema.json";
+    let unreached = "NOTES.md";
+    let writes = [
+        (
+            "RIGGING.md",
+            "# Rigging\n\n## Tiers\n- default: @logic\n- sandbox: @sandbox\n\n## Dependencies\n- policy: locked\n"
+                .to_string(),
+        ),
+        (
+            "features/example.feature",
+            format!(
+                "Feature: example\n\n  @conformance\n  Scenario: the schema is honoured\n    Given the schema at \"{scantling}\"\n    Then it is honoured\n"
+            ),
+        ),
+        ("tests/cucumber.rs", "fn main() {}\n".to_string()),
+        (scantling, "{}\n".to_string()),
+        (unreached, "notes\n".to_string()),
+    ];
+    for (path, body) in &writes {
+        std::fs::write(dir.join(path), body)
+            .unwrap_or_else(|e| panic!("{path} not written under {}: {e}", dir.display()));
+    }
+
+    run_in(dir, "git init -q .");
+    run_in(dir, "git add -A");
+    run_in(
+        dir,
+        "git -c user.email=crew@tinman.test -c user.name=crew -c commit.gpgsign=false \
+         commit -q -m base",
+    );
+    let base = run_in(dir, "git rev-parse HEAD").trim().to_string();
+
+    for path in ["features/example.feature", scantling, unreached] {
+        let mut body = std::fs::read_to_string(dir.join(path))
+            .unwrap_or_else(|e| panic!("{path} not read back under {}: {e}", dir.display()));
+        body.push('\n');
+        std::fs::write(dir.join(path), body)
+            .unwrap_or_else(|e| panic!("{path} not touched under {}: {e}", dir.display()));
+    }
+
+    let changed_paths = run_in(dir, &format!("git diff --name-only {base}"))
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    let report = run_in(dir, &command.replace("{base}", &base));
+    SelectionReport {
+        changed_paths,
+        report,
+    }
 }
 
 /// The path the rigging keeps the weather record at.
